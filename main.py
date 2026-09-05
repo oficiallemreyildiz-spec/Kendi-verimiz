@@ -4,7 +4,6 @@ import logging
 import threading
 from http.server import HTTPServer, BaseHTTPRequestHandler
 
-# Render port hatasını (Application exited early) önlemek için mini web sunucusu
 class SimpleHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         self.send_response(200)
@@ -18,23 +17,19 @@ def run_web_server():
     server = HTTPServer(('0.0.0.0', port), SimpleHandler)
     server.serve_forever()
 
-# Web sunucusunu arka planda başlat
 threading.Thread(target=run_web_server, daemon=True).start()
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 
 import requests
-PROXY_URL = os.getenv("PROXY_URL")
-if PROXY_URL:
-    os.environ["HTTP_PROXY"] = PROXY_URL
-    os.environ["HTTPS_PROXY"] = PROXY_URL
-
 from TikTokLive import TikTokLiveClient
 from TikTokLive.events import ConnectEvent, EnvelopeEvent
+from httpx import Proxy
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 CHAT_ID = os.getenv("CHAT_ID")
 MIN_DIAMONDS = int(os.getenv("MIN_DIAMONDS", 1))
+PROXY_URL = os.getenv("PROXY_URL")
 
 def send_telegram_message(text):
     if not BOT_TOKEN or not CHAT_ID:
@@ -50,7 +45,16 @@ def send_telegram_message(text):
 
 async def monitor_stream(unique_id):
     try:
-        client = TikTokLiveClient(unique_id=unique_id)
+        client_kwargs = {"unique_id": unique_id}
+        
+        if PROXY_URL:
+            # Markdown link kalıntılarını temizle
+            clean_proxy = PROXY_URL.strip().replace("[", "").replace("]", "")
+            proxy_obj = Proxy(clean_proxy)
+            client_kwargs["web_proxy"] = proxy_obj
+            client_kwargs["ws_proxy"] = proxy_obj
+
+        client = TikTokLiveClient(**client_kwargs)
 
         @client.on(ConnectEvent)
         async def on_connect(event: ConnectEvent):
