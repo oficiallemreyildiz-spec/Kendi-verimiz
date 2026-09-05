@@ -4,8 +4,8 @@ import logging
 import requests
 from TikTokLive import TikTokLiveClient
 from TikTokLive.events import ConnectEvent, EnvelopeEvent
+from httpx import Proxy
 
-# Log ayarları
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
@@ -27,14 +27,13 @@ def send_telegram_message(text):
 
 async def monitor_stream(unique_id):
     client_kwargs = {
-        "unique_id": unique_id,
-        "headers": {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36"
-        }
+        "unique_id": unique_id
     }
     
     if PROXY_URL:
-        client_kwargs["proxy"] = PROXY_URL
+        proxy_obj = Proxy(PROXY_URL)
+        client_kwargs["web_proxy"] = proxy_obj
+        client_kwargs["ws_proxy"] = proxy_obj
 
     client = TikTokLiveClient(**client_kwargs)
 
@@ -42,7 +41,6 @@ async def monitor_stream(unique_id):
     async def on_connect(event: ConnectEvent):
         logging.info(f"Yayın bağlantısı kuruldu: {unique_id}")
 
-    # Sandık/Kutu olayları için EnvelopeEvent kullanılır
     @client.on(EnvelopeEvent)
     async def on_envelope(event: EnvelopeEvent):
         try:
