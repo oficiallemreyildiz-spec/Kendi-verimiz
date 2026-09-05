@@ -1,32 +1,29 @@
 import asyncio
-import html
 import json
 import logging
 import os
-import threading
+import time
 from http.server import BaseHTTPRequestHandler, HTTPServer
-from urllib.parse import quote
 
 import httpx
 import websockets
 
 
-# ============================================================
+# =========================================================
 # AYARLAR
-# ============================================================
+# =========================================================
 
-API_KEY = os.getenv("TIKTOOL_API_KEY", "").strip()
+TIKTOOL_API_KEY = os.getenv("TIKTOOL_API_KEY", "")
+BOT_TOKEN = os.getenv("BOT_TOKEN", "")
+CHAT_ID = os.getenv("CHAT_ID", "")
 
-BOT_TOKEN = os.getenv("BOT_TOKEN", "").strip()
-CHAT_ID = os.getenv("CHAT_ID", "").strip()
-
-PROXY_HOST = os.getenv("PROXY_HOST", "").strip()
-PROXY_PORT = os.getenv("PROXY_PORT", "").strip()
-PROXY_USERNAME = os.getenv("PROXY_USERNAME", "").strip()
-PROXY_PASSWORD = os.getenv("PROXY_PASSWORD", "").strip()
+PROXY_HOST = os.getenv("PROXY_HOST", "")
+PROXY_PORT = os.getenv("PROXY_PORT", "")
+PROXY_USERNAME = os.getenv("PROXY_USERNAME", "")
+PROXY_PASSWORD = os.getenv("PROXY_PASSWORD", "")
 
 MAX_CONNECTIONS = int(os.getenv("MAX_CONNECTIONS", "3"))
-WATCH_SECONDS = int(os.getenv("WATCH_SECONDS", "3"))
+WATCH_SECONDS = int(os.getenv("WATCH_SECONDS", "45"))
 MAX_LIVES = int(os.getenv("MAX_LIVES", "10"))
 DISCOVERY_INTERVAL = int(os.getenv("DISCOVERY_INTERVAL", "300"))
 
@@ -34,64 +31,81 @@ API_BASE = "https://api.tik.tools"
 WS_BASE = "wss://api.tik.tools"
 
 
-# ============================================================
-# LOG
-# ============================================================
+# =========================================================
+# LOGGING
+# =========================================================
 
 logging.basicConfig(
     level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(message)s",
-    force=True,
+    format="%(asctime)s | %(message)s",
 )
 
-log = logging.getLogger("TreasureAlert")
+# API key'in Render loglarında görünmesini engelle
+logging.getLogger("httpx").setLevel(logging.WARNING)
+logging.getLogger("httpcore").setLevel(logging.WARNING)
+
+log = logging.getLogger("TREASURE")
 
 
-# ============================================================
+# =========================================================
 # PROXY
-# ============================================================
+# =========================================================
 
 def build_proxy():
-    if not PROXY_HOST or not PROXY_PORT:
+    if not all([
+        PROXY_HOST,
+        PROXY_PORT,
+        PROXY_USERNAME,
+        PROXY_PASSWORD,
+    ]):
         return None
 
-    if PROXY_USERNAME and PROXY_PASSWORD:
-        return (
-            "http://"
-            + quote(PROXY_USERNAME, safe="")
-            + ":"
-            + quote(PROXY_PASSWORD, safe="")
-            + "@"
-            + PROXY_HOST
-            + ":"
-            + PROXY_PORT
-        )
-
     return (
-        "http://"
-        + PROXY_HOST
-        + ":"
-        + PROXY_PORT
+        f"http://{PROXY_USERNAME}:"
+        f"{PROXY_PASSWORD}@"
+        f"{PROXY_HOST}:{PROXY_PORT}"
     )
 
 
 HTTP_PROXY = build_proxy()
 
 
-# ============================================================
+# =========================================================
+# HTTP SERVER - RENDER HEALTH CHECK
+# =========================================================
+
+class HealthHandler(BaseHTTPRequestHandler):
+
+    def do_GET(self):
+        self.send_response(200)
+        self.send_header("Content-Type", "text/plain")
+        self.end_headers()
+        self.wfile.write(b"TREASURE ALERT OK")
+
+    def log_message(self, format, *args):
+        return
+
+
+def start_health_server():
+    port = int(os.getenv("PORT", "10000"))
+
+    server = HTTPServer(
+        ("0.0.0.0", port),
+        HealthHandler
+    )
+
+    log.info(f"HEALTH SERVER -> PORT {port}")
+
+    server.serve_forever()
+
+
+# =========================================================
 # TELEGRAM
-# ============================================================
+# =========================================================
 
 async def telegram_send(text):
 
-    if not BOT_TOKEN or not CHAT_ID:
-        log.error("❌ Telegram ENV eksik.")
-        return
-
-    url = (
-        "https://api.telegram.org/"
-        f"bot{BOT_TOKEN}/sendMessage"
-    )
+    url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
 
     payload = {
         "chat_id": CHAT_ID,
@@ -101,428 +115,402 @@ async def telegram_send(text):
     }
 
     try:
-        async with httpx.AsyncClient(timeout=20) as client:
+        async with httpx.AsyncClient(timeout=15) as client:
 
             response = await client.post(
                 url,
-                json=payload,
-            )
-
-            if response.status_code == 200:
-                log.info("📨 Telegram gönderildi.")
-            else:
-                log.error(
-                    "❌ Telegram HTTP %s",
-                    response.status_code,
-                )
-
-    except Exception as e:
-        log.error(
-            "❌ Telegram hatası: %s",
-            e,
-        )
-
-
-# ============================================================
-# LIVE KEŞFİ
-# ============================================================
-
-async def discover_live():
-
-    log.info("🔎 LIVE listesi yenileniyor...")
-
-    headers = {
-        "User-Agent": (
-            "Mozilla/5.0 "
-            "(Linux; Android 16) "
-            "AppleWebKit/537.36 "
-            "(KHTML, like Gecko) "
-            "Chrome/131.0 Mobile Safari/537.36"
-        ),
-        "Accept": "application/json,text/plain,*/*",
-        "Referer": "https://tik.tools/",
-    }
-
-    try:
-
-        async with httpx.AsyncClient(
-            timeout=30,
-            follow_redirects=True,
-            proxy=HTTP_PROXY,
-            headers=headers,
-        ) as client:
-
-            response = await client.get(
-                f"{API_BASE}/api/live/top-channels"
-            )
-
-            log.info(
-                "🔎 TOP-CHANNELS HTTP %s",
-                response.status_code,
+                json=payload
             )
 
             if response.status_code != 200:
-                log.error(
-                    "❌ LIVE keşfi başarısız: HTTP %s",
-                    response.status_code,
+                log.warning(
+                    f"TELEGRAM HTTP {response.status_code}"
                 )
-                return []
-
-            result = response.json()
 
     except Exception as e:
-
-        log.error(
-            "❌ LIVE keşif hatası: %s",
-            e,
-        )
-
-        return []
-
-    channels = result.get("channels", [])
-
-    if not isinstance(channels, list):
-        return []
-
-    lives = []
-    seen = set()
-
-    for channel in channels:
-
-        if not isinstance(channel, dict):
-            continue
-
-        username = (
-            channel.get("uniqueId")
-            or channel.get("unique_id")
-            or channel.get("username")
-        )
-
-        if not username:
-            continue
-
-        username = (
-            str(username)
-            .strip()
-            .lstrip("@")
-        )
-
-        key = username.lower()
-
-        if key in seen:
-            continue
-
-        seen.add(key)
-
-        lives.append(
-            {
-                "username": username,
-                "room_id": str(
-                    channel.get("roomId")
-                    or channel.get("room_id")
-                    or ""
-                ),
-                "region": str(
-                    channel.get("region")
-                    or ""
-                ),
-            }
-        )
-
-        if len(lives) >= MAX_LIVES:
-            break
-
-    log.info(
-        "🔥 %s LIVE bulundu.",
-        len(lives),
-    )
-
-    for i, live in enumerate(lives, 1):
-        log.info(
-            "🔴 %s/%s -> @%s | %s",
-            i,
-            len(lives),
-            live["username"],
-            live["region"],
-        )
-
-    return lives
+        log.warning(f"TELEGRAM HATA -> {e}")
 
 
-# ============================================================
+# =========================================================
 # DUPLICATE
-# ============================================================
+# =========================================================
 
 sent_envelopes = set()
 
 
-# ============================================================
-# HAZİNE
-# ============================================================
+# =========================================================
+# ENVELOPE
+# =========================================================
 
-async def handle_envelope(
-    username,
-    data,
-    event_type="envelope",
-):
-
-    if not isinstance(data, dict):
-        data = {}
-
-    envelope_id = (
-        data.get("envelopeId")
-        or data.get("envelope_id")
-        or ""
-    )
-
-    envelope_id = str(envelope_id)
-
-    if envelope_id:
-
-        key = (
-            f"{username.lower()}:{envelope_id}"
-        )
-
-        if key in sent_envelopes:
-            return
-
-        sent_envelopes.add(key)
-
-    diamonds = (
-        data.get("diamondCount")
-        or data.get("diamond_count")
-        or 0
-    )
-
-    people = (
-        data.get("peopleCount")
-        or data.get("people_count")
-        or 0
-    )
-
-    sender = (
-        data.get("sendUserName")
-        or data.get("send_user_name")
-        or ""
-    )
-
-    if not sender:
-
-        user = data.get("user", {})
-
-        if isinstance(user, dict):
-            sender = (
-                user.get("uniqueId")
-                or user.get("unique_id")
-                or user.get("nickname")
-                or ""
-            )
-
-    sender = str(sender)
-
-    if event_type == "superFanBox":
-
-        title = "🟣 SUPER FAN BOX BULUNDU!"
-
-        log.warning(
-            "🟣🟣 SUPER FAN BOX -> @%s | 💎 %s",
-            username,
-            diamonds,
-        )
-
-    else:
-
-        title = "🎁 HAZİNE BULUNDU!"
-
-        log.warning(
-            "🎁🎁 HAZİNE -> @%s | 💎 %s",
-            username,
-            diamonds,
-        )
-
-    message = (
-        f"<b>{title}</b>\n\n"
-        f"📺 Yayın: @{html.escape(username)}\n"
-        f"💎 Değer: {html.escape(str(diamonds))}\n"
-        f"👥 Kişi: {html.escape(str(people))}\n"
-        f"👤 Gönderen: {html.escape(sender)}\n"
-        f"🆔 Envelope: {html.escape(envelope_id)}\n\n"
-        f"🌍 Global hızlı tarama"
-    )
-
-    await telegram_send(message)
-
-
-# ============================================================
-# JWT
-# ============================================================
-
-async def mint_jwt(username):
-
-    if not API_KEY:
-        log.error("❌ TIKTOOL_API_KEY yok.")
-        return None
-
-    url = (
-        f"{API_BASE}/authentication/jwt"
-        f"?apiKey={quote(API_KEY, safe='')}"
-    )
-
-    payload = {
-        "allowed_creators": [username],
-        "expire_after": 600,
-        "max_websockets": 1,
-    }
+async def handle_envelope(data, username):
 
     try:
 
-        async with httpx.AsyncClient(
-            timeout=20,
-            follow_redirects=True,
-            proxy=HTTP_PROXY,
-        ) as client:
+        envelope_id = (
+            data.get("envelopeId")
+            or data.get("id")
+            or ""
+        )
 
-            response = await client.post(
-                url,
-                json=payload,
-            )
+        diamond_count = int(
+            data.get("diamondCount")
+            or data.get("diamonds")
+            or 0
+        )
+
+        people_count = int(
+            data.get("peopleCount")
+            or data.get("people")
+            or 0
+        )
+
+        sender = (
+            data.get("sendUserName")
+            or data.get("sender")
+            or data.get("userName")
+            or "Bilinmiyor"
+        )
+
+        unique_key = (
+            f"{username}:"
+            f"{envelope_id}:"
+            f"{diamond_count}:"
+            f"{people_count}"
+        )
+
+        if unique_key in sent_envelopes:
+            return False
+
+        sent_envelopes.add(unique_key)
+
+        # Belleğin sonsuza kadar büyümesini engelle
+        if len(sent_envelopes) > 5000:
+            sent_envelopes.clear()
+
+        message = (
+            "🎁 <b>TREASURE ALERT</b>\n\n"
+            f"👤 LIVE: <b>@{username}</b>\n"
+            f"💎 Elmas: <b>{diamond_count}</b>\n"
+            f"👥 Kişi: <b>{people_count}</b>\n"
+            f"🎁 Gönderen: <b>{sender}</b>"
+        )
+
+        log.info(
+            f"🎁 ZARF BULUNDU -> "
+            f"@{username} | "
+            f"{diamond_count} 💎 | "
+            f"{people_count} kişi"
+        )
+
+        await telegram_send(message)
+
+        return True
+
+    except Exception as e:
+
+        log.warning(
+            f"ENVELOPE PARSE HATA @{username} -> {e}"
+        )
+
+        return False
+
+
+# =========================================================
+# JWT CACHE
+# =========================================================
+
+jwt_token = None
+jwt_users = set()
+jwt_expires_at = 0
+
+jwt_lock = asyncio.Lock()
+
+
+async def get_batch_jwt(usernames):
+
+    global jwt_token
+    global jwt_users
+    global jwt_expires_at
+
+    users = sorted(
+        set(
+            u.lstrip("@").strip()
+            for u in usernames
+            if u
+        )
+    )
+
+    if not users:
+        return None
+
+    now = time.monotonic()
+
+    # Mevcut token hâlâ geçerli ve bütün kullanıcıları kapsıyorsa
+    if (
+        jwt_token
+        and now < jwt_expires_at - 30
+        and set(users).issubset(jwt_users)
+    ):
+        return jwt_token
+
+    async with jwt_lock:
+
+        # Lock beklerken başka görev token aldıysa tekrar kontrol et
+        now = time.monotonic()
+
+        if (
+            jwt_token
+            and now < jwt_expires_at - 30
+            and set(users).issubset(jwt_users)
+        ):
+            return jwt_token
+
+        payload = {
+            "allowed_creators": users,
+            "expire_after": 600,
+            "max_websockets": MAX_CONNECTIONS,
+        }
+
+        log.info(
+            f"JWT İSTENİYOR -> {len(users)} LIVE | "
+            f"MAX WS={MAX_CONNECTIONS}"
+        )
+
+        try:
+
+            async with httpx.AsyncClient(
+                proxy=HTTP_PROXY,
+                timeout=20
+            ) as client:
+
+                response = await client.post(
+                    f"{API_BASE}/authentication/jwt"
+                    f"?apiKey={TIKTOOL_API_KEY}",
+                    json=payload
+                )
 
             log.info(
-                "🔐 JWT HTTP %s -> @%s",
-                response.status_code,
-                username,
+                f"JWT HTTP -> {response.status_code}"
             )
+
+            if response.status_code == 429:
+
+                retry_after = response.headers.get(
+                    "Retry-After",
+                    "60"
+                )
+
+                try:
+                    wait_seconds = int(retry_after)
+                except:
+                    wait_seconds = 60
+
+                wait_seconds = min(
+                    max(wait_seconds, 10),
+                    300
+                )
+
+                log.warning(
+                    f"JWT 429 -> {wait_seconds} saniye bekleniyor"
+                )
+
+                await asyncio.sleep(wait_seconds)
+
+                return None
 
             if response.status_code != 200:
 
-                log.error(
-                    "❌ JWT reddedildi -> @%s",
-                    username,
+                log.warning(
+                    f"JWT REDDEDİLDİ -> "
+                    f"{response.status_code}"
                 )
 
                 return None
 
             result = response.json()
 
-    except Exception as e:
+            token = (
+                result
+                .get("data", {})
+                .get("token")
+            )
 
-        log.error(
-            "❌ JWT hatası -> @%s | %s",
-            username,
-            e,
-        )
+            if not token:
 
-        return None
+                log.warning("JWT TOKEN YOK")
 
-    token = (
-        result
-        .get("data", {})
-        .get("token")
-    )
+                return None
 
-    if not token:
+            jwt_token = token
+            jwt_users = set(users)
 
-        log.error(
-            "❌ JWT token yok -> @%s",
-            username,
-        )
+            jwt_expires_at = (
+                time.monotonic() + 600
+            )
 
-        return None
+            log.info(
+                "JWT HAZIR -> "
+                f"{len(users)} LIVE için ortak token"
+            )
 
-    return token
+            return jwt_token
+
+        except Exception as e:
+
+            log.warning(
+                f"JWT HATA -> {e}"
+            )
+
+            return None
 
 
-# ============================================================
-# WS EVENT
-# ============================================================
+# =========================================================
+# TIKTOOL LIVE DISCOVERY
+# =========================================================
 
-async def process_ws_message(
-    username,
-    raw,
-):
-
-    if isinstance(raw, bytes):
-
-        raw = raw.decode(
-            "utf-8",
-            errors="replace",
-        )
+async def discover_live():
 
     try:
 
-        event = json.loads(raw)
+        async with httpx.AsyncClient(
+            proxy=HTTP_PROXY,
+            timeout=20
+        ) as client:
+
+            response = await client.get(
+                f"{API_BASE}/api/live/top-channels"
+            )
+
+        log.info(
+            f"TOP-CHANNELS HTTP {response.status_code}"
+        )
+
+        if response.status_code != 200:
+            return []
+
+        result = response.json()
+
+        channels = result.get(
+            "channels",
+            []
+        )
+
+        lives = []
+
+        for item in channels:
+
+            username = (
+                item.get("uniqueId")
+                or item.get("unique_id")
+            )
+
+            if not username:
+                continue
+
+            username = username.lstrip("@")
+
+            lives.append({
+                "username": username,
+                "displayName": (
+                    item.get("displayName")
+                    or username
+                ),
+                "roomId": (
+                    item.get("roomId")
+                    or item.get("room_id")
+                ),
+            })
+
+        lives = lives[:MAX_LIVES]
+
+        log.info(
+            f"GENEL TARAMA: "
+            f"{len(lives)}/{MAX_LIVES} LIVE BULUNDU"
+        )
+
+        if lives:
+
+            log.info(
+                "LIVE LISTESİ -> "
+                + ", ".join(
+                    "@" + x["username"]
+                    for x in lives
+                )
+            )
+
+        return lives
+
+    except Exception as e:
+
+        log.warning(
+            f"DISCOVERY HATA -> {e}"
+        )
+
+        return []
+
+
+# =========================================================
+# WEBSOCKET MESSAGE
+# =========================================================
+
+async def process_ws_message(
+    raw,
+    username
+):
+
+    try:
+
+        message = json.loads(raw)
 
     except Exception:
+        return False
 
-        return
+    event = message.get("event")
 
-    if not isinstance(event, dict):
-        return
-
-    event_name = (
-        event.get("event")
-        or event.get("type")
-        or ""
-    )
-
-    data = event.get(
+    data = message.get(
         "data",
-        {},
+        {}
     )
 
-    if not isinstance(data, dict):
-        data = {}
+    if event == "envelope":
 
-    if event_name == "envelope":
-
-        await handle_envelope(
-            username,
+        return await handle_envelope(
             data,
-            "envelope",
+            username
         )
 
-        return True
+    if event == "superFanBox":
 
-    if event_name == "superFanBox":
-
-        await handle_envelope(
-            username,
-            data,
-            "superFanBox",
+        log.info(
+            f"⭐ SUPER FAN BOX -> @{username}"
         )
 
-        return True
+        return await handle_envelope(
+            data,
+            username
+        )
 
+    # Gereksiz eventleri sessizce geç
     return False
 
 
-# ============================================================
-# TEK LIVE - 3 SANİYE
-# ============================================================
+# =========================================================
+# LIVE WATCH
+# =========================================================
 
-async def watch_live(username):
-
-    username = (
-        str(username)
-        .strip()
-        .lstrip("@")
-    )
-
-    log.info(
-        "🎯 TARAMA -> @%s | %ss",
-        username,
-        WATCH_SECONDS,
-    )
-
-    token = await mint_jwt(username)
-
-    if not token:
-        return
+async def watch_live(
+    username,
+    token
+):
 
     ws_url = (
         f"{WS_BASE}"
-        f"?uniqueId={quote(username, safe='')}"
-        f"&jwtKey={quote(token, safe='')}"
+        f"?uniqueId={username}"
+        f"&jwtKey={token}"
+    )
+
+    log.info(
+        f"WS BAŞLIYOR -> @{username}"
     )
 
     try:
@@ -538,14 +526,11 @@ async def watch_live(username):
         ) as ws:
 
             log.info(
-                "🟢 WS BAĞLANDI -> @%s",
-                username,
+                f"WS BAĞLANDI -> @{username}"
             )
 
-            loop = asyncio.get_running_loop()
-
             deadline = (
-                loop.time()
+                asyncio.get_running_loop().time()
                 + WATCH_SECONDS
             )
 
@@ -553,7 +538,7 @@ async def watch_live(username):
 
                 remaining = (
                     deadline
-                    - loop.time()
+                    - asyncio.get_running_loop().time()
                 )
 
                 if remaining <= 0:
@@ -563,56 +548,42 @@ async def watch_live(username):
 
                     raw = await asyncio.wait_for(
                         ws.recv(),
-                        timeout=remaining,
+                        timeout=remaining
                     )
 
                 except asyncio.TimeoutError:
+                    break
 
+                except websockets.ConnectionClosed:
                     break
 
                 found = await process_ws_message(
-                    username,
                     raw,
+                    username
                 )
 
                 if found:
-
-                    log.info(
-                        "💰 HAZİNE YAKALANDI -> @%s",
-                        username,
-                    )
-
                     break
 
             log.info(
-                "⏭️ SONRAKİ LIVE -> @%s",
-                username,
+                f"TARAMA BİTTİ -> @{username}"
             )
-
-    except websockets.exceptions.InvalidStatus as e:
-
-        log.error(
-            "❌ WS HTTP -> @%s | %s",
-            username,
-            e,
-        )
 
     except Exception as e:
 
-        log.error(
-            "❌ WS -> @%s | %s",
-            username,
-            e,
+        log.warning(
+            f"WS HATA @{username} -> {e}"
         )
 
 
-# ============================================================
-# PARALEL TARAMA
-# ============================================================
+# =========================================================
+# 3'LÜ BATCH
+# =========================================================
 
 async def scan_batch(
     lives,
     start_index,
+    token
 ):
 
     batch = lives[
@@ -623,230 +594,211 @@ async def scan_batch(
     if not batch:
         return
 
-    names = [
-        live["username"]
-        for live in batch
+    usernames = [
+        x["username"]
+        for x in batch
     ]
 
     log.info(
-        "⚡ PARALEL GRUP -> %s",
-        ", ".join(
+        "PARALEL GRUP -> "
+        + ", ".join(
             "@" + x
-            for x in names
-        ),
+            for x in usernames
+        )
     )
 
     await asyncio.gather(
         *[
             watch_live(
-                live["username"]
+                username,
+                token
             )
-            for live in batch
+            for username in usernames
         ],
-        return_exceptions=True,
+        return_exceptions=True
     )
 
 
-# ============================================================
-# GLOBAL HIZLI SCANNER
-# ============================================================
+# =========================================================
+# GLOBAL SCANNER
+# =========================================================
 
 async def global_scanner():
 
     log.info(
-        "🚀🚀🚀 HIZLI GLOBAL SCANNER 🚀🚀🚀"
+        "GLOBAL SCANNER BAŞLADI"
     )
 
-    log.info(
-        "⚙️ MAX_CONNECTIONS = %s",
-        MAX_CONNECTIONS,
-    )
-
-    log.info(
-        "⚙️ WATCH_SECONDS = %s",
-        WATCH_SECONDS,
-    )
-
-    log.info(
-        "⚙️ MAX_LIVES = %s",
-        MAX_LIVES,
-    )
-
-    lives = []
+    current_lives = []
     last_discovery = 0
 
     while True:
 
-        now = asyncio.get_running_loop().time()
+        now = time.monotonic()
 
-        # ====================================================
-        # LIVE LİSTESİNİ SADECE GEREKTİĞİNDE YENİLE
-        # ====================================================
-
+        # Yeni LIVE listesi zamanı
         if (
-            not lives
+            not current_lives
             or now - last_discovery
             >= DISCOVERY_INTERVAL
         ):
 
-            new_lives = await discover_live()
+            discovered = await discover_live()
 
-            if new_lives:
+            if discovered:
 
-                lives = new_lives
-
+                current_lives = discovered
                 last_discovery = now
 
             else:
 
-                await asyncio.sleep(5)
+                log.warning(
+                    "LIVE BULUNAMADI"
+                )
 
+                await asyncio.sleep(10)
                 continue
 
-        # ====================================================
-        # LİSTEYİ 3'LÜ GRUPLARLA TARA
-        # ====================================================
+        usernames = [
+            x["username"]
+            for x in current_lives
+        ]
+
+        # =================================================
+        # TEK JWT
+        # =================================================
+
+        token = await get_batch_jwt(
+            usernames
+        )
+
+        if not token:
+
+            log.warning(
+                "JWT ALINAMADI -> "
+                "10 saniye sonra tekrar"
+            )
+
+            await asyncio.sleep(10)
+            continue
+
+        # =================================================
+        # 3'ERLİ TARAMA
+        # =================================================
 
         for index in range(
             0,
-            len(lives),
-            MAX_CONNECTIONS,
+            len(current_lives),
+            MAX_CONNECTIONS
         ):
 
+            # Token süresi dolmak üzereyse
+            # bu turu kesip yeni token al
+            if (
+                time.monotonic()
+                >= jwt_expires_at - 30
+            ):
+                log.info(
+                    "JWT SÜRESİ DOLMAK ÜZERE"
+                )
+                break
+
             await scan_batch(
-                lives,
+                current_lives,
                 index,
+                token
             )
 
-        # ====================================================
-        # TUR BİTTİ
-        # ====================================================
+        # Listeyi sonsuza kadar körü körüne
+        # kullanmak yerine discovery zamanını kontrol et
+        if (
+            time.monotonic()
+            - last_discovery
+            >= DISCOVERY_INTERVAL
+        ):
 
-        log.info(
-            "🔄 TUR BİTTİ -> HEMEN YENİ TURA GEÇİLİYOR"
-        )
+            current_lives = []
 
-        # Bekleme YOK.
-        # Aynı LIVE listesi tekrar taranıyor.
+        else:
 
-
-# ============================================================
-# RENDER HEALTH SERVER
-# ============================================================
-
-class HealthHandler(
-    BaseHTTPRequestHandler
-):
-
-    def do_GET(self):
-
-        self.send_response(200)
-
-        self.send_header(
-            "Content-Type",
-            "text/plain; charset=utf-8",
-        )
-
-        self.end_headers()
-
-        self.wfile.write(
-            b"TreasureAlert OK\n"
-        )
-
-    def log_message(
-        self,
-        format,
-        *args,
-    ):
-        return
+            # Hemen tekrar tarayabiliriz;
+            # WATCH_SECONDS=45 ile günlük WS
+            # limiti aşılmayacak şekilde ayarlanmıştır.
+            await asyncio.sleep(1)
 
 
-def start_health_server():
-
-    port = int(
-        os.getenv(
-            "PORT",
-            "10000",
-        )
-    )
-
-    server = HTTPServer(
-        (
-            "0.0.0.0",
-            port,
-        ),
-        HealthHandler,
-    )
-
-    log.info(
-        "🌐 Render health server -> PORT %s",
-        port,
-    )
-
-    server.serve_forever()
-
-
-# ============================================================
+# =========================================================
 # MAIN
-# ============================================================
+# =========================================================
 
 async def main():
 
     log.info(
-        "🔥🔥🔥 TREASURE ALERT GLOBAL BAŞLIYOR 🔥🔥🔥"
+        "🔥 TREASURE ALERT GLOBAL BAŞLIYOR"
     )
 
     log.info(
-        "🔑 TIKTOOL_API_KEY: %s",
-        "VAR" if API_KEY else "YOK",
+        f"TIKTOOL API KEY: "
+        f"{'VAR' if TIKTOOL_API_KEY else 'YOK'}"
     )
 
     log.info(
-        "🤖 BOT_TOKEN: %s",
-        "VAR" if BOT_TOKEN else "YOK",
+        f"BOT TOKEN: "
+        f"{'VAR' if BOT_TOKEN else 'YOK'}"
     )
 
     log.info(
-        "💬 CHAT_ID: %s",
-        "VAR" if CHAT_ID else "YOK",
+        f"CHAT ID: "
+        f"{'VAR' if CHAT_ID else 'YOK'}"
     )
 
     log.info(
-        "🌐 HTTP PROXY: %s",
-        "AKTİF" if HTTP_PROXY else "KAPALI",
+        f"HTTP PROXY: "
+        f"{'AKTİF' if HTTP_PROXY else 'YOK'}"
+    )
+
+    log.info(
+        f"MAX_CONNECTIONS={MAX_CONNECTIONS}"
+    )
+
+    log.info(
+        f"WATCH_SECONDS={WATCH_SECONDS}"
+    )
+
+    log.info(
+        f"MAX_LIVES={MAX_LIVES}"
+    )
+
+    log.info(
+        f"DISCOVERY_INTERVAL={DISCOVERY_INTERVAL}"
     )
 
     await global_scanner()
 
 
-# ============================================================
+# =========================================================
 # START
-# ============================================================
+# =========================================================
 
 if __name__ == "__main__":
 
-    threading.Thread(
+    # Health server'ı ayrı thread'de çalıştır
+    import threading
+
+    health_thread = threading.Thread(
         target=start_health_server,
-        daemon=True,
-    ).start()
+        daemon=True
+    )
+
+    health_thread.start()
 
     try:
-
-        asyncio.run(
-            main()
-        )
+        asyncio.run(main())
 
     except KeyboardInterrupt:
-
-        log.info(
-            "🛑 TreasureAlert durduruldu."
-        )
+        log.info("BOT DURDURULDU")
 
     except Exception as e:
-
         log.exception(
-            "💥 ANA HATA: %s",
-            e,
+            f"FATAL HATA -> {e}"
         )
-
-        raise
