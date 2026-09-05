@@ -1,9 +1,11 @@
 import os
 import re
+import json
+import base64
 import time
 import asyncio
 import threading
-from urllib.parse import quote
+from urllib.parse import urlparse, parse_qs
 from http.server import HTTPServer, BaseHTTPRequestHandler
 import requests
 from telethon import TelegramClient, events
@@ -45,7 +47,7 @@ def send_alert(msg):
     payload = {
         "chat_id": TARGET_CHAT_ID,
         "text": msg,
-        "disable_web_page_preview": True
+        "disable_web_page_preview": False
     }
     try:
         r = requests.post(url, json=payload, timeout=5)
@@ -57,39 +59,68 @@ def send_alert(msg):
                 sec = int(re.search(r'\d+', err).group()) if re.search(r'\d+', err) else 5
                 time.sleep(sec + 1)
         else:
-            print("[BAŞARILI] Linkli bildirim iletildi!")
+            print("[BAŞARILI] TikTok Canlı Yayın Linki iletildi!")
     except Exception as e:
         print(f"[İstek Hatası]: {e}")
 
+def extract_tiktok_from_url(url_str):
+    """Link içindeki Base64 verisinden gerçek kullanıcı adını çözer"""
+    try:
+        parsed = urlparse(url_str.strip())
+        qs = parse_qs(parsed.query)
+        # ?r= veya ?p= parametresini kontrol et
+        encoded = qs.get('r', [None])[0] or qs.get('p', [None])[0]
+        if encoded:
+            # Base64 padding tamamlama
+            padded = encoded + '=' * (-len(encoded) % 4)
+            decoded_bytes = base64.b64decode(padded)
+            decoded_str = decoded_bytes.decode('utf-8', errors='ignore')
+            data = json.loads(decoded_str)
+            user = data.get('user')
+            if user:
+                return user
+    except Exception as e:
+        print(f"[Link Çözme Hatası]: {e}")
+    return None
+
 def parse_tiktok_message(text, chat_title):
     username = None
+    
+    # 1. YOL: Mesaj içindeki linki yakala ve şifresini çöz
+    urls = re.findall(r'https?://[^\s]+', text)
+    for u in urls:
+        extracted = extract_tiktok_from_url(u)
+        if extracted:
+            username = extracted
+            break
+
+    # 2. YOL (Yedek): Linkten çıkmazsa başlık satırından kullanıcı adını al
+    if not username:
+        for line in text.splitlines():
+            if "##" in line and ">" in line:
+                parts = line.split(">", 1)
+                if len(parts) > 1 and parts[1].strip():
+                    username = parts[1].strip()
+                    break
+
+    # Eski çöp link satırlarını temizle
     clean_lines = []
-
     for line in text.splitlines():
-        # ## T12345> kullanıcıadı satırını yakala (Arapça, sembol vs. hepsini kapsar)
-        if "##" in line and ">" in line:
-            parts = line.split(">", 1)
-            if len(parts) > 1:
-                raw_user = parts[1].strip()
-                if raw_user:
-                    username = raw_user
-
-        # Çöp link satırlarını temizle
-        if "dichvu321" in line or line.strip() in [">", "=", "-"]:
+        if any(bad in line for bad in ["dichvu321", "junb.io.vn", "box-countdown"]) or line.strip() in [">", "=", "-"]:
             continue
         clean_lines.append(line)
-
+    
     body = "\n".join(clean_lines).strip()
 
+    # Link oluştur
     if username:
-        # Arapça veya özel karakterli isimleri güvenli URL formatına çevirir
-        encoded_user = quote(username)
-        live_link = f"https://www.tiktok.com/@{encoded_user}/live"
+        live_link = f"https://www.tiktok.com/@{username}/live"
         return (
-            f"🚨 YENİ SANDIK!\n"
-            f"Kaynak: {chat_title}\n\n"
+            f"🚨 YENİ SANDIK DÜŞTÜ!\n"
+            f"Kaynak: {chat_title}\n"
+            f"Yayıncı: @{username}\n\n"
             f"{body}\n\n"
-            f"🔗 CANLI YAYIN LİNKİ:\n{live_link}"
+            f"🔗 TİKTOK CANLI YAYIN LİNKİ:\n{live_link}"
         )
     return f"🚨 YENİ SANDIK!\nKaynak: {chat_title}\n\n{body}"
 
