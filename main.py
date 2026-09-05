@@ -32,10 +32,8 @@ async def listen_room(unique_id: str):
     async def on_connect(event: ConnectEvent):
         print(f"[*] Yayına başarıyla bağlanıldı: @{unique_id} (Room ID: {client.room_id})")
 
-    # Genel event yakalayıcı (Tüm gelen paketleri yakalar, çökme yapmaz)
     @client.on(GiftEvent)
     async def on_gift(event: GiftEvent):
-        # Kutu, sandık veya özel hediye event kontrolü
         event_dict = str(event).lower()
         if "chest" in event_dict or "box" in event_dict or "treasure" in event_dict:
             msg = (
@@ -55,7 +53,7 @@ async def main():
     print("TikTok Canlı Akış Dinleyici Başlatılıyor...")
     send_telegram_msg("🤖 <b>TikTok Akış Botu Başlatıldı!</b>")
     
-    # Test amaçlı şu an aktif olan 1-2 yayıncının kullanıcı adını gir
+    # Test için aktif kullanıcı
     target_users = ["tiktok"]
     
     tasks = [listen_room(user) for user in target_users]
