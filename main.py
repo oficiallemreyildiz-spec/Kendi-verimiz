@@ -11,14 +11,25 @@ API_HASH = "737566711ac17fecd1ebeab1e2123773"
 
 STRING_SESSION = os.getenv("STRING_SESSION")
 BOT_TOKEN = os.getenv("BOT_TOKEN")
-CHAT_ID = os.getenv("CHAT_ID")
+TARGET_CHAT_ID = -1003999489709  # Bildirimlerin düşeceği senin grubun
 
-# Render port kapanmasını önleyen sunucu
+# Mesajların toplanacağı 5 kaynak grup
+SOURCE_CHATS = [
+    -1004427105311,
+    -1003965749742,
+    -1002223772922,
+    -1002485768492,
+    -1002583301445
+]
+
 class HealthCheck(BaseHTTPRequestHandler):
     def do_GET(self):
         self.send_response(200)
         self.end_headers()
         self.wfile.write(b"OK")
+    def do_HEAD(self):
+        self.send_response(200)
+        self.end_headers()
 
 def start_server():
     port = int(os.getenv("PORT", 10000))
@@ -26,38 +37,40 @@ def start_server():
     server.serve_forever()
 
 def send_alert(msg):
-    if not BOT_TOKEN or not CHAT_ID:
-        print("[HATA] Bot Token veya Chat ID eksik!")
+    if not BOT_TOKEN:
+        print("[HATA] BOT_TOKEN eksik!")
         return
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
-    payload = {"chat_id": CHAT_ID, "text": msg, "parse_mode": "HTML"}
+    payload = {
+        "chat_id": TARGET_CHAT_ID,
+        "text": msg
+    }
     try:
-        requests.post(url, json=payload, timeout=5)
+        r = requests.post(url, json=payload, timeout=5)
+        res = r.json()
+        if not res.get("ok"):
+            print(f"[GÖNDERME HATASI]: {res.get('description')}")
+        else:
+            print("[BAŞARILI] Bildirim grubuna iletildi!")
     except Exception as e:
-        print(f"[Telegram Hatası]: {e}")
+        print(f"[İstek Hatası]: {e}")
 
 client = TelegramClient(StringSession(STRING_SESSION), API_ID, API_HASH)
 
-@client.on(events.NewMessage)
+@client.on(events.NewMessage(chats=SOURCE_CHATS))
 async def message_listener(event):
     chat = await event.get_chat()
-    chat_title = getattr(chat, 'title', '')
+    chat_title = getattr(chat, 'title', f"Grup ({event.chat_id})")
     text = event.raw_text or ""
 
-    # Gruptan gelen sandık verilerini filtrele
-    if "BOT : 20 - 16" in chat_title or "BOX:" in text or "dichvu321.com" in text:
-        print(f"[YENİ SANDIK] {chat_title} grubundan yakalandı!")
-        alert_msg = (
-            f"🚨 <b>YENİ SANDIK BİLDİRİMİ!</b>\n\n"
-            f"{text}\n\n"
-            f"⚡ <i>Otomatik Aktarım</i>"
-        )
-        send_alert(alert_msg)
+    print(f"\n[YENİ VERİ] Kaynak: {chat_title} (ID: {event.chat_id})")
+    alert_msg = f"🚨 YENİ SANDIK!\nKaynak: {chat_title}\n\n{text}"
+    send_alert(alert_msg)
 
 async def main():
-    print("=== Telegram Hesap Dinleyici Başlatıldı ===")
+    print("=== 5 Kaynak Grup Dinleniyor ===")
+    send_alert("🤖 Userbot Başlatıldı! 5 kaynak grup dinleniyor, sandıklar bu gruba aktarılacak.")
     await client.start()
-    send_alert("🤖 <b>Userbot Başlatıldı!</b> Sandık grubu 7/24 dinleniyor...")
     await client.run_until_disconnected()
 
 if __name__ == "__main__":
