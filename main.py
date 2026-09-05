@@ -5,7 +5,7 @@ import threading
 import requests
 
 from http.server import HTTPServer, BaseHTTPRequestHandler
-from urllib.parse import urlparse, unquote
+from urllib.parse import quote
 
 from TikTokLive import TikTokLiveClient
 from TikTokLive.events import ConnectEvent, EnvelopeEvent
@@ -13,7 +13,7 @@ from httpx import Proxy
 
 
 # ============================================================
-# RENDER PORT SERVER
+# RENDER WEB SERVER
 # ============================================================
 
 class SimpleHandler(BaseHTTPRequestHandler):
@@ -45,7 +45,7 @@ def run_web_server():
     )
 
     logging.info(
-        f"Web server aktif - PORT {port}"
+        f"Web server aktif - PORT={port}"
     )
 
     server.serve_forever()
@@ -76,11 +76,6 @@ CHAT_ID = os.getenv(
     ""
 ).strip()
 
-PROXY_URL = os.getenv(
-    "PROXY_URL",
-    ""
-).strip()
-
 MIN_DIAMONDS = int(
     os.getenv(
         "MIN_DIAMONDS",
@@ -88,150 +83,89 @@ MIN_DIAMONDS = int(
     )
 )
 
+PROXY_USERNAME = os.getenv(
+    "PROXY_USERNAME",
+    ""
+).strip()
+
+PROXY_PASSWORD = os.getenv(
+    "PROXY_PASSWORD",
+    ""
+).strip()
+
 
 # ============================================================
-# STREAM LIST
+# 3 TIKTOK + 3 WEBSHARE PROXY
 # ============================================================
 
-TARGET_STREAMERS = [
-    "sakura12p4",
-    "sanackindy3",
-    "aikanyan0727"
-]
+STREAM_PROXIES = {
+
+    "sakura12p4": (
+        "31.59.20.176",
+        6754
+    ),
+
+    "sanackindy3": (
+        "45.38.107.97",
+        6014
+    ),
+
+    "aikanyan0727": (
+        "198.105.121.200",
+        6462
+    ),
+}
 
 
 # ============================================================
-# PROXY
+# PROXY OLUSTUR
 # ============================================================
 
-def get_proxy():
+def create_proxy(host, port):
 
-    if not PROXY_URL:
-
-        logging.warning(
-            "PROXY_URL bulunamadi."
+    if not PROXY_USERNAME:
+        logging.error(
+            "PROXY_USERNAME bulunamadi!"
         )
+        return None
 
+    if not PROXY_PASSWORD:
+        logging.error(
+            "PROXY_PASSWORD bulunamadi!"
+        )
         return None
 
     try:
 
-        proxy_url = PROXY_URL.strip()
-
-        # Olası markdown kalıntılarını temizle
-        if "](" in proxy_url:
-
-            proxy_url = (
-                proxy_url
-                .split("](")[0]
-                .replace("[", "")
-                .strip()
-            )
-
-        if proxy_url.endswith(")"):
-
-            proxy_url = proxy_url[:-1].strip()
-
-        parsed = urlparse(
-            proxy_url
+        # URL karakterlerini güvenli hale getir
+        username = quote(
+            PROXY_USERNAME,
+            safe=""
         )
 
-        if not parsed.hostname:
-
-            logging.error(
-                "Proxy hostname bulunamadi."
-            )
-
-            return None
-
-        if not parsed.port:
-
-            logging.error(
-                "Proxy port bulunamadi."
-            )
-
-            return None
-
-        scheme = parsed.scheme or "http"
-
-        username = (
-            unquote(parsed.username)
-            if parsed.username
-            else None
+        password = quote(
+            PROXY_PASSWORD,
+            safe=""
         )
 
-        password = (
-            unquote(parsed.password)
-            if parsed.password
-            else None
+        proxy_url = (
+            f"http://{username}:"
+            f"{password}@{host}:{port}"
         )
 
-        hostname = parsed.hostname
-        port = parsed.port
+        proxy = Proxy(proxy_url)
 
         logging.info(
-            f"Proxy: {scheme}://"
-            f"{hostname}:{port}"
-        )
-
-        if username:
-
-            logging.info(
-                "Proxy kullanici adi mevcut."
-            )
-
-        else:
-
-            logging.warning(
-                "Proxy kullanici adi yok."
-            )
-
-        if password:
-
-            logging.info(
-                "Proxy sifresi mevcut."
-            )
-
-        else:
-
-            logging.warning(
-                "Proxy sifresi yok."
-            )
-
-        # Kullanıcı adı/şifreyi Proxy'ye
-        # ayrı olarak veriyoruz.
-
-        clean_url = (
-            f"{scheme}://"
-            f"{hostname}:{port}"
-        )
-
-        if username and password:
-
-            proxy = Proxy(
-                clean_url,
-                auth=(
-                    username,
-                    password
-                )
-            )
-
-        else:
-
-            proxy = Proxy(
-                clean_url
-            )
-
-        logging.info(
-            "Proxy nesnesi olusturuldu."
+            f"Proxy hazir: {host}:{port}"
         )
 
         return proxy
 
     except Exception as e:
 
-        logging.exception(
-            f"Proxy olusturma hatasi: {e}"
+        logging.error(
+            f"Proxy olusturma hatasi "
+            f"{host}:{port}: {e}"
         )
 
         return None
@@ -300,10 +234,12 @@ async def telegram_message(text):
 
 
 # ============================================================
-# SINGLE STREAM
+# TEK TIKTOK HESABINI IZLE
 # ============================================================
 
 async def monitor_stream(username):
+
+    host, port = STREAM_PROXIES[username]
 
     while True:
 
@@ -312,48 +248,47 @@ async def monitor_stream(username):
         try:
 
             logging.info(
-                "----------------------------------------"
+                "========================================"
             )
 
             logging.info(
-                f"Baglanti deneniyor: @{username}"
+                f"@{username} baglaniyor..."
             )
 
-            # Her bağlantıda yeni proxy oluştur
-            proxy = get_proxy()
+            logging.info(
+                f"Proxy: {host}:{port}"
+            )
 
-            client_kwargs = {
-                "unique_id": username
-            }
+            proxy = create_proxy(
+                host,
+                port
+            )
 
-            if proxy:
+            if proxy is None:
 
-                client_kwargs[
-                    "web_proxy"
-                ] = proxy
-
-                client_kwargs[
-                    "ws_proxy"
-                ] = proxy
-
-                logging.info(
-                    f"Proxy aktif: @{username}"
+                logging.error(
+                    f"@{username} proxy "
+                    f"olusturulamadi."
                 )
 
-            else:
+                await asyncio.sleep(30)
+                continue
 
-                logging.warning(
-                    f"Proxy yok: @{username}"
-                )
+
+            # ------------------------------------------------
+            # TikTokLive Client
+            # ------------------------------------------------
 
             client = TikTokLiveClient(
-                **client_kwargs
+                unique_id=username,
+                web_proxy=proxy,
+                ws_proxy=proxy
             )
 
 
-            # =================================================
+            # ------------------------------------------------
             # CONNECT
-            # =================================================
+            # ------------------------------------------------
 
             @client.on(ConnectEvent)
             async def on_connect(
@@ -361,13 +296,14 @@ async def monitor_stream(username):
             ):
 
                 logging.info(
-                    f"YAYINA BAGLANDI: @{username}"
+                    f"✅ YAYINA BAGLANDI: "
+                    f"@{username}"
                 )
 
 
-            # =================================================
+            # ------------------------------------------------
             # ENVELOPE
-            # =================================================
+            # ------------------------------------------------
 
             @client.on(EnvelopeEvent)
             async def on_envelope(
@@ -393,13 +329,14 @@ async def monitor_stream(username):
                     diamonds = diamonds or 0
 
                     logging.info(
-                        f"Envelope: @{username} "
+                        f"🎁 ENVELOPE: "
+                        f"@{username} "
                         f"diamonds={diamonds}"
                     )
 
                     if diamonds < MIN_DIAMONDS:
-
                         return
+
 
                     message = (
                         "🎁 <b>"
@@ -424,7 +361,7 @@ async def monitor_stream(username):
                     )
 
                     logging.info(
-                        f"KUTU BULUNDU: "
+                        f"🚨 KUTU BULUNDU: "
                         f"@{username} "
                         f"({diamonds})"
                     )
@@ -437,22 +374,21 @@ async def monitor_stream(username):
                     )
 
 
-            # =================================================
+            # ------------------------------------------------
             # START
-            # =================================================
+            # ------------------------------------------------
 
             logging.info(
-                f"TikTokLive start(): "
+                f"TikTokLive baslatiliyor: "
                 f"@{username}"
             )
 
             await client.start()
 
-            # start() normal şekilde dönerse
             logging.warning(
-                f"TikTokLive baglantisi sonlandi: "
-                f"@{username}"
+                f"@{username} baglantisi sona erdi."
             )
+
 
         except Exception as e:
 
@@ -461,45 +397,45 @@ async def monitor_stream(username):
             if "407" in error:
 
                 logging.error(
-                    f"407 PROXY AUTHENTICATION "
-                    f"REQUIRED: @{username}"
+                    f"❌ 407 PROXY AUTH: "
+                    f"@{username} "
+                    f"-> {host}:{port}"
                 )
 
                 logging.error(
-                    "Proxy kullanici adi veya "
-                    "sifresi kabul edilmiyor."
+                    "Webshare proxy kimlik "
+                    "dogrulamasi reddedildi."
                 )
 
             elif "403" in error:
 
                 logging.error(
-                    f"403 TIKTOK ERISIM HATASI: "
+                    f"❌ 403 TIKTOK: "
                     f"@{username}"
                 )
 
             else:
 
                 logging.error(
-                    f"Baglanti hatasi "
+                    f"❌ BAGLANTI HATASI: "
                     f"@{username}: {e}"
                 )
+
 
         finally:
 
             try:
 
                 if client:
-
                     await client.disconnect()
 
             except Exception:
-
                 pass
 
 
-        # =====================================================
+        # ------------------------------------------------
         # RECONNECT
-        # =====================================================
+        # ------------------------------------------------
 
         logging.warning(
             f"@{username} 30 saniye sonra "
@@ -520,12 +456,11 @@ async def main():
     )
 
     logging.info(
-        "TikTok Live Tarama Botu BASLATILDI"
+        "🚀 TikTok Live Tarama Botu BASLATILDI"
     )
 
     logging.info(
-        f"Hesap sayisi: "
-        f"{len(TARGET_STREAMERS)}"
+        "3 hesap / 3 ayri Webshare proxy"
     )
 
     logging.info(
@@ -534,66 +469,56 @@ async def main():
 
 
     # --------------------------------------------------------
-    # ENV CHECK
+    # ENV KONTROL
     # --------------------------------------------------------
 
-    if BOT_TOKEN:
+    logging.info(
+        f"BOT_TOKEN: "
+        f"{'OK' if BOT_TOKEN else 'YOK'}"
+    )
+
+    logging.info(
+        f"CHAT_ID: "
+        f"{'OK' if CHAT_ID else 'YOK'}"
+    )
+
+    logging.info(
+        f"PROXY_USERNAME: "
+        f"{'OK' if PROXY_USERNAME else 'YOK'}"
+    )
+
+    logging.info(
+        f"PROXY_PASSWORD: "
+        f"{'OK' if PROXY_PASSWORD else 'YOK'}"
+    )
+
+
+    # --------------------------------------------------------
+    # PROXY LISTESI
+    # --------------------------------------------------------
+
+    for username, (host, port) in STREAM_PROXIES.items():
 
         logging.info(
-            "BOT_TOKEN OK"
-        )
-
-    else:
-
-        logging.error(
-            "BOT_TOKEN YOK!"
-        )
-
-
-    if CHAT_ID:
-
-        logging.info(
-            "CHAT_ID OK"
-        )
-
-    else:
-
-        logging.error(
-            "CHAT_ID YOK!"
-        )
-
-
-    if PROXY_URL:
-
-        logging.info(
-            "PROXY_URL OK"
-        )
-
-    else:
-
-        logging.warning(
-            "PROXY_URL YOK!"
+            f"@{username} "
+            f"-> {host}:{port}"
         )
 
 
     # --------------------------------------------------------
-    # STREAMLER
+    # 3 HESABI AYNI ANDA BASLAT
     # --------------------------------------------------------
 
     tasks = []
 
-    for username in TARGET_STREAMERS:
+    for username in STREAM_PROXIES:
 
-        tasks.append(
-            asyncio.create_task(
-                monitor_stream(username)
-            )
+        task = asyncio.create_task(
+            monitor_stream(username)
         )
 
+        tasks.append(task)
 
-    # --------------------------------------------------------
-    # BOTU SUREKLI CALISTIR
-    # --------------------------------------------------------
 
     await asyncio.gather(
         *tasks
@@ -606,13 +531,11 @@ async def main():
 
 if __name__ == "__main__":
 
-    # Render health server
     threading.Thread(
         target=run_web_server,
         daemon=True
     ).start()
 
-    # Botu başlat
     try:
 
         asyncio.run(
