@@ -4,7 +4,6 @@ import json
 import logging
 import os
 import threading
-import time
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from urllib.parse import quote
 
@@ -21,23 +20,16 @@ API_KEY = os.getenv("TIKTOOL_API_KEY", "").strip()
 BOT_TOKEN = os.getenv("BOT_TOKEN", "").strip()
 CHAT_ID = os.getenv("CHAT_ID", "").strip()
 
-SESSION_ID = os.getenv("TIKTOK_SESSION_ID", "").strip()
+# Top-channels maksimum 10 canlı döndürüyor.
+MAX_LIVES = 10
 
+# Public ticker 5 dakikada bir kullanılmalı.
+DISCOVERY_INTERVAL = 300
+
+# Aynı anda kaç WebSocket?
+# Free/Sandbox için düşük tutuyoruz.
 MAX_CONNECTIONS = int(
-    os.getenv("MAX_CONNECTIONS", "5")
-)
-
-DISCOVERY_INTERVAL = int(
-    os.getenv("DISCOVERY_INTERVAL", "45")
-)
-
-WATCH_SECONDS = int(
-    os.getenv("WATCH_SECONDS", "180")
-)
-
-FEED_COUNT = min(
-    int(os.getenv("FEED_COUNT", "50")),
-    50,
+    os.getenv("MAX_CONNECTIONS", "10")
 )
 
 
@@ -58,14 +50,16 @@ log = logging.getLogger("TreasureAlert")
 # TELEGRAM
 # ============================================================
 
-async def telegram(text):
+async def telegram_send(text):
 
     if not BOT_TOKEN or not CHAT_ID:
-        log.error("❌ BOT_TOKEN / CHAT_ID eksik.")
+        log.error(
+            "❌ BOT_TOKEN veya CHAT_ID eksik."
+        )
         return
 
     url = (
-        f"https://api.telegram.org/"
+        "https://api.telegram.org/"
         f"bot{BOT_TOKEN}/sendMessage"
     )
 
@@ -82,228 +76,102 @@ async def telegram(text):
             timeout=15
         ) as client:
 
-            r = await client.post(
+            response = await client.post(
                 url,
                 json=payload,
             )
 
-            if r.status_code != 200:
+            if response.status_code != 200:
 
                 log.error(
                     "❌ Telegram HTTP %s: %s",
-                    r.status_code,
-                    r.text[:500],
+                    response.status_code,
+                    response.text[:300],
                 )
 
     except Exception as e:
 
         log.error(
-            "❌ Telegram: %s",
+            "❌ Telegram bağlantı hatası: %s",
             e,
         )
 
 
 # ============================================================
-# FEED İSTEĞİ
+# GENEL LIVE KEŞFİ
 # ============================================================
 
-async def get_feed(
-    region,
-    channel,
-    cursor=None,
-):
+async def discover_live():
 
-    params = {
-        "apiKey": API_KEY,
-        "region": region,
-        "channel_id": str(channel),
-        "count": str(FEED_COUNT),
-    }
+    if not API_KEY:
 
-    if SESSION_ID:
-        params["session_id"] = SESSION_ID
+        log.error(
+            "❌ TIKTOOL_API_KEY bulunamadı!"
+        )
 
-    if cursor:
-        params["max_time"] = str(cursor)
+        return []
 
     try:
 
-        # ÖNEMLİ:
-        # Feed keşfini Webshare proxy'den geçirmiyoruz.
         async with httpx.AsyncClient(
             timeout=30,
             follow_redirects=True,
         ) as client:
 
-            r = await client.get(
-                "https://api.tik.tools/webcast/feed",
-                params=params,
+            response = await client.get(
+                "https://api.tik.tools/api/live/top-channels"
             )
 
             log.info(
-                "🔎 FEED %s / channel=%s -> HTTP %s",
-                region,
-                channel,
-                r.status_code,
+                "🔎 TOP-CHANNELS HTTP %s",
+                response.status_code,
             )
 
-            if r.status_code != 200:
+            if response.status_code != 200:
 
                 log.error(
-                    "❌ Feed cevap: %s",
-                    r.text[:500],
+                    "❌ Top channels: %s",
+                    response.text[:500],
                 )
 
-                return [], None
+                return []
 
-            result = r.json()
-
-            # ------------------------------------------------
-            # TikTool signed URL
-            # ------------------------------------------------
-
-            signed_url = result.get(
-                "signed_url"
-            )
-
-            if not signed_url:
-
-                log.error(
-                    "❌ signed_url yok. Keys=%s",
-                    list(result.keys()),
-                )
-
-                return [], None
-
-            headers = dict(
-                result.get(
-                    "headers",
-                    {},
-                )
-            )
-
-            cookies = result.get(
-                "cookies",
-                "",
-            )
-
-            if cookies:
-                headers["Cookie"] = cookies
-
-            # ------------------------------------------------
-            # TikTok feed
-            # ------------------------------------------------
-
-            rr = await client.get(
-                signed_url,
-                headers=headers,
-                timeout=30,
-            )
-
-            log.info(
-                "🌐 TIKTOK FEED -> HTTP %s",
-                rr.status_code,
-            )
-
-            if rr.status_code != 200:
-
-                log.error(
-                    "❌ TikTok feed: %s",
-                    rr.text[:500],
-                )
-
-                return [], None
-
-            feed = rr.json()
-
-            return parse_feed(
-                feed
-            )
+            result = response.json()
 
     except Exception as e:
 
         log.error(
-            "❌ Feed exception: %s",
+            "❌ LIVE keşif hatası: %s",
             e,
         )
 
-        return [], None
+        return []
 
-
-# ============================================================
-# FEED PARSER
-# ============================================================
-
-def parse_feed(feed):
-
-    rooms = []
-
-    if not isinstance(
-        feed,
-        dict,
-    ):
-        return [], None
-
-    entries = feed.get(
-        "data",
+    channels = result.get(
+        "channels",
         [],
     )
 
     if not isinstance(
-        entries,
+        channels,
         list,
     ):
-        entries = []
+        channels = []
 
-    for entry in entries:
+    lives = []
+    seen = set()
+
+    for channel in channels:
 
         if not isinstance(
-            entry,
+            channel,
             dict,
         ):
             continue
 
-        # Normal TikTok yapı:
-        #
-        # entry
-        #   └── data
-        #       ├── id_str
-        #       ├── owner
-        #       └── title
-
-        room = entry.get(
-            "data"
-        )
-
-        if not isinstance(
-            room,
-            dict,
-        ):
-            room = entry
-
-        owner = room.get(
-            "owner",
-            {},
-        )
-
-        if not isinstance(
-            owner,
-            dict,
-        ):
-            owner = {}
-
         username = (
-            owner.get("display_id")
-            or owner.get("unique_id")
-            or owner.get("displayId")
-            or room.get("display_id")
-            or room.get("unique_id")
-        )
-
-        room_id = (
-            room.get("id_str")
-            or room.get("room_id")
-            or room.get("roomId")
+            channel.get("uniqueId")
+            or channel.get("unique_id")
         )
 
         if not username:
@@ -313,272 +181,212 @@ def parse_feed(feed):
             username
         ).strip().lstrip("@")
 
-        if not username:
+        key = username.lower()
+
+        if not username or key in seen:
             continue
 
-        viewers = (
-            room.get("user_count")
-            or room.get("userCount")
-            or room.get("viewer_count")
-            or 0
-        )
+        seen.add(key)
 
-        title = (
-            room.get("title")
-            or ""
-        )
-
-        rooms.append(
+        lives.append(
             {
                 "username": username,
-                "room_id": (
-                    str(room_id)
-                    if room_id
-                    else ""
+                "room_id": str(
+                    channel.get("roomId")
+                    or ""
                 ),
-                "viewers": viewers,
-                "title": str(title),
+                "region": channel.get(
+                    "region",
+                    "",
+                ),
+                "display_name": channel.get(
+                    "displayName",
+                    username,
+                ),
             }
         )
 
-    extra = feed.get(
-        "extra",
+    lives = lives[:MAX_LIVES]
+
+    log.info(
+        "🔥 GENEL TARAMA: %s LIVE BULUNDU",
+        len(lives),
+    )
+
+    for live in lives:
+
+        log.info(
+            "🔴 @%s | %s | ROOM=%s",
+            live["username"],
+            live["region"],
+            live["room_id"],
+        )
+
+    return lives
+
+
+# ============================================================
+# HAZİNE
+# ============================================================
+
+sent_envelopes = set()
+
+
+async def handle_envelope(
+    username,
+    data,
+):
+
+    envelope_id = (
+        data.get("envelopeId")
+        or data.get("envelope_id")
+        or ""
+    )
+
+    # Aynı olay tekrar gelirse Telegram'a tekrar gönderme.
+    if envelope_id:
+
+        dedupe_key = (
+            f"{username.lower()}:{envelope_id}"
+        )
+
+        if dedupe_key in sent_envelopes:
+            return
+
+        sent_envelopes.add(
+            dedupe_key
+        )
+
+        # Sonsuza kadar büyümesin.
+        if len(sent_envelopes) > 5000:
+
+            sent_envelopes.clear()
+
+    diamonds = (
+        data.get("diamondCount")
+        or data.get("diamond_count")
+        or 0
+    )
+
+    user = data.get(
+        "user",
         {},
     )
 
     if not isinstance(
-        extra,
+        user,
         dict,
     ):
-        extra = {}
+        user = {}
 
-    cursor = (
-        extra.get("max_time")
-        or extra.get("maxTime")
+    sender = (
+        user.get("uniqueId")
+        or user.get("unique_id")
+        or user.get("nickname")
+        or ""
     )
 
-    # Tekilleştir
-    unique = {}
-
-    for room in rooms:
-
-        unique[
-            room["username"].lower()
-        ] = room
-
-    result = list(
-        unique.values()
+    log.warning(
+        "🎁🎁🎁 HAZİNE BULUNDU | "
+        "@%s | 💎 %s | 👤 %s | 🆔 %s",
+        username,
+        diamonds,
+        sender,
+        envelope_id,
     )
 
-    return result, cursor
+    message = (
+        "🎁 <b>HAZİNE BULUNDU!</b>\n\n"
+        f"📺 Yayın: @{html.escape(username)}\n"
+        f"💎 Değer: {html.escape(str(diamonds))}\n"
+        f"👤 Gönderen: {html.escape(str(sender))}\n"
+        f"🆔 Envelope: {html.escape(str(envelope_id))}\n\n"
+        "🌍 Genel LIVE taraması"
+    )
+
+    await telegram_send(
+        message
+    )
 
 
 # ============================================================
-# GENEL LIVE KEŞFİ
+# SUPER FAN BOX
 # ============================================================
 
-async def discover():
-
-    # Birden fazla kanal deniyoruz.
-    channels = [
-        "87",       # Recommended
-        "86",       # Suggested
-        "42",       # Following
-        "1111006",  # Gaming
-    ]
-
-    regions = [
-        "US",
-        "TR",
-        "GB",
-        "DE",
-        "BR",
-        "ID",
-        "JP",
-    ]
-
-    all_rooms = {}
-
-    # İlk aşamada çok fazla API tüketmemek için
-    # birkaç bölge/kanal kombinasyonu.
-    combinations = [
-        ("US", "87"),
-        ("TR", "87"),
-        ("GB", "87"),
-        ("DE", "87"),
-        ("BR", "87"),
-        ("ID", "87"),
-        ("JP", "87"),
-        ("US", "86"),
-        ("TR", "86"),
-    ]
-
-    for region, channel in combinations:
-
-        rooms, _ = await get_feed(
-            region,
-            channel,
-        )
-
-        for room in rooms:
-
-            key = room[
-                "username"
-            ].lower()
-
-            all_rooms[key] = room
-
-        if rooms:
-
-            log.info(
-                "🔥 %s / %s -> %s LIVE",
-                region,
-                channel,
-                len(rooms),
-            )
-
-    result = list(
-        all_rooms.values()
-    )
-
-    log.info(
-        "🔥🔥 GENEL TARAMA SONUCU: %s FARKLI LIVE",
-        len(result),
-    )
-
-    for room in result[:100]:
-
-        log.info(
-            "🔴 @%s | 👥 %s",
-            room["username"],
-            room["viewers"],
-        )
-
-    return result
-
-
-# ============================================================
-# ENVELOPE / HAZİNE
-# ============================================================
-
-async def handle_event(
+async def handle_superfanbox(
     username,
-    event,
     data,
 ):
 
-    event_lower = str(
-        event
-    ).lower()
+    envelope_id = (
+        data.get("envelopeId")
+        or data.get("envelope_id")
+        or ""
+    )
 
-    # --------------------------------------------------------
-    # ENVELOPE
-    # --------------------------------------------------------
+    diamonds = (
+        data.get("diamondCount")
+        or data.get("diamond_count")
+        or 0
+    )
 
-    if (
-        event_lower == "envelope"
-        or "envelope" in event_lower
+    user = data.get(
+        "user",
+        {},
+    )
+
+    if not isinstance(
+        user,
+        dict,
     ):
+        user = {}
 
-        log.warning(
-            "🎁🎁🎁 HAZİNE BULUNDU | @%s",
-            username,
-        )
+    sender = (
+        user.get("uniqueId")
+        or user.get("unique_id")
+        or user.get("nickname")
+        or ""
+    )
 
-        log.warning(
-            "📦 DATA: %s",
-            json.dumps(
-                data,
-                ensure_ascii=False,
-            )[:3000],
-        )
+    log.warning(
+        "🟣 SUPER FAN BOX | @%s | "
+        "💎 %s | 👤 %s",
+        username,
+        diamonds,
+        sender,
+    )
 
-        diamonds = (
-            data.get("diamondCount")
-            or data.get("diamond_count")
-            or data.get("amount")
-            or 0
-        )
+    # Bunu şimdilik ayrı mesaj olarak gönderiyoruz.
+    message = (
+        "🟣 <b>SUPER FAN BOX</b>\n\n"
+        f"📺 Yayın: @{html.escape(username)}\n"
+        f"💎 Değer: {html.escape(str(diamonds))}\n"
+        f"👤 Gönderen: {html.escape(str(sender))}\n"
+        f"🆔 {html.escape(str(envelope_id))}"
+    )
 
-        sender = ""
-
-        user = data.get(
-            "user",
-            {},
-        )
-
-        if isinstance(
-            user,
-            dict,
-        ):
-
-            sender = (
-                user.get("uniqueId")
-                or user.get("unique_id")
-                or user.get("nickname")
-                or ""
-            )
-
-        envelope_id = (
-            data.get("envelopeId")
-            or data.get("envelope_id")
-            or ""
-        )
-
-        message = (
-            "🎁 <b>HAZİNE BULUNDU!</b>\n\n"
-            f"📺 @{html.escape(username)}\n"
-            f"💎 Değer: {html.escape(str(diamonds))}\n"
-            f"👤 Gönderen: {html.escape(str(sender))}\n"
-            f"🆔 {html.escape(str(envelope_id))}\n\n"
-            "🔎 Genel tarama tarafından yakalandı."
-        )
-
-        await telegram(
-            message
-        )
-
-        return
-
-
-    # --------------------------------------------------------
-    # SUPER FAN BOX
-    # --------------------------------------------------------
-
-    if (
-        event_lower == "superfanbox"
-        or "superfan" in event_lower
-    ):
-
-        log.warning(
-            "🟣 SUPER FAN BOX | @%s | %s",
-            username,
-            json.dumps(
-                data,
-                ensure_ascii=False,
-            )[:2000],
-        )
-
-        return
+    await telegram_send(
+        message
+    )
 
 
 # ============================================================
-# WEBSOCKET
+# TEK LIVE'I DİNLE
 # ============================================================
 
-async def watch(
-    room,
+async def watch_live(
+    live,
     semaphore,
 ):
 
-    username = room[
+    username = live[
         "username"
     ]
 
     async with semaphore:
 
         log.info(
-            "🔌 WS -> @%s",
+            "🔌 BAĞLANIYOR -> @%s",
             username,
         )
 
@@ -590,103 +398,117 @@ async def watch(
             + quote(API_KEY)
         )
 
-        try:
+        while True:
 
-            async with websockets.connect(
-                ws_url,
-                ping_interval=20,
-                ping_timeout=20,
-                close_timeout=5,
-                max_size=20 * 1024 * 1024,
-            ) as ws:
+            try:
 
-                log.info(
-                    "✅ WS BAĞLANDI -> @%s",
+                async with websockets.connect(
+                    ws_url,
+                    ping_interval=20,
+                    ping_timeout=20,
+                    close_timeout=5,
+                    max_size=20 * 1024 * 1024,
+                ) as ws:
+
+                    log.info(
+                        "✅ LIVE BAĞLANDI -> @%s",
+                        username,
+                    )
+
+                    async for raw in ws:
+
+                        try:
+
+                            event = json.loads(
+                                raw
+                            )
+
+                        except Exception:
+
+                            continue
+
+                        if not isinstance(
+                            event,
+                            dict,
+                        ):
+                            continue
+
+                        event_name = str(
+                            event.get(
+                                "event",
+                                "",
+                            )
+                        )
+
+                        data = event.get(
+                            "data",
+                            {},
+                        )
+
+                        if not isinstance(
+                            data,
+                            dict,
+                        ):
+                            data = {}
+
+                        # --------------------------------------------
+                        # HAZİNE
+                        # --------------------------------------------
+
+                        if event_name == "envelope":
+
+                            await handle_envelope(
+                                username,
+                                data,
+                            )
+
+                        # --------------------------------------------
+                        # SUPER FAN BOX
+                        # --------------------------------------------
+
+                        elif event_name == "superFanBox":
+
+                            await handle_superfanbox(
+                                username,
+                                data,
+                            )
+
+                        # --------------------------------------------
+                        # YAYIN BİTTİ
+                        # --------------------------------------------
+
+                        elif event_name in (
+                            "streamEnd",
+                            "control",
+                        ):
+
+                            log.info(
+                                "⏹️ YAYIN BİTTİ -> @%s",
+                                username,
+                            )
+
+                            return
+
+            except Exception as e:
+
+                log.warning(
+                    "⚠️ @%s WS kapandı: %s",
                     username,
+                    str(e)[:300],
                 )
 
-                started = time.monotonic()
-
-                while (
-                    time.monotonic()
-                    - started
-                    < WATCH_SECONDS
-                ):
-
-                    try:
-
-                        raw = await asyncio.wait_for(
-                            ws.recv(),
-                            timeout=30,
-                        )
-
-                    except asyncio.TimeoutError:
-
-                        log.info(
-                            "💓 @%s aktif",
-                            username,
-                        )
-
-                        continue
-
-                    if not raw:
-                        break
-
-                    try:
-
-                        msg = json.loads(
-                            raw
-                        )
-
-                    except Exception:
-                        continue
-
-                    if not isinstance(
-                        msg,
-                        dict,
-                    ):
-                        continue
-
-                    event = msg.get(
-                        "event",
-                        "",
-                    )
-
-                    data = msg.get(
-                        "data",
-                        {},
-                    )
-
-                    if not isinstance(
-                        data,
-                        dict,
-                    ):
-                        data = {}
-
-                    await handle_event(
-                        username,
-                        event,
-                        data,
-                    )
-
-        except Exception as e:
-
-            log.error(
-                "❌ WS @%s: %s",
-                username,
-                str(e)[:500],
-            )
-
-        finally:
+            # Bağlantı koptuğunda hemen saldırgan
+            # reconnect yapmıyoruz.
+            await asyncio.sleep(10)
 
             log.info(
-                "🔌 WS KAPANDI -> @%s",
+                "🔄 @%s yeniden bağlanıyor...",
                 username,
             )
 
 
 # ============================================================
-# WATCH QUEUE
+# GLOBAL SCANNER
 # ============================================================
 
 async def global_scanner():
@@ -695,76 +517,78 @@ async def global_scanner():
         MAX_CONNECTIONS
     )
 
-    active = set()
+    active = {}
 
     log.info(
-        "🚀🚀🚀 GLOBAL LIVE TARAMA BAŞLADI"
+        "🚀🚀 GLOBAL HAZİNE TARAMASI BAŞLADI"
     )
 
     while True:
 
-        rooms = await discover()
+        lives = await discover_live()
 
-        if not rooms:
+        current = {
+            live["username"].lower(): live
+            for live in lives
+        }
 
-            log.warning(
-                "⚠️ LIVE bulunamadı."
+        # --------------------------------------------------------
+        # Yeni LIVE'lar
+        # --------------------------------------------------------
+
+        for key, live in current.items():
+
+            if key in active:
+                continue
+
+            task = asyncio.create_task(
+                watch_live(
+                    live,
+                    semaphore,
+                )
             )
 
-        else:
+            active[key] = task
 
-            for room in rooms:
+            log.info(
+                "➕ TARAMAYA EKLENDİ -> @%s",
+                live["username"],
+            )
 
-                username = room[
-                    "username"
-                ]
+        # --------------------------------------------------------
+        # Artık LIVE olmayanları kapat
+        # --------------------------------------------------------
 
-                key = username.lower()
+        for key in list(active):
 
-                if key in active:
-                    continue
+            if key not in current:
 
-                active.add(key)
-
-                asyncio.create_task(
-                    watch_release(
-                        room,
-                        semaphore,
-                        active,
-                    )
+                task = active.pop(
+                    key
                 )
 
+                if not task.done():
+
+                    task.cancel()
+
+                log.info(
+                    "➖ TARAMADAN ÇIKTI -> @%s",
+                    key,
+                )
+
+        log.info(
+            "📡 AKTİF WS: %s",
+            len(active),
+        )
+
+        # Public ticker'ın 5 dakikalık limitine uyuyoruz.
         await asyncio.sleep(
             DISCOVERY_INTERVAL
         )
 
 
-async def watch_release(
-    room,
-    semaphore,
-    active,
-):
-
-    key = room[
-        "username"
-    ].lower()
-
-    try:
-
-        await watch(
-            room,
-            semaphore,
-        )
-
-    finally:
-
-        active.discard(
-            key
-        )
-
-
 # ============================================================
-# RENDER SERVER
+# RENDER HEALTH
 # ============================================================
 
 class Handler(
@@ -783,7 +607,7 @@ class Handler(
         self.end_headers()
 
         self.wfile.write(
-            b"TreasureAlert GLOBAL OK"
+            b"TreasureAlert GLOBAL SCANNER OK"
         )
 
     def log_message(
@@ -821,6 +645,18 @@ def start_server():
 
 if __name__ == "__main__":
 
+    log.info(
+        "========================================"
+    )
+
+    log.info(
+        "🔥 TREASURE ALERT GLOBAL"
+    )
+
+    log.info(
+        "========================================"
+    )
+
     if not API_KEY:
 
         log.error(
@@ -844,6 +680,14 @@ if __name__ == "__main__":
         daemon=True,
     ).start()
 
-    asyncio.run(
-        global_scanner()
-    )
+    try:
+
+        asyncio.run(
+            global_scanner()
+        )
+
+    except KeyboardInterrupt:
+
+        log.info(
+            "🛑 Sistem kapatıldı."
+        )
