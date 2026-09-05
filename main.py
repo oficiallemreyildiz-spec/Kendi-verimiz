@@ -29,7 +29,17 @@ from httpx import Proxy
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 CHAT_ID = os.getenv("CHAT_ID")
 MIN_DIAMONDS = int(os.getenv("MIN_DIAMONDS", 1))
-PROXY_URL = os.getenv("PROXY_URL")
+
+# Proxy adresini tertemiz hale getir
+raw_proxy = os.getenv("PROXY_URL", "")
+if "](http" in raw_proxy:
+    PROXY_URL = raw_proxy.split("](")[0].replace("[", "").strip()
+else:
+    PROXY_URL = raw_proxy.strip().replace("[", "").replace("]", "").split("(")[0].strip().rstrip(")")
+
+if PROXY_URL:
+    os.environ["HTTP_PROXY"] = PROXY_URL
+    os.environ["HTTPS_PROXY"] = PROXY_URL
 
 def send_telegram_message(text):
     if not BOT_TOKEN or not CHAT_ID:
@@ -48,8 +58,7 @@ async def monitor_stream(unique_id):
         client_kwargs = {"unique_id": unique_id}
         
         if PROXY_URL:
-            clean_proxy = PROXY_URL.strip().split("(")[0].strip().replace("[", "").replace("]", "").rstrip(")")
-            proxy_obj = Proxy(clean_proxy)
+            proxy_obj = Proxy(PROXY_URL)
             client_kwargs["web_proxy"] = proxy_obj
             client_kwargs["ws_proxy"] = proxy_obj
 
