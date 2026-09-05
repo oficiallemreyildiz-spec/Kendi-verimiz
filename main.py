@@ -2,9 +2,9 @@ import os
 import asyncio
 import requests
 from TikTokLive import TikTokLiveClient
-from TikTokLive.events import ConnectEvent, CustomEvent
+from TikTokLive.events import ConnectEvent, GiftEvent
 
-# Render Environment Variables (Ortam Değişkenleri) üzerinden alıyoruz
+# Render Ortam Değişkenleri
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 CHAT_ID = os.getenv("CHAT_ID")
 
@@ -25,23 +25,22 @@ def send_telegram_msg(message: str):
         print(f"[Telegram Hatası]: {e}")
 
 async def listen_room(unique_id: str):
-    """Belirtilen canlı yayına bağlanıp kutu/sandık eventlerini dinler"""
+    """Belirtilen canlı yayını dinler"""
     client = TikTokLiveClient(unique_id=unique_id)
 
     @client.on(ConnectEvent)
     async def on_connect(event: ConnectEvent):
-        print(f"[*] Yayına bağlanıldı: @{unique_id} (Room ID: {client.room_id})")
+        print(f"[*] Yayına başarıyla bağlanıldı: @{unique_id} (Room ID: {client.room_id})")
 
-    # TikTok kutu / sandık / hediye verilerini yakalama
-    @client.on(CustomEvent)
-    async def on_custom(event: CustomEvent):
-        event_name = getattr(event, "name", "").lower()
-        # TikTok içindeki sandık / kutu event anahtarları
-        if "treasure" in event_name or "box" in event_name or "envelope" in event_name:
+    # Genel event yakalayıcı (Tüm gelen paketleri yakalar, çökme yapmaz)
+    @client.on(GiftEvent)
+    async def on_gift(event: GiftEvent):
+        # Kutu, sandık veya özel hediye event kontrolü
+        event_dict = str(event).lower()
+        if "chest" in event_dict or "box" in event_dict or "treasure" in event_dict:
             msg = (
                 f"🚨 <b>YENİ SANDIK / KUTU BULUNDU!</b>\n\n"
                 f"👤 <b>Yayıncı:</b> @{unique_id}\n"
-                f"📦 <b>Event:</b> {event_name}\n"
                 f"🔗 <b>Yayın Linki:</b> https://www.tiktok.com/@{unique_id}/live"
             )
             print(f"[BULDUM] @{unique_id} odasında kutu yakalandı!")
@@ -50,15 +49,14 @@ async def listen_room(unique_id: str):
     try:
         await client.start()
     except Exception as e:
-        print(f"[@{unique_id} Bağlantı Koptu/Hata]: {e}")
+        print(f"[@{unique_id} Bağlantı Hatası]: {e}")
 
 async def main():
     print("TikTok Canlı Akış Dinleyici Başlatılıyor...")
-    send_telegram_msg("🤖 <b>TikTok Akış Botu Başlatıldı!</b> Veri dinleniyor...")
+    send_telegram_msg("🤖 <b>TikTok Akış Botu Başlatıldı!</b>")
     
-    # Buraya taranacak yayıncı havuzunu veya otomatik döngüyü ekliyoruz
-    # Örnek: Takip edilecek hedef canlı yayıncı listesi
-    target_users = ["hedef_kullanici_1", "hedef_kullanici_2"]
+    # Test amaçlı şu an aktif olan 1-2 yayıncının kullanıcı adını gir
+    target_users = ["tiktok"]
     
     tasks = [listen_room(user) for user in target_users]
     await asyncio.gather(*tasks)
