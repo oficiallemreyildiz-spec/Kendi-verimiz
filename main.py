@@ -1,6 +1,7 @@
 import os
 import asyncio
 import logging
+import base64
 import threading
 from http.server import HTTPServer, BaseHTTPRequestHandler
 
@@ -48,8 +49,18 @@ async def monitor_stream(unique_id):
         client_kwargs = {"unique_id": unique_id}
         
         if PROXY_URL:
-            # Proxy adresindeki parantez ve fazlalıkları otomatik temizle
             clean_proxy = PROXY_URL.strip().split("(")[0].strip().replace("[", "").replace("]", "").rstrip(")")
+            
+            # Proxy kimlik doğrulama başlıklarını hazırla
+            if "@" in clean_proxy:
+                auth_part = clean_proxy.split("://")[1].split("@")[0]
+                encoded_auth = base64.b64encode(auth_part.encode("ascii")).decode("ascii")
+                custom_headers = {
+                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
+                    "Proxy-Authorization": f"Basic {encoded_auth}"
+                }
+                client_kwargs["headers"] = custom_headers
+
             proxy_obj = Proxy(clean_proxy)
             client_kwargs["web_proxy"] = proxy_obj
             client_kwargs["ws_proxy"] = proxy_obj
