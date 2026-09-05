@@ -1,17 +1,23 @@
 import os
 import asyncio
 import logging
-import requests
-
-PROXY_URL = os.getenv("PROXY_URL")
-if PROXY_URL:
-    os.environ["HTTP_PROXY"] = PROXY_URL
-    os.environ["HTTPS_PROXY"] = PROXY_URL
-
-from TikTokLive import TikTokLiveClient
-from TikTokLive.events import ConnectEvent, EnvelopeEvent
+import traceback
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
+
+try:
+    import requests
+    PROXY_URL = os.getenv("PROXY_URL")
+    if PROXY_URL:
+        os.environ["HTTP_PROXY"] = PROXY_URL
+        os.environ["HTTPS_PROXY"] = PROXY_URL
+
+    from TikTokLive import TikTokLiveClient
+    from TikTokLive.events import ConnectEvent, EnvelopeEvent
+except Exception as e:
+    logging.critical(f"Kritik Başlangıç Hatası: {e}")
+    traceback.print_exc()
+    exit(1)
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 CHAT_ID = os.getenv("CHAT_ID")
@@ -30,29 +36,29 @@ def send_telegram_message(text):
         logging.error(f"Telegram mesaj hatası: {e}")
 
 async def monitor_stream(unique_id):
-    client = TikTokLiveClient(unique_id=unique_id)
-
-    @client.on(ConnectEvent)
-    async def on_connect(event: ConnectEvent):
-        logging.info(f"Yayın bağlantısı kuruldu: {unique_id}")
-
-    @client.on(EnvelopeEvent)
-    async def on_envelope(event: EnvelopeEvent):
-        try:
-            diamonds = getattr(event, "diamonds", 0) or getattr(event, "coins", 0)
-            if diamonds >= MIN_DIAMONDS:
-                msg = (
-                    f"🎁 <b>TREASURE BOX / GOODY BAG</b>\n\n"
-                    f"👤 <b>Yayıncı:</b> @{unique_id}\n"
-                    f"💎 <b>Elmas:</b> {diamonds}\n"
-                    f"⚡ <a href='https://www.tiktok.com/@{unique_id}/live'>YAYINA GİT</a>"
-                )
-                send_telegram_message(msg)
-                logging.info(f"Kutu bulundu: {unique_id} ({diamonds} Elmas)")
-        except Exception as err:
-            logging.error(f"Kutu okuma hatası: {err}")
-
     try:
+        client = TikTokLiveClient(unique_id=unique_id)
+
+        @client.on(ConnectEvent)
+        async def on_connect(event: ConnectEvent):
+            logging.info(f"Yayın bağlantısı kuruldu: {unique_id}")
+
+        @client.on(EnvelopeEvent)
+        async def on_envelope(event: EnvelopeEvent):
+            try:
+                diamonds = getattr(event, "diamonds", 0) or getattr(event, "coins", 0)
+                if diamonds >= MIN_DIAMONDS:
+                    msg = (
+                        f"🎁 <b>TREASURE BOX / GOODY BAG</b>\n\n"
+                        f"👤 <b>Yayıncı:</b> @{unique_id}\n"
+                        f"💎 <b>Elmas:</b> {diamonds}\n"
+                        f"⚡ <a href='https://www.tiktok.com/@{unique_id}/live'>YAYINA GİT</a>"
+                    )
+                    send_telegram_message(msg)
+                    logging.info(f"Kutu bulundu: {unique_id} ({diamonds} Elmas)")
+            except Exception as err:
+                logging.error(f"Kutu okuma hatası: {err}")
+
         await client.start()
     except Exception as e:
         logging.warning(f"{unique_id} yayınına bağlanılamadı: {e}")
@@ -64,4 +70,8 @@ async def main():
     await asyncio.gather(*tasks)
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    try:
+        asyncio.run(main())
+    except Exception as e:
+        logging.critical(f"Çalışma zamanı kritik hatası: {e}")
+        traceback.print_exc()
