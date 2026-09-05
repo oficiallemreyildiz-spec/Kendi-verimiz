@@ -48,8 +48,8 @@ async def monitor_stream(unique_id):
         client_kwargs = {"unique_id": unique_id}
         
         if PROXY_URL:
-            # Markdown link kalıntılarını temizle
-            clean_proxy = PROXY_URL.strip().replace("[", "").replace("]", "")
+            # Proxy adresindeki parantez ve fazlalıkları otomatik temizle
+            clean_proxy = PROXY_URL.strip().split("(")[0].strip().replace("[", "").replace("]", "").rstrip(")")
             proxy_obj = Proxy(clean_proxy)
             client_kwargs["web_proxy"] = proxy_obj
             client_kwargs["ws_proxy"] = proxy_obj
