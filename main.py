@@ -1,17 +1,16 @@
 import os
 import asyncio
 import logging
-from TikTokLive import TikTokLiveClient
-from TikTokLive.events import ConnectEvent, TreasureBoxEvent
 import requests
+from TikTokLive import TikTokLiveClient
+from TikTokLive.events import ConnectEvent, EnvelopeEvent
 
-# Log yapılandırması
+# Log ayarları
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 CHAT_ID = os.getenv("CHAT_ID")
 MIN_DIAMONDS = int(os.getenv("MIN_DIAMONDS", 1))
-# Render üzerinde tanımlayabileceğiniz opsiyonel PROXY_URL (örneğin: http://user:pass@ip:port)
 PROXY_URL = os.getenv("PROXY_URL", None)
 
 def send_telegram_message(text):
@@ -24,10 +23,9 @@ def send_telegram_message(text):
         res = requests.post(url, json=payload, timeout=10)
         res.raise_for_status()
     except Exception as e:
-        logging.error(f"Telegram mesajı gönderilemedi: {e}")
+        logging.error(f"Telegram mesaj hatası: {e}")
 
 async def monitor_stream(unique_id):
-    # Client yapılandırması (Proxy ve Custom Headers desteği ile)
     client_kwargs = {
         "unique_id": unique_id,
         "headers": {
@@ -44,8 +42,9 @@ async def monitor_stream(unique_id):
     async def on_connect(event: ConnectEvent):
         logging.info(f"Yayın bağlantısı kuruldu: {unique_id}")
 
-    @client.on(TreasureBoxEvent)
-    async def on_treasure_box(event: TreasureBoxEvent):
+    # Sandık/Kutu olayları için EnvelopeEvent kullanılır
+    @client.on(EnvelopeEvent)
+    async def on_envelope(event: EnvelopeEvent):
         try:
             diamonds = getattr(event, "diamonds", 0) or getattr(event, "coins", 0)
             if diamonds >= MIN_DIAMONDS:
@@ -56,9 +55,9 @@ async def monitor_stream(unique_id):
                     f"⚡ <a href='https://www.tiktok.com/@{unique_id}/live'>YAYINA GİT</a>"
                 )
                 send_telegram_message(msg)
-                logging.info(f"Hazine kutusu bildirildi: {unique_id} ({diamonds} Elmas)")
+                logging.info(f"Kutu bulundu: {unique_id} ({diamonds} Elmas)")
         except Exception as err:
-            logging.error(f"Kutu işleme hatası: {err}")
+            logging.error(f"Kutu okuma hatası: {err}")
 
     try:
         await client.start()
@@ -67,9 +66,7 @@ async def monitor_stream(unique_id):
 
 async def main():
     logging.info("TikTok Live Tarama Botu Başlatıldı...")
-    # Örnek yayıncı listesi veya dinamik canlı yayın tarama döngüsü
     target_streamers = ["sakura12p4", "sanackindy3", "aikanyan0727"]
-    
     tasks = [monitor_stream(username) for username in target_streamers]
     await asyncio.gather(*tasks)
 
