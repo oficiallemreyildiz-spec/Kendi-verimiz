@@ -1,5 +1,6 @@
 import asyncio
 import html
+import json
 import logging
 import os
 import threading
@@ -24,18 +25,14 @@ PROXY_PORT = os.getenv("PROXY_PORT", "").strip()
 PROXY_USERNAME = os.getenv("PROXY_USERNAME", "").strip()
 PROXY_PASSWORD = os.getenv("PROXY_PASSWORD", "").strip()
 
-# Aynı anda kaç LIVE dinlenecek?
-# Şimdilik Render ENV'deki MAX_CONNECTIONS=1 kullanılacak.
 MAX_CONNECTIONS = int(
     os.getenv("MAX_CONNECTIONS", "1")
 )
 
-# LIVE keşfi
 DISCOVERY_INTERVAL = int(
     os.getenv("DISCOVERY_INTERVAL", "300")
 )
 
-# Bir taramada en fazla kaç LIVE alınacak?
 MAX_LIVES = int(
     os.getenv("MAX_LIVES", "10")
 )
@@ -62,10 +59,12 @@ log = logging.getLogger("TreasureAlert")
 # ============================================================
 
 def build_proxy():
+
     if not PROXY_HOST or not PROXY_PORT:
         return None
 
     if PROXY_USERNAME and PROXY_PASSWORD:
+
         return (
             "http://"
             + quote(PROXY_USERNAME, safe="")
@@ -93,6 +92,7 @@ HTTP_PROXY = build_proxy()
 # ============================================================
 
 async def telegram_send(text):
+
     if not BOT_TOKEN:
         log.error("❌ BOT_TOKEN eksik.")
         return
@@ -114,30 +114,39 @@ async def telegram_send(text):
     }
 
     try:
+
         async with httpx.AsyncClient(
             timeout=20
         ) as client:
 
             response = await client.post(
                 url,
-                json=payload,
+                json=payload
             )
 
             if response.status_code == 200:
+
                 log.info(
                     "📨 Telegram bildirimi gönderildi."
                 )
+
             else:
+
                 log.error(
-                    "❌ Telegram HTTP %s: %s",
-                    response.status_code,
-                    response.text[:500],
+                    "❌ Telegram HTTP %s",
+                    response.status_code
+                )
+
+                log.error(
+                    "%s",
+                    response.text[:500]
                 )
 
     except Exception as e:
+
         log.error(
             "❌ Telegram hatası: %s",
-            e,
+            e
         )
 
 
@@ -182,36 +191,32 @@ async def discover_live():
 
             log.info(
                 "🔎 TOP-CHANNELS HTTP %s",
-                response.status_code,
+                response.status_code
             )
 
             if response.status_code != 200:
 
                 log.error(
                     "❌ LIVE keşfi başarısız: HTTP %s",
-                    response.status_code,
+                    response.status_code
                 )
 
                 log.error(
                     "Cevap: %s",
-                    response.text[:500],
+                    response.text[:500]
                 )
 
                 return []
 
             try:
+
                 result = response.json()
 
             except Exception as e:
 
                 log.error(
                     "❌ JSON çözülemedi: %s",
-                    e,
-                )
-
-                log.error(
-                    "Cevap: %s",
-                    response.text[:500],
+                    e
                 )
 
                 return []
@@ -220,7 +225,7 @@ async def discover_live():
 
         log.error(
             "❌ PROXY HATASI: %s",
-            e,
+            e
         )
 
         return []
@@ -229,7 +234,7 @@ async def discover_live():
 
         log.error(
             "⏱️ LIVE keşfi timeout: %s",
-            e,
+            e
         )
 
         return []
@@ -238,14 +243,14 @@ async def discover_live():
 
         log.error(
             "❌ LIVE keşif hatası: %s",
-            e,
+            e
         )
 
         return []
 
     channels = result.get(
         "channels",
-        [],
+        []
     )
 
     if not isinstance(channels, list):
@@ -316,7 +321,7 @@ async def discover_live():
 
     log.info(
         "🔥 GENEL TARAMA: %s LIVE BULUNDU",
-        len(lives),
+        len(lives)
     )
 
     for live in lives:
@@ -325,7 +330,7 @@ async def discover_live():
             "🔴 @%s | %s | ROOM=%s",
             live["username"],
             live["region"],
-            live["room_id"],
+            live["room_id"]
         )
 
     return lives
@@ -339,13 +344,13 @@ sent_envelopes = set()
 
 
 # ============================================================
-# HAZİNE
+# HAZİNE / ZARF
 # ============================================================
 
 async def handle_envelope(
     username,
     data,
-    event_type="envelope",
+    event_type="envelope"
 ):
 
     if not isinstance(data, dict):
@@ -359,10 +364,6 @@ async def handle_envelope(
 
     envelope_id = str(envelope_id)
 
-    # --------------------------------------------------------
-    # DUPLICATE
-    # --------------------------------------------------------
-
     if envelope_id:
 
         dedupe_key = (
@@ -373,7 +374,7 @@ async def handle_envelope(
 
             log.info(
                 "♻️ Tekrarlanan hazine atlandı -> @%s",
-                username,
+                username
             )
 
             return
@@ -383,11 +384,8 @@ async def handle_envelope(
         )
 
         if len(sent_envelopes) > 5000:
-            sent_envelopes.clear()
 
-    # --------------------------------------------------------
-    # DIAMOND
-    # --------------------------------------------------------
+            sent_envelopes.clear()
 
     diamonds = (
         data.get("diamondCount")
@@ -395,77 +393,66 @@ async def handle_envelope(
         or 0
     )
 
-    # --------------------------------------------------------
-    # USER
-    # --------------------------------------------------------
-
-    user = data.get(
-        "user",
-        {},
+    people = (
+        data.get("peopleCount")
+        or data.get("people_count")
+        or 0
     )
 
-    if not isinstance(user, dict):
-        user = {}
-
     sender = (
-        user.get("uniqueId")
-        or user.get("unique_id")
-        or user.get("nickname")
+        data.get("sendUserName")
+        or data.get("send_user_name")
         or ""
     )
 
-    sender = str(sender)
+    if not sender:
 
-    # --------------------------------------------------------
-    # LOG
-    # --------------------------------------------------------
+        user = data.get(
+            "user",
+            {}
+        )
+
+        if isinstance(user, dict):
+
+            sender = (
+                user.get("uniqueId")
+                or user.get("unique_id")
+                or user.get("nickname")
+                or ""
+            )
+
+    sender = str(sender)
 
     if event_type == "superFanBox":
 
+        title = "🟣 SUPER FAN BOX BULUNDU!"
+
         log.warning(
-            "🟣🟣🟣 SUPER FAN BOX BULUNDU | "
-            "@%s | 💎 %s | 👤 %s | 🆔 %s",
+            "🟣 SUPER FAN BOX | @%s | 💎 %s | 👥 %s",
             username,
             diamonds,
-            sender,
-            envelope_id,
+            people
         )
-
-        title = "🟣 SUPER FAN BOX BULUNDU!"
 
     else:
 
-        log.warning(
-            "🎁🎁🎁 HAZİNE BULUNDU | "
-            "@%s | 💎 %s | 👤 %s | 🆔 %s",
-            username,
-            diamonds,
-            sender,
-            envelope_id,
-        )
-
         title = "🎁 HAZİNE BULUNDU!"
 
-    # --------------------------------------------------------
-    # TELEGRAM
-    # --------------------------------------------------------
+        log.warning(
+            "🎁 HAZİNE | @%s | 💎 %s | 👥 %s",
+            username,
+            diamonds,
+            people
+        )
 
     message = (
         f"<b>{title}</b>\n\n"
-
-        f"📺 Yayın: "
-        f"@{html.escape(username)}\n"
-
-        f"💎 Değer: "
-        f"{html.escape(str(diamonds))}\n"
-
-        f"👤 Gönderen: "
-        f"{html.escape(sender)}\n"
-
-        f"🆔 Envelope: "
-        f"{html.escape(envelope_id)}\n\n"
-
-        f"🌍 Genel LIVE taraması"
+        f"📺 Yayın: @{html.escape(username)}\n"
+        f"💎 Değer: {html.escape(str(diamonds))}\n"
+        f"👥 Kişi: {html.escape(str(people))}\n"
+        f"👤 Gönderen: {html.escape(sender)}\n"
+        f"🆔 Envelope: {html.escape(envelope_id)}\n\n"
+        f"🌍 Global LIVE taraması"
     )
 
     await telegram_send(
@@ -496,18 +483,13 @@ async def mint_jwt(username):
         "allowed_creators": [
             username
         ],
-
         "expire_after": 600,
-
         "max_websockets": 1,
     }
 
     headers = {
-        "Content-Type":
-            "application/json",
-
-        "Accept":
-            "application/json",
+        "Content-Type": "application/json",
+        "Accept": "application/json",
     }
 
     try:
@@ -521,57 +503,46 @@ async def mint_jwt(username):
 
             response = await client.post(
                 url,
-                json=payload,
+                json=payload
             )
 
             log.info(
                 "🔐 JWT HTTP %s -> @%s",
                 response.status_code,
-                username,
+                username
             )
 
             if response.status_code != 200:
 
                 log.error(
                     "❌ JWT alınamadı -> @%s",
-                    username,
+                    username
                 )
 
                 log.error(
                     "JWT cevap: %s",
-                    response.text[:500],
+                    response.text[:500]
                 )
 
                 return None
 
-            try:
-                result = response.json()
-
-            except Exception as e:
-
-                log.error(
-                    "❌ JWT JSON hatası: %s",
-                    e,
-                )
-
-                return None
+            result = response.json()
 
     except httpx.ProxyError as e:
 
         log.error(
             "❌ JWT PROXY HATASI -> @%s: %s",
             username,
-            e,
+            e
         )
 
         return None
 
-    except httpx.TimeoutException as e:
+    except httpx.TimeoutException:
 
         log.error(
-            "⏱️ JWT timeout -> @%s: %s",
-            username,
-            e,
+            "⏱️ JWT timeout -> @%s",
+            username
         )
 
         return None
@@ -579,9 +550,9 @@ async def mint_jwt(username):
     except Exception as e:
 
         log.error(
-            "❌ JWT isteği hatası -> @%s: %s",
+            "❌ JWT hatası -> @%s: %s",
             username,
-            e,
+            e
         )
 
         return None
@@ -596,44 +567,40 @@ async def mint_jwt(username):
 
         log.error(
             "❌ JWT token bulunamadı -> @%s",
-            username,
-        )
-
-        log.error(
-            "JWT cevap: %s",
-            str(result)[:500],
+            username
         )
 
         return None
 
     log.info(
         "✅ JWT hazır -> @%s",
-        username,
+        username
     )
 
     return token
 
 
 # ============================================================
-# WEBSOCKET EVENT İŞLEYİCİ
+# WS MESAJI
 # ============================================================
 
 async def process_ws_message(
     username,
-    raw,
+    raw
 ):
+
+    if isinstance(raw, bytes):
+
+        raw = raw.decode(
+            "utf-8",
+            errors="replace"
+        )
 
     try:
 
-        event = json_loads_safe(raw)
+        event = json.loads(raw)
 
-    except Exception as e:
-
-        log.error(
-            "❌ WS JSON hatası -> @%s: %s",
-            username,
-            e,
-        )
+    except Exception:
 
         return
 
@@ -642,126 +609,70 @@ async def process_ws_message(
 
     event_name = (
         event.get("event")
+        or event.get("type")
         or ""
     )
 
-    if not event_name:
-        return
-
     data = event.get(
         "data",
-        {},
+        {}
     )
 
     if not isinstance(data, dict):
         data = {}
-
-    # --------------------------------------------------------
-    # ROOM INFO
-    # --------------------------------------------------------
-
-    if event_name == "roomInfo":
-
-        log.info(
-            "🏠 RoomInfo geldi -> @%s",
-            username,
-        )
-
-        return
-
-    # --------------------------------------------------------
-    # ENVELOPE
-    # --------------------------------------------------------
 
     if event_name == "envelope":
 
         await handle_envelope(
             username,
             data,
-            "envelope",
+            "envelope"
         )
 
         return
-
-    # --------------------------------------------------------
-    # SUPER FAN BOX
-    # --------------------------------------------------------
 
     if event_name == "superFanBox":
 
         await handle_envelope(
             username,
             data,
-            "superFanBox",
+            "superFanBox"
         )
 
         return
 
-    # --------------------------------------------------------
-    # CONTROL
-    # --------------------------------------------------------
+    if event_name == "roomInfo":
+
+        log.info(
+            "🏠 ROOM INFO -> @%s",
+            username
+        )
+
+        return
 
     if event_name == "control":
 
         log.info(
-            "🎛️ CONTROL -> @%s | %s",
+            "🎛️ CONTROL -> @%s",
+            username
+        )
+
+        return
+
+    if event_name:
+
+        log.info(
+            "ℹ️ EVENT -> @%s | %s",
             username,
-            str(data)[:300],
+            event_name
         )
 
-        return
-
-    # --------------------------------------------------------
-    # DİĞER EVENTLER
-    # --------------------------------------------------------
-
-    if event_name in {
-        "chat",
-        "gift",
-        "like",
-        "member",
-        "follow",
-        "share",
-        "roomUser",
-        "subscribe",
-        "emote",
-    }:
-
-        return
-
-    # Tanımadığımız eventleri görmek için:
-    log.info(
-        "ℹ️ EVENT -> @%s | %s",
-        username,
-        event_name,
-    )
-
 
 # ============================================================
-# JSON
+# WEBSOCKET
 # ============================================================
 
-def json_loads_safe(raw):
-
-    if isinstance(raw, bytes):
-
-        raw = raw.decode(
-            "utf-8",
-            errors="replace",
-        )
-
-    return __import__(
-        "json"
-    ).loads(raw)
-
-
-# ============================================================
-# TEK LIVE İZLE
-# ============================================================
-
-async def watch_live(
-    username,
-):
+async def watch_live(username):
 
     username = (
         str(username)
@@ -780,11 +691,6 @@ async def watch_live(
 
         if not token:
 
-            log.error(
-                "❌ JWT yok, 30 saniye sonra tekrar -> @%s",
-                username,
-            )
-
             await asyncio.sleep(30)
 
             continue
@@ -797,13 +703,16 @@ async def watch_live(
 
         log.info(
             "🔌 BAĞLANIYOR -> @%s",
-            username,
+            username
         )
 
         try:
 
+            # ÖNEMLİ:
+            # REST ve JWT ile aynı Webshare proxy.
             async with websockets.connect(
                 ws_url,
+                proxy=HTTP_PROXY,
                 open_timeout=30,
                 close_timeout=10,
                 ping_interval=20,
@@ -813,15 +722,23 @@ async def watch_live(
 
                 log.info(
                     "🟢 WS BAĞLANDI -> @%s",
-                    username,
+                    username
                 )
 
                 async for raw in ws:
 
                     await process_ws_message(
                         username,
-                        raw,
+                        raw
                     )
+
+        except websockets.exceptions.InvalidStatus as e:
+
+            log.error(
+                "❌ WS HTTP DURUMU -> @%s | %s",
+                username,
+                e
+            )
 
         except websockets.exceptions.ConnectionClosed as e:
 
@@ -829,14 +746,14 @@ async def watch_live(
                 "🔌 WS KAPANDI -> @%s | code=%s | reason=%s",
                 username,
                 getattr(e, "code", ""),
-                getattr(e, "reason", ""),
+                getattr(e, "reason", "")
             )
 
         except asyncio.TimeoutError:
 
             log.warning(
                 "⏱️ WS TIMEOUT -> @%s",
-                username,
+                username
             )
 
         except Exception as e:
@@ -844,19 +761,19 @@ async def watch_live(
             log.error(
                 "❌ WS HATASI -> @%s | %s",
                 username,
-                e,
+                e
             )
 
         log.info(
-            "🔄 10 saniye sonra yeniden bağlanılacak -> @%s",
-            username,
+            "🔄 10 saniye sonra yeniden denenecek -> @%s",
+            username
         )
 
         await asyncio.sleep(10)
 
 
 # ============================================================
-# AKTİF BAĞLANTILAR
+# GLOBAL TASKLER
 # ============================================================
 
 active_tasks = {}
@@ -878,12 +795,12 @@ async def global_scanner():
 
     log.info(
         "⚙️ MAX_CONNECTIONS = %s",
-        MAX_CONNECTIONS,
+        MAX_CONNECTIONS
     )
 
     log.info(
         "⚙️ MAX_LIVES = %s",
-        MAX_LIVES,
+        MAX_LIVES
     )
 
     while True:
@@ -892,44 +809,24 @@ async def global_scanner():
 
             lives = await discover_live()
 
-            if not lives:
-
-                log.info(
-                    "😴 Şu anda izlenecek LIVE bulunamadı."
-                )
-
-            current_users = set()
-
             for live in lives:
 
-                username = (
-                    live["username"]
-                )
+                username = live["username"]
 
                 key = username.lower()
 
-                current_users.add(
-                    key
-                )
-
                 if key in active_tasks:
-
                     continue
 
-                # ------------------------------------------------
-                # TASK
-                # ------------------------------------------------
-
                 async def runner(
-                    user=username,
-                    sem=semaphore,
+                    user=username
                 ):
 
-                    async with sem:
+                    async with semaphore:
 
                         log.info(
                             "📡 TARAMAYA EKLENDİ -> @%s",
-                            user,
+                            user
                         )
 
                         await watch_live(
@@ -944,48 +841,38 @@ async def global_scanner():
 
                 log.info(
                     "📡 AKTİF WS TASK -> @%s",
-                    username,
+                    username
                 )
-
-            # ----------------------------------------------------
-            # BITMIŞ TASK'LARI TEMİZLE
-            # ----------------------------------------------------
 
             dead = []
 
             for key, task in active_tasks.items():
 
                 if task.done():
-
                     dead.append(key)
 
             for key in dead:
 
                 active_tasks.pop(
                     key,
-                    None,
-                )
-
-                log.info(
-                    "🧹 Biten task temizlendi -> %s",
-                    key,
+                    None
                 )
 
             log.info(
                 "📊 AKTİF TASK: %s",
-                len(active_tasks),
+                len(active_tasks)
             )
 
         except Exception as e:
 
-            log.error(
+            log.exception(
                 "❌ GLOBAL SCANNER HATASI: %s",
-                e,
+                e
             )
 
         log.info(
-            "⏳ %s saniye sonra yeniden LIVE taraması...",
-            DISCOVERY_INTERVAL,
+            "⏳ %s saniye sonra yeniden tarama...",
+            DISCOVERY_INTERVAL
         )
 
         await asyncio.sleep(
@@ -994,7 +881,7 @@ async def global_scanner():
 
 
 # ============================================================
-# RENDER HEALTH SERVER
+# RENDER HEALTH
 # ============================================================
 
 class HealthHandler(
@@ -1009,7 +896,7 @@ class HealthHandler(
 
         self.send_header(
             "Content-Type",
-            "text/plain; charset=utf-8",
+            "text/plain; charset=utf-8"
         )
 
         self.end_headers()
@@ -1021,7 +908,7 @@ class HealthHandler(
     def log_message(
         self,
         format,
-        *args,
+        *args
     ):
 
         return
@@ -1032,28 +919,28 @@ def start_health_server():
     port = int(
         os.getenv(
             "PORT",
-            "10000",
+            "10000"
         )
     )
 
     server = HTTPServer(
         (
             "0.0.0.0",
-            port,
+            port
         ),
-        HealthHandler,
+        HealthHandler
     )
 
     log.info(
         "🌐 Render health server -> PORT %s",
-        port,
+        port
     )
 
     server.serve_forever()
 
 
 # ============================================================
-# ANA PROGRAM
+# MAIN
 # ============================================================
 
 async def main():
@@ -1062,81 +949,53 @@ async def main():
         "🔥🔥🔥 TREASURE ALERT GLOBAL BAŞLIYOR 🔥🔥🔥"
     )
 
-    if API_KEY:
+    log.info(
+        "🔑 TIKTOOL_API_KEY: %s",
+        "VAR" if API_KEY else "YOK"
+    )
 
-        log.info(
-            "🔑 TIKTOOL_API_KEY: VAR"
-        )
+    log.info(
+        "🤖 BOT_TOKEN: %s",
+        "VAR" if BOT_TOKEN else "YOK"
+    )
 
-    else:
+    log.info(
+        "💬 CHAT_ID: %s",
+        "VAR" if CHAT_ID else "YOK"
+    )
 
-        log.error(
-            "❌ TIKTOOL_API_KEY: YOK"
-        )
-
-    if BOT_TOKEN:
-
-        log.info(
-            "🤖 BOT_TOKEN: VAR"
-        )
-
-    else:
-
-        log.error(
-            "❌ BOT_TOKEN: YOK"
-        )
-
-    if CHAT_ID:
-
-        log.info(
-            "💬 CHAT_ID: VAR"
-        )
-
-    else:
-
-        log.error(
-            "❌ CHAT_ID: YOK"
-        )
-
-    if HTTP_PROXY:
-
-        log.info(
-            "🌐 HTTP PROXY: AKTİF"
-        )
-
-    else:
-
-        log.info(
-            "🌐 HTTP PROXY: KAPALI"
-        )
+    log.info(
+        "🌐 HTTP PROXY: %s",
+        "AKTİF" if HTTP_PROXY else "KAPALI"
+    )
 
     log.info(
         "⚙️ MAX_CONNECTIONS=%s",
-        MAX_CONNECTIONS,
+        MAX_CONNECTIONS
     )
 
     log.info(
         "⚙️ DISCOVERY_INTERVAL=%s",
-        DISCOVERY_INTERVAL,
+        DISCOVERY_INTERVAL
     )
 
     log.info(
         "⚙️ MAX_LIVES=%s",
-        MAX_LIVES,
+        MAX_LIVES
     )
 
     await global_scanner()
 
 
 # ============================================================
-# START
+# BAŞLAT
 # ============================================================
 
 if __name__ == "__main__":
 
     health_thread = threading.Thread(
         target=start_health_server,
-        daemon=True,
+        daemon=True
     )
 
     health_thread.start()
@@ -1157,7 +1016,7 @@ if __name__ == "__main__":
 
         log.exception(
             "💥 ANA PROGRAM HATASI: %s",
-            e,
+            e
         )
 
         raise
