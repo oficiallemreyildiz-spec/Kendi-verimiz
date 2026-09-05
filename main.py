@@ -1,555 +1,659 @@
-import os
 import asyncio
+import html
 import logging
+import os
 import threading
-import requests
-
-from http.server import HTTPServer, BaseHTTPRequestHandler
+from http.server import BaseHTTPRequestHandler, HTTPServer
 from urllib.parse import quote
 
+import httpx
 from TikTokLive import TikTokLiveClient
-from TikTokLive.events import ConnectEvent, EnvelopeEvent
-from httpx import Proxy
+from TikTokLive.events import ConnectEvent, DisconnectEvent, EnvelopeEvent
+from TikTokLive.client.errors import UserOfflineError
 
 
 # ============================================================
-# RENDER WEB SERVER
+# AYARLAR
 # ============================================================
 
-class SimpleHandler(BaseHTTPRequestHandler):
+TELEGRAM_TOKEN = os.getenv("BOT_TOKEN", "")
+CHAT_ID = os.getenv("CHAT_ID", "")
 
-    def do_GET(self):
-        self.send_response(200)
-        self.send_header(
-            "Content-Type",
-            "text/plain; charset=utf-8"
-        )
-        self.end_headers()
-        self.wfile.write(
-            b"TikTok Bot is running!"
-        )
+# Render'da mevcut API key'in hangi isimdeyse onu kullanır.
+API_KEY = (
+    os.getenv("TIKTOOLS_API_KEY")
+    or os.getenv("TIKHUB_API_KEY")
+    or os.getenv("EULER_API_KEY")
+    or os.getenv("TIKTOK_API_KEY")
+    or ""
+)
 
-    def log_message(self, format, *args):
-        pass
+PROXY_USERNAME = os.getenv("PROXY_USERNAME", "")
+PROXY_PASSWORD = os.getenv("PROXY_PASSWORD", "")
 
+# Aynı anda bağlanılacak maksimum LIVE.
+MAX_CONNECTIONS = int(
+    os.getenv("MAX_CONNECTIONS", "3")
+)
 
-def run_web_server():
+# Feed yenileme süresi.
+DISCOVERY_INTERVAL = int(
+    os.getenv("DISCOVERY_INTERVAL", "60")
+)
 
-    port = int(
-        os.getenv("PORT", "10000")
-    )
-
-    server = HTTPServer(
-        ("0.0.0.0", port),
-        SimpleHandler
-    )
-
-    logging.info(
-        f"Web server aktif - PORT={port}"
-    )
-
-    server.serve_forever()
+# Aynı odayı tekrar tekrar bağlamamak için.
+ROOM_TTL = int(
+    os.getenv("ROOM_TTL", "7200")
+)
 
 
 # ============================================================
-# LOGGING
+# LOG
 # ============================================================
 
 logging.basicConfig(
     level=logging.INFO,
-    format="%(asctime)s - %(levelname)s - %(message)s",
-    force=True
+    format="%(asctime)s [%(levelname)s] %(message)s",
+    force=True,
 )
 
-
-# ============================================================
-# ENV
-# ============================================================
-
-BOT_TOKEN = os.getenv(
-    "BOT_TOKEN",
-    ""
-).strip()
-
-CHAT_ID = os.getenv(
-    "CHAT_ID",
-    ""
-).strip()
-
-MIN_DIAMONDS = int(
-    os.getenv(
-        "MIN_DIAMONDS",
-        "1"
-    )
-)
-
-PROXY_USERNAME = os.getenv(
-    "PROXY_USERNAME",
-    ""
-).strip()
-
-PROXY_PASSWORD = os.getenv(
-    "PROXY_PASSWORD",
-    ""
-).strip()
-
-
-# ============================================================
-# 3 TIKTOK + 3 WEBSHARE PROXY
-# ============================================================
-
-STREAM_PROXIES = {
-
-    "sakura12p4": (
-        "31.59.20.176",
-        6754
-    ),
-
-    "sanackindy3": (
-        "45.38.107.97",
-        6014
-    ),
-
-    "aikanyan0727": (
-        "198.105.121.200",
-        6462
-    ),
-}
-
-
-# ============================================================
-# PROXY OLUSTUR
-# ============================================================
-
-def create_proxy(host, port):
-
-    if not PROXY_USERNAME:
-        logging.error(
-            "PROXY_USERNAME bulunamadi!"
-        )
-        return None
-
-    if not PROXY_PASSWORD:
-        logging.error(
-            "PROXY_PASSWORD bulunamadi!"
-        )
-        return None
-
-    try:
-
-        # URL karakterlerini güvenli hale getir
-        username = quote(
-            PROXY_USERNAME,
-            safe=""
-        )
-
-        password = quote(
-            PROXY_PASSWORD,
-            safe=""
-        )
-
-        proxy_url = (
-            f"http://{username}:"
-            f"{password}@{host}:{port}"
-        )
-
-        proxy = Proxy(proxy_url)
-
-        logging.info(
-            f"Proxy hazir: {host}:{port}"
-        )
-
-        return proxy
-
-    except Exception as e:
-
-        logging.error(
-            f"Proxy olusturma hatasi "
-            f"{host}:{port}: {e}"
-        )
-
-        return None
+log = logging.getLogger("TreasureAlert")
 
 
 # ============================================================
 # TELEGRAM
 # ============================================================
 
-def send_telegram_message(text):
+async def telegram_send(text):
 
-    if not BOT_TOKEN:
-
-        logging.error(
-            "BOT_TOKEN bulunamadi!"
-        )
-
-        return
-
-    if not CHAT_ID:
-
-        logging.error(
-            "CHAT_ID bulunamadi!"
-        )
-
+    if not TELEGRAM_TOKEN or not CHAT_ID:
+        log.error("BOT_TOKEN veya CHAT_ID eksik.")
         return
 
     url = (
-        "https://api.telegram.org/"
-        f"bot{BOT_TOKEN}/sendMessage"
+        f"https://api.telegram.org/"
+        f"bot{TELEGRAM_TOKEN}/sendMessage"
     )
 
     payload = {
         "chat_id": CHAT_ID,
         "text": text,
-        "parse_mode": "HTML"
+        "parse_mode": "HTML",
+        "disable_web_page_preview": True,
     }
 
     try:
 
-        response = requests.post(
-            url,
-            json=payload,
+        async with httpx.AsyncClient(
             timeout=15
-        )
+        ) as client:
 
-        response.raise_for_status()
+            r = await client.post(
+                url,
+                json=payload,
+            )
 
-        logging.info(
-            "Telegram bildirimi gonderildi."
-        )
+            if r.status_code != 200:
+                log.error(
+                    "Telegram %s: %s",
+                    r.status_code,
+                    r.text[:300],
+                )
 
     except Exception as e:
 
-        logging.error(
-            f"Telegram hatasi: {e}"
+        log.error(
+            "Telegram bağlantı hatası: %s",
+            e,
         )
 
 
-async def telegram_message(text):
+# ============================================================
+# PROXY
+# ============================================================
 
-    await asyncio.to_thread(
-        send_telegram_message,
-        text
+def make_proxy():
+
+    if not PROXY_USERNAME or not PROXY_PASSWORD:
+        return None
+
+    user = quote(
+        PROXY_USERNAME,
+        safe="",
+    )
+
+    password = quote(
+        PROXY_PASSWORD,
+        safe="",
+    )
+
+    return httpx.Proxy(
+        "http://"
+        f"{user}:{password}"
+        "@p.webshare.io:80"
     )
 
 
 # ============================================================
-# TEK TIKTOK HESABINI IZLE
+# DISCOVERY
 # ============================================================
 
-async def monitor_stream(username):
+async def discover_live_streams():
 
-    host, port = STREAM_PROXIES[username]
+    if not API_KEY:
+        log.error(
+            "❌ Feed API anahtarı bulunamadı."
+        )
+        return []
 
-    while True:
+    # tik.tools feed endpoint'i.
+    url = "https://api.tik.tools/webcast/feed"
+
+    headers = {
+        "Authorization": f"Bearer {API_KEY}",
+        "Accept": "application/json",
+    }
+
+    params = {
+        "channel": "87",
+        "region": "TR",
+    }
+
+    try:
+
+        async with httpx.AsyncClient(
+            timeout=30
+        ) as client:
+
+            response = await client.get(
+                url,
+                headers=headers,
+                params=params,
+            )
+
+            log.info(
+                "🔎 LIVE FEED HTTP %s",
+                response.status_code,
+            )
+
+            if response.status_code != 200:
+
+                log.error(
+                    "Feed hatası: %s",
+                    response.text[:500],
+                )
+
+                return []
+
+            data = response.json()
+
+    except Exception as e:
+
+        log.error(
+            "Feed bağlantı hatası: %s",
+            e,
+        )
+
+        return []
+
+    rooms = []
+
+    # API cevabının olası yapıları.
+    candidates = []
+
+    if isinstance(data, list):
+        candidates = data
+
+    elif isinstance(data, dict):
+
+        root = data.get("data", data)
+
+        if isinstance(root, dict):
+
+            for key in (
+                "rooms",
+                "items",
+                "results",
+                "lives",
+            ):
+
+                value = root.get(key)
+
+                if isinstance(value, list):
+                    candidates = value
+                    break
+
+        elif isinstance(root, list):
+            candidates = root
+
+    for item in candidates:
+
+        if not isinstance(item, dict):
+            continue
+
+        owner = item.get("owner") or {}
+
+        username = (
+            owner.get("display_id")
+            or item.get("display_id")
+            or item.get("unique_id")
+            or item.get("username")
+        )
+
+        room_id = (
+            item.get("id_str")
+            or item.get("room_id")
+            or item.get("roomId")
+        )
+
+        if not username:
+            continue
+
+        username = str(
+            username
+        ).lstrip("@").strip()
+
+        if not username:
+            continue
+
+        rooms.append(
+            {
+                "username": username,
+                "room_id": str(room_id)
+                if room_id
+                else None,
+                "title": str(
+                    item.get("title") or ""
+                ),
+                "viewers": item.get(
+                    "user_count",
+                    item.get(
+                        "viewer_count",
+                        0,
+                    ),
+                ),
+            }
+        )
+
+    # Aynı kullanıcıyı tekilleştir.
+    unique = {}
+
+    for room in rooms:
+        unique[
+            room["username"].lower()
+        ] = room
+
+    result = list(unique.values())
+
+    log.info(
+        "📡 FEED %s canlı yayın buldu.",
+        len(result),
+    )
+
+    return result
+
+
+# ============================================================
+# HAZİNE
+# ============================================================
+
+async def handle_envelope(
+    username,
+    event,
+):
+
+    try:
+
+        info = getattr(
+            event,
+            "envelope_info",
+            None,
+        )
+
+        if info is None:
+            log.warning(
+                "🎁 Envelope geldi fakat bilgi yok: @%s",
+                username,
+            )
+            return
+
+        business_type = getattr(
+            info,
+            "business_type",
+            None,
+        )
+
+        diamonds = getattr(
+            info,
+            "diamond_count",
+            0,
+        )
+
+        people = getattr(
+            info,
+            "people_count",
+            0,
+        )
+
+        sender = getattr(
+            info,
+            "send_user_name",
+            "",
+        )
+
+        envelope_id = getattr(
+            info,
+            "envelope_id",
+            "",
+        )
+
+        log.warning(
+            "🎁🎁 HAZİNE BULUNDU | "
+            "@%s | type=%s | diamonds=%s | "
+            "people=%s | sender=%s",
+            username,
+            business_type,
+            diamonds,
+            people,
+            sender,
+        )
+
+        safe_username = html.escape(
+            username
+        )
+
+        safe_sender = html.escape(
+            str(sender)
+        )
+
+        message = (
+            "🎁 <b>HAZİNE BULUNDU!</b>\n\n"
+            f"📺 @{safe_username}\n"
+            f"💎 Diamond: {diamonds}\n"
+            f"👥 Kişi: {people}\n"
+            f"👤 Gönderen: {safe_sender}\n"
+            f"🔢 BusinessType: {business_type}\n"
+            f"🆔 {envelope_id}"
+        )
+
+        await telegram_send(
+            message
+        )
+
+    except Exception as e:
+
+        log.exception(
+            "Envelope hatası @%s: %s",
+            username,
+            e,
+        )
+
+
+# ============================================================
+# LIVE BAĞLANTISI
+# ============================================================
+
+async def watch_room(
+    room,
+    semaphore,
+):
+
+    username = room["username"]
+    room_id = room.get("room_id")
+
+    async with semaphore:
 
         client = None
 
         try:
 
-            logging.info(
-                "========================================"
-            )
+            proxy = make_proxy()
 
-            logging.info(
-                f"@{username} baglaniyor..."
-            )
+            kwargs = {
+                "unique_id": username,
+            }
 
-            logging.info(
-                f"Proxy: {host}:{port}"
-            )
+            if proxy:
 
-            proxy = create_proxy(
-                host,
-                port
-            )
-
-            if proxy is None:
-
-                logging.error(
-                    f"@{username} proxy "
-                    f"olusturulamadi."
-                )
-
-                await asyncio.sleep(30)
-                continue
-
-
-            # ------------------------------------------------
-            # TikTokLive Client
-            # ------------------------------------------------
+                kwargs["web_proxy"] = proxy
+                kwargs["ws_proxy"] = proxy
 
             client = TikTokLiveClient(
-                unique_id=username,
-                web_proxy=proxy,
-                ws_proxy=proxy
+                **kwargs
             )
-
-
-            # ------------------------------------------------
-            # CONNECT
-            # ------------------------------------------------
 
             @client.on(ConnectEvent)
-            async def on_connect(
-                event: ConnectEvent
-            ):
+            async def on_connect(event):
 
-                logging.info(
-                    f"✅ YAYINA BAGLANDI: "
-                    f"@{username}"
+                log.info(
+                    "✅ BAĞLANDI | @%s | ROOM=%s",
+                    username,
+                    client.room_id,
                 )
 
+            @client.on(DisconnectEvent)
+            async def on_disconnect(event):
 
-            # ------------------------------------------------
-            # ENVELOPE
-            # ------------------------------------------------
+                log.info(
+                    "⚠️ AYRILDI | @%s",
+                    username,
+                )
 
             @client.on(EnvelopeEvent)
-            async def on_envelope(
-                event: EnvelopeEvent
-            ):
+            async def on_envelope(event):
 
-                try:
-
-                    diamonds = getattr(
-                        event,
-                        "diamonds",
-                        0
-                    )
-
-                    if not diamonds:
-
-                        diamonds = getattr(
-                            event,
-                            "coins",
-                            0
-                        )
-
-                    diamonds = diamonds or 0
-
-                    logging.info(
-                        f"🎁 ENVELOPE: "
-                        f"@{username} "
-                        f"diamonds={diamonds}"
-                    )
-
-                    if diamonds < MIN_DIAMONDS:
-                        return
-
-
-                    message = (
-                        "🎁 <b>"
-                        "TREASURE BOX / GOODY BAG"
-                        "</b>\n\n"
-
-                        f"👤 <b>Yayıncı:</b> "
-                        f"@{username}\n"
-
-                        f"💎 <b>Elmas:</b> "
-                        f"{diamonds}\n"
-
-                        f"⚡ <a href="
-                        f"'https://www.tiktok.com/"
-                        f"@{username}/live'>"
-                        f"YAYINA GİT"
-                        f"</a>"
-                    )
-
-                    await telegram_message(
-                        message
-                    )
-
-                    logging.info(
-                        f"🚨 KUTU BULUNDU: "
-                        f"@{username} "
-                        f"({diamonds})"
-                    )
-
-                except Exception as e:
-
-                    logging.exception(
-                        f"Envelope hatasi "
-                        f"@{username}: {e}"
-                    )
-
-
-            # ------------------------------------------------
-            # START
-            # ------------------------------------------------
-
-            logging.info(
-                f"TikTokLive baslatiliyor: "
-                f"@{username}"
-            )
-
-            await client.start()
-
-            logging.warning(
-                f"@{username} baglantisi sona erdi."
-            )
-
-
-        except Exception as e:
-
-            error = str(e)
-
-            if "407" in error:
-
-                logging.error(
-                    f"❌ 407 PROXY AUTH: "
-                    f"@{username} "
-                    f"-> {host}:{port}"
+                await handle_envelope(
+                    username,
+                    event,
                 )
 
-                logging.error(
-                    "Webshare proxy kimlik "
-                    "dogrulamasi reddedildi."
+            # Feed'den room ID geldiyse
+            # mümkün olduğunca doğrudan odaya bağlan.
+            if room_id:
+
+                task = await client.start(
+                    room_id=int(room_id),
+                    fetch_live_check=False,
                 )
 
-            elif "403" in error:
-
-                logging.error(
-                    f"❌ 403 TIKTOK: "
-                    f"@{username}"
-                )
+                await task
 
             else:
 
-                logging.error(
-                    f"❌ BAGLANTI HATASI: "
-                    f"@{username}: {e}"
-                )
+                await client.connect()
 
+        except UserOfflineError:
+
+            log.info(
+                "⏸️ @%s artık LIVE değil.",
+                username,
+            )
+
+        except Exception as e:
+
+            log.error(
+                "❌ @%s: %s",
+                username,
+                str(e)[:500],
+            )
 
         finally:
 
             try:
 
-                if client:
+                if client and client.connected:
                     await client.disconnect()
 
             except Exception:
                 pass
 
 
-        # ------------------------------------------------
-        # RECONNECT
-        # ------------------------------------------------
+# ============================================================
+# GENEL TARAMA
+# ============================================================
 
-        logging.warning(
-            f"@{username} 30 saniye sonra "
-            f"yeniden denenecek..."
+async def global_scanner():
+
+    semaphore = asyncio.Semaphore(
+        MAX_CONNECTIONS
+    )
+
+    active = set()
+
+    log.info(
+        "🚀 GENEL LIVE TARAMA BAŞLADI"
+    )
+
+    while True:
+
+        try:
+
+            rooms = (
+                await discover_live_streams()
+            )
+
+            new_rooms = []
+
+            for room in rooms:
+
+                key = (
+                    room["username"].lower()
+                )
+
+                if key in active:
+                    continue
+
+                active.add(key)
+                new_rooms.append(room)
+
+            if new_rooms:
+
+                log.info(
+                    "🆕 %s yeni LIVE bulundu.",
+                    len(new_rooms),
+                )
+
+                for room in new_rooms:
+
+                    log.info(
+                        "➡️ @%s | viewers=%s",
+                        room["username"],
+                        room["viewers"],
+                    )
+
+                    asyncio.create_task(
+                        watch_and_release(
+                            room,
+                            semaphore,
+                            active,
+                        )
+                    )
+
+            else:
+
+                log.info(
+                    "ℹ️ Yeni yayın bulunmadı."
+                )
+
+        except Exception as e:
+
+            log.exception(
+                "Genel tarama hatası: %s",
+                e,
+            )
+
+        await asyncio.sleep(
+            DISCOVERY_INTERVAL
         )
 
-        await asyncio.sleep(30)
+
+async def watch_and_release(
+    room,
+    semaphore,
+    active,
+):
+
+    key = room[
+        "username"
+    ].lower()
+
+    try:
+
+        await watch_room(
+            room,
+            semaphore,
+        )
+
+    finally:
+
+        active.discard(
+            key
+        )
+
+
+# ============================================================
+# RENDER HEALTH SERVER
+# ============================================================
+
+class Handler(
+    BaseHTTPRequestHandler
+):
+
+    def do_GET(self):
+
+        self.send_response(200)
+
+        self.send_header(
+            "Content-Type",
+            "text/plain; charset=utf-8",
+        )
+
+        self.end_headers()
+
+        self.wfile.write(
+            b"TreasureAlert GLOBAL SCANNER OK"
+        )
+
+    def log_message(
+        self,
+        *args,
+    ):
+        pass
+
+
+def start_server():
+
+    port = int(
+        os.getenv(
+            "PORT",
+            "10000",
+        )
+    )
+
+    server = HTTPServer(
+        ("0.0.0.0", port),
+        Handler,
+    )
+
+    log.info(
+        "🌐 Render server PORT=%s",
+        port,
+    )
+
+    server.serve_forever()
 
 
 # ============================================================
 # MAIN
 # ============================================================
 
-async def main():
-
-    logging.info(
-        "========================================"
-    )
-
-    logging.info(
-        "🚀 TikTok Live Tarama Botu BASLATILDI"
-    )
-
-    logging.info(
-        "3 hesap / 3 ayri Webshare proxy"
-    )
-
-    logging.info(
-        "========================================"
-    )
-
-
-    # --------------------------------------------------------
-    # ENV KONTROL
-    # --------------------------------------------------------
-
-    logging.info(
-        f"BOT_TOKEN: "
-        f"{'OK' if BOT_TOKEN else 'YOK'}"
-    )
-
-    logging.info(
-        f"CHAT_ID: "
-        f"{'OK' if CHAT_ID else 'YOK'}"
-    )
-
-    logging.info(
-        f"PROXY_USERNAME: "
-        f"{'OK' if PROXY_USERNAME else 'YOK'}"
-    )
-
-    logging.info(
-        f"PROXY_PASSWORD: "
-        f"{'OK' if PROXY_PASSWORD else 'YOK'}"
-    )
-
-
-    # --------------------------------------------------------
-    # PROXY LISTESI
-    # --------------------------------------------------------
-
-    for username, (host, port) in STREAM_PROXIES.items():
-
-        logging.info(
-            f"@{username} "
-            f"-> {host}:{port}"
-        )
-
-
-    # --------------------------------------------------------
-    # 3 HESABI AYNI ANDA BASLAT
-    # --------------------------------------------------------
-
-    tasks = []
-
-    for username in STREAM_PROXIES:
-
-        task = asyncio.create_task(
-            monitor_stream(username)
-        )
-
-        tasks.append(task)
-
-
-    await asyncio.gather(
-        *tasks
-    )
-
-
-# ============================================================
-# START
-# ============================================================
-
 if __name__ == "__main__":
 
     threading.Thread(
-        target=run_web_server,
-        daemon=True
+        target=start_server,
+        daemon=True,
     ).start()
 
-    try:
-
-        asyncio.run(
-            main()
-        )
-
-    except KeyboardInterrupt:
-
-        logging.info(
-            "Bot durduruldu."
-        )
-
-    except Exception as e:
-
-        logging.exception(
-            f"ANA PROGRAM HATASI: {e}"
-        )
+    asyncio.run(
+        global_scanner()
+    )
