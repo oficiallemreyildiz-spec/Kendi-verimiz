@@ -1,5 +1,6 @@
 import os
 import re
+import time
 import asyncio
 import threading
 from http.server import HTTPServer, BaseHTTPRequestHandler
@@ -12,7 +13,7 @@ API_HASH = "737566711ac17fecd1ebeab1e2123773"
 
 STRING_SESSION = os.getenv("STRING_SESSION")
 BOT_TOKEN = os.getenv("BOT_TOKEN")
-TARGET_CHAT_ID = -1003999489709  # Bildirimlerin düşeceği grubun
+TARGET_CHAT_ID = -1003999489709
 
 SOURCE_CHATS = [
     -1004427105311,
@@ -38,30 +39,56 @@ def start_server():
 
 def send_alert(msg):
     if not BOT_TOKEN:
-        print("[HATA] BOT_TOKEN eksik!")
         return
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
     payload = {
         "chat_id": TARGET_CHAT_ID,
         "text": msg,
-        "disable_web_page_preview": False
+        "disable_web_page_preview": True
     }
     try:
         r = requests.post(url, json=payload, timeout=5)
         res = r.json()
         if not res.get("ok"):
-            print(f"[GÖNDERME HATASI]: {res.get('description')}")
+            err = res.get("description", "")
+            print(f"[GÖNDERME HATASI]: {err}")
+            # Rate limit yakalanırsa bekle
+            if "retry after" in err:
+                retry_sec = int(re.search(r'\d+', err).group()) if re.search(r'\d+', err) else 5
+                time.sleep(retry_sec + 1)
         else:
-            print("[BAŞARILI] Bildirim grubuna iletildi!")
+            print("[BAŞARILI] Temiz bildirim iletildi.")
     except Exception as e:
         print(f"[İstek Hatası]: {e}")
 
-def extract_tiktok_username(text):
-    """## Txxxx> kullanici_adi formatından kullanıcı adını çeker"""
-    match = re.search(r'>\s*([a-zA-Z0-9_.-]+)', text)
-    if match:
-        return match.group(1).strip()
-    return None
+def parse_tiktok_message(text, chat_title):
+    # Kullanıcı adını çek: ## Txxxxx> username
+    match = re.search(r'##\s*[^>\n]+>\s*([a-zA-Z0-9_.-]+)', text)
+    if not match:
+        # Alternatif eşleşme: sadece > sonrasındaki ilk kelime
+        match = re.search(r'>\s*([a-zA-Z0-9_.-]+)', text)
+    
+    username = match.group(1).strip() if match else None
+
+    # Mesajdan dichvu321 ve çöp link satırlarını temizle
+    lines = text.split('\n')
+    clean_lines = []
+    for line in lines:
+        if "dichvu321.com" in line or line.strip() == ">" or line.strip() == "=":
+            continue
+        clean_lines.append(line)
+    
+    body = "\n".join(clean_lines).strip()
+
+    if username:
+        live_link = f"https://www.tiktok.com/@{username}/live"
+        return (
+            f"🚨 YENİ SANDIK!\n"
+            f"Kaynak: {chat_title}\n\n"
+            f"{body}\n\n"
+            f"🔗 CANLI YAYIN LİNKİ:\n{live_link}"
+        )
+    return f"🚨 YENİ SANDIK!\nKaynak: {chat_title}\n\n{body}"
 
 client = TelegramClient(StringSession(STRING_SESSION), API_ID, API_HASH)
 
@@ -71,26 +98,9 @@ async def message_listener(event):
     chat_title = getattr(chat, 'title', f"Grup ({event.chat_id})")
     text = event.raw_text or ""
 
-    # Kullanıcı adını yakala
-    username = extract_tiktok_username(text)
-    
-    # Eski dichvu321 link satırını mesajdan temizle
-    clean_text = re.sub(r'>\s*https?://live\.dichvu321\.com[^\s]+', '', text).strip()
-
-    if username:
-        tiktok_live_url = f"https://www.tiktok.com/@{username}/live"
-        alert_msg = (
-            f"🚨 YENİ SANDIK!\n"
-            f"Kaynak: {chat_title}\n\n"
-            f"{clean_text}\n\n"
-            f"🔗 CANLI YAYIN LİNKİ:\n{tiktok_live_url}"
-        )
-    else:
-        # Kullanıcı adı formatı farklıysa orijinal hali kalsın
-        alert_msg = f"🚨 YENİ SANDIK!\nKaynak: {chat_title}\n\n{text}"
-
-    print(f"\n[YENİ VERİ] Kaynak: {chat_title} | Yayıncı: {username or 'Bilinmiyor'}")
-    send_alert(alert_msg)
+    formatted_msg = parse_tiktok_message(text, chat_title)
+    send_alert(formatted_msg)
+    await asyncio.sleep(1.2)  # Telegram limitine takılmamak için hafif bekleme
 
 async def main():
     print("=== 5 Kaynak Grup Dinleniyor ===")
