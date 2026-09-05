@@ -1,3 +1,2 @@
-TikTokLive
-requests
 httpx
+websockets
