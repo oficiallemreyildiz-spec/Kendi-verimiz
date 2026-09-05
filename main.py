@@ -3,6 +3,7 @@ import re
 import time
 import asyncio
 import threading
+from urllib.parse import quote
 from http.server import HTTPServer, BaseHTTPRequestHandler
 import requests
 from telethon import TelegramClient, events
@@ -52,36 +53,38 @@ def send_alert(msg):
         if not res.get("ok"):
             err = res.get("description", "")
             print(f"[GÖNDERME HATASI]: {err}")
-            # Rate limit yakalanırsa bekle
             if "retry after" in err:
-                retry_sec = int(re.search(r'\d+', err).group()) if re.search(r'\d+', err) else 5
-                time.sleep(retry_sec + 1)
+                sec = int(re.search(r'\d+', err).group()) if re.search(r'\d+', err) else 5
+                time.sleep(sec + 1)
         else:
-            print("[BAŞARILI] Temiz bildirim iletildi.")
+            print("[BAŞARILI] Linkli bildirim iletildi!")
     except Exception as e:
         print(f"[İstek Hatası]: {e}")
 
 def parse_tiktok_message(text, chat_title):
-    # Kullanıcı adını çek: ## Txxxxx> username
-    match = re.search(r'##\s*[^>\n]+>\s*([a-zA-Z0-9_.-]+)', text)
-    if not match:
-        # Alternatif eşleşme: sadece > sonrasındaki ilk kelime
-        match = re.search(r'>\s*([a-zA-Z0-9_.-]+)', text)
-    
-    username = match.group(1).strip() if match else None
-
-    # Mesajdan dichvu321 ve çöp link satırlarını temizle
-    lines = text.split('\n')
+    username = None
     clean_lines = []
-    for line in lines:
-        if "dichvu321.com" in line or line.strip() == ">" or line.strip() == "=":
+
+    for line in text.splitlines():
+        # ## T12345> kullanıcıadı satırını yakala (Arapça, sembol vs. hepsini kapsar)
+        if "##" in line and ">" in line:
+            parts = line.split(">", 1)
+            if len(parts) > 1:
+                raw_user = parts[1].strip()
+                if raw_user:
+                    username = raw_user
+
+        # Çöp link satırlarını temizle
+        if "dichvu321" in line or line.strip() in [">", "=", "-"]:
             continue
         clean_lines.append(line)
-    
+
     body = "\n".join(clean_lines).strip()
 
     if username:
-        live_link = f"https://www.tiktok.com/@{username}/live"
+        # Arapça veya özel karakterli isimleri güvenli URL formatına çevirir
+        encoded_user = quote(username)
+        live_link = f"https://www.tiktok.com/@{encoded_user}/live"
         return (
             f"🚨 YENİ SANDIK!\n"
             f"Kaynak: {chat_title}\n\n"
@@ -100,7 +103,7 @@ async def message_listener(event):
 
     formatted_msg = parse_tiktok_message(text, chat_title)
     send_alert(formatted_msg)
-    await asyncio.sleep(1.2)  # Telegram limitine takılmamak için hafif bekleme
+    await asyncio.sleep(1.2)
 
 async def main():
     print("=== 5 Kaynak Grup Dinleniyor ===")
