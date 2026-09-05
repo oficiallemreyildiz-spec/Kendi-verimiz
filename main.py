@@ -1,23 +1,36 @@
 import os
 import asyncio
 import logging
-import traceback
+import threading
+from http.server import HTTPServer, BaseHTTPRequestHandler
+
+# Render port hatasını (Application exited early) önlemek için mini web sunucusu
+class SimpleHandler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200)
+        self.end_headers()
+        self.wfile.write(b"TikTok Bot is running!")
+    def log_message(self, format, *args):
+        return
+
+def run_web_server():
+    port = int(os.getenv("PORT", 10000))
+    server = HTTPServer(('0.0.0.0', port), SimpleHandler)
+    server.serve_forever()
+
+# Web sunucusunu arka planda başlat
+threading.Thread(target=run_web_server, daemon=True).start()
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 
-try:
-    import requests
-    PROXY_URL = os.getenv("PROXY_URL")
-    if PROXY_URL:
-        os.environ["HTTP_PROXY"] = PROXY_URL
-        os.environ["HTTPS_PROXY"] = PROXY_URL
+import requests
+PROXY_URL = os.getenv("PROXY_URL")
+if PROXY_URL:
+    os.environ["HTTP_PROXY"] = PROXY_URL
+    os.environ["HTTPS_PROXY"] = PROXY_URL
 
-    from TikTokLive import TikTokLiveClient
-    from TikTokLive.events import ConnectEvent, EnvelopeEvent
-except Exception as e:
-    logging.critical(f"Kritik Başlangıç Hatası: {e}")
-    traceback.print_exc()
-    exit(1)
+from TikTokLive import TikTokLiveClient
+from TikTokLive.events import ConnectEvent, EnvelopeEvent
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 CHAT_ID = os.getenv("CHAT_ID")
@@ -70,8 +83,4 @@ async def main():
     await asyncio.gather(*tasks)
 
 if __name__ == "__main__":
-    try:
-        asyncio.run(main())
-    except Exception as e:
-        logging.critical(f"Çalışma zamanı kritik hatası: {e}")
-        traceback.print_exc()
+    asyncio.run(main())
