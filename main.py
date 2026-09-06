@@ -2,6 +2,7 @@ import os
 import re
 import asyncio
 import threading
+from urllib.parse import quote
 from http.server import HTTPServer, BaseHTTPRequestHandler
 import requests
 from telethon import TelegramClient, events
@@ -49,15 +50,18 @@ def send_alert(msg):
     except:
         pass
 
+def get_username(text):
+    for line in text.splitlines():
+        if "##" in line:
+            cleaned = re.sub(r'##\s*\S+', '', line).strip()
+            cleaned = re.sub(r'^[\s>›:|-]+', '', cleaned).strip()
+            if cleaned:
+                return cleaned
+    return None
+
 def parse_tiktok_message(text, chat_title):
-    username = None
+    username = get_username(text)
     
-    # İsmi yakalamak için en basit yöntem (ister > ister › olsun yakalar)
-    match = re.search(r'##.*?[>›]\s*([^\s]+)', text)
-    if match:
-        username = match.group(1).strip()
-    
-    # Orijinal mesajdaki çöp kısımları temizle
     clean_lines = []
     for line in text.splitlines():
         if any(bad in line for bad in ["dichvu321", "junb.io.vn", "box-countdown", "http"]):
@@ -67,13 +71,13 @@ def parse_tiktok_message(text, chat_title):
         clean_lines.append(line)
     
     body = "\n".join(clean_lines).strip()
+    msg = f"🚨 YENİ SANDIK!\nKaynak: {chat_title}\n\n{body}\n\n"
     
-    # Senin tam olarak istediğin saf link yapısı
     if username:
-        link = f"https://www.tiktok.com/@{username}/live"
-        msg = f"🚨 YENİ SANDIK!\nKaynak: {chat_title}\n\n{body}\n\n🔗 {link}"
-    else:
-        msg = f"🚨 YENİ SANDIK!\nKaynak: {chat_title}\n\n{body}"
+        # Sadece çalışan alt tiresiz linki bırakıyoruz
+        clean_user = username.replace("_", "")
+        safe_clean = quote(clean_user)
+        msg += f"🔗 DİREKT LİNK:\nhttps://www.tiktok.com/@{safe_clean}/live"
         
     return msg
 
@@ -89,7 +93,7 @@ async def message_listener(event):
     send_alert(formatted_msg)
 
 async def main():
-    print("=== Saf Link Motoru Aktif ===")
+    print("=== Tek Linkli Sistem Aktif ===")
     await client.start()
     await client.run_until_disconnected()
 
