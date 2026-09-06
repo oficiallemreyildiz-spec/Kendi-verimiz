@@ -27,7 +27,6 @@ SOURCE_CHATS = [
     -1002583301445
 ]
 
-# Render üzerinde çalışan ve TikTok uygulamasını zorla odaya sokan köprü
 class RequestHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         parsed_path = urlparse(self.path)
@@ -41,25 +40,31 @@ class RequestHandler(BaseHTTPRequestHandler):
             <head>
                 <meta charset="utf-8">
                 <meta name="viewport" content="width=device-width, initial-scale=1">
-                <title>TikTok'a Geçiliyor...</title>
+                <title>Odaya Dalınıyor...</title>
                 <script>
-                    // Doğrudan uygulamanın içindeki odayı tetikler
+                    // 1. Aşama: En güncel Android TikTok protokolü
                     setTimeout(function() {{
                         if("{room}" !== "") {{
-                            window.location.href = "snssdk1233://webcast/room/{room}";
+                            window.location.href = "snssdk1233://live?room_id={room}";
                         }}
                     }}, 100);
-                    // Uygulama açılmazsa veya hata verirse yedek web linkine gider
+                    
+                    // 2. Aşama: Uygulama uyanmazsa agresif Android Intent zorlaması
+                    setTimeout(function() {{
+                        if("{room}" !== "") {{
+                            window.location.href = "intent://live?room_id={room}#Intent;scheme=tiktok;package=com.zhiliaoapp.musically;end;";
+                        }}
+                    }}, 500);
+
+                    // 3. Aşama: Hiçbiri çalışmazsa standart web linki
                     setTimeout(function() {{
                         window.location.href = "https://www.tiktok.com/@{user}/live";
-                    }}, 2000);
+                    }}, 1500);
                 </script>
             </head>
-            <body style="background:#111; color:#fff; text-align:center; padding: 50px; font-family: sans-serif;">
-                <h2>🚀 TikTok Doğrudan Odaya Yönlendiriliyor...</h2>
-                <p style="color:#aaa;">Lütfen bekleyin...</p>
-                <br><br>
-                <a href="https://www.tiktok.com/@{user}/live" style="color:#00f2fe; text-decoration:none; font-size:18px; border:1px solid #00f2fe; padding:10px 20px; border-radius:5px;">Otomatik açılmazsa buraya tıklayın</a>
+            <body style="background:#000; color:#fff; text-align:center; padding: 50px; font-family: sans-serif;">
+                <h2>⚡ TikTok Odasına Zorla Giriliyor...</h2>
+                <p style="color:#666;">Eğer profilin açılırsa yayın çoktan kapanmıştır.</p>
             </body>
             </html>"""
             self.send_response(200)
@@ -95,12 +100,11 @@ def send_alert(msg):
         res = r.json()
         if not res.get("ok"):
             err = res.get("description", "")
-            print(f"[GÖNDERME HATASI]: {err}")
             if "retry after" in err:
                 sec = int(re.search(r'\d+', err).group()) if re.search(r'\d+', err) else 5
                 time.sleep(sec + 1)
-    except Exception as e:
-        print(f"[İstek Hatası]: {e}")
+    except Exception:
+        pass
 
 def extract_room_id(text):
     urls = re.findall(r'https?://[^\s]+', text)
@@ -111,13 +115,11 @@ def extract_room_id(text):
             p_val = qs.get('p', [None])[0]
             r_val = qs.get('r', [None])[0]
             
-            # Şifreli Oda ID'sini çözer
             if p_val:
                 p_val += "=" * ((4 - len(p_val) % 4) % 4)
                 decoded = base64.b64decode(p_val).decode('utf-8', errors='ignore').strip()
                 if decoded.isdigit():
                     return decoded
-            
             if r_val:
                 r_val += "=" * ((4 - len(r_val) % 4) % 4)
                 decoded = base64.b64decode(r_val).decode('utf-8', errors='ignore')
@@ -154,15 +156,15 @@ def parse_tiktok_message(text, chat_title):
     escaped_title = html.escape(chat_title)
     
     safe_user = quote(username) if username else ""
-    live_link = f"https://www.tiktok.com/@{safe_user}/live" if safe_user else ""
     
     msg = f"🚨 <b>YENİ SANDIK!</b>\nKaynak: <i>{escaped_title}</i>\n\n{escaped_body}\n\n"
     
     if room_id and safe_user:
         redirect_link = f"{APP_URL}/tiktok?room={room_id}&user={safe_user}"
-        msg += f"🔥 <a href='{redirect_link}'>DİREKT ODAYA GİR (Kısayol)</a>\n\n"
-        msg += f"🔗 <a href='{live_link}'>Alternatif Web Linki</a>"
+        msg += f"🔥 <a href='{redirect_link}'>DİREKT ODAYA GİR (Gizli Link)</a>\n\n"
+        msg += f"👤 <code>{username}</code> (Kopyalamak için tıkla)"
     elif safe_user:
+        live_link = f"https://www.tiktok.com/@{safe_user}/live"
         msg += f"🔗 <a href='{live_link}'>TIKLA VE YAYINA GİT</a>"
     
     return msg
@@ -180,7 +182,7 @@ async def message_listener(event):
     await asyncio.sleep(1.2)
 
 async def main():
-    print("=== 5 Kaynak Grup Dinleniyor (DeepLink Aktif) ===")
+    print("=== DeepLink Motoru Aktif ===")
     await client.start()
     await client.run_until_disconnected()
 
