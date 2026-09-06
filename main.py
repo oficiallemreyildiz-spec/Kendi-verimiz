@@ -2,7 +2,6 @@ import os
 import re
 import asyncio
 import threading
-from urllib.parse import quote
 from http.server import HTTPServer, BaseHTTPRequestHandler
 import requests
 from telethon import TelegramClient, events
@@ -50,18 +49,15 @@ def send_alert(msg):
     except:
         pass
 
-def get_username(text):
-    for line in text.splitlines():
-        if "##" in line:
-            cleaned = re.sub(r'##\s*\S+', '', line).strip()
-            cleaned = re.sub(r'^[\s>›:|-]+', '', cleaned).strip()
-            if cleaned:
-                return cleaned
-    return None
-
 def parse_tiktok_message(text, chat_title):
-    username = get_username(text)
+    username = None
     
+    # İsmi yakalamak için en basit yöntem (ister > ister › olsun yakalar)
+    match = re.search(r'##.*?[>›]\s*([^\s]+)', text)
+    if match:
+        username = match.group(1).strip()
+    
+    # Orijinal mesajdaki çöp kısımları temizle
     clean_lines = []
     for line in text.splitlines():
         if any(bad in line for bad in ["dichvu321", "junb.io.vn", "box-countdown", "http"]):
@@ -71,19 +67,13 @@ def parse_tiktok_message(text, chat_title):
         clean_lines.append(line)
     
     body = "\n".join(clean_lines).strip()
-    msg = f"🚨 YENİ SANDIK!\nKaynak: {chat_title}\n\n{body}\n\n"
     
+    # Senin tam olarak istediğin saf link yapısı
     if username:
-        safe_original = quote(username)
-        msg += f"🔗 1. İHTİMAL (Orijinal İsim):\nhttps://www.tiktok.com/@{safe_original}/live\n\n"
-        
-        # Eğer isimde alt tire varsa, Vietnamlılar bozmuş demektir. Temizleyip ikinci linki veriyoruz.
-        if "_" in username:
-            clean_user = username.replace("_", "")
-            safe_clean = quote(clean_user)
-            msg += f"🔗 2. İHTİMAL (Alt Tiresiz Gerçek İsim):\nhttps://www.tiktok.com/@{safe_clean}/live\n\n"
-            
-        msg += f"🔍 İKİSİ DE AÇMAZSA (TikTok'ta Ara):\nhttps://www.tiktok.com/search/user?q={safe_original}"
+        link = f"https://www.tiktok.com/@{username}/live"
+        msg = f"🚨 YENİ SANDIK!\nKaynak: {chat_title}\n\n{body}\n\n🔗 {link}"
+    else:
+        msg = f"🚨 YENİ SANDIK!\nKaynak: {chat_title}\n\n{body}"
         
     return msg
 
@@ -99,7 +89,7 @@ async def message_listener(event):
     send_alert(formatted_msg)
 
 async def main():
-    print("=== Kesin Çözüm: 3 İhtimalli Çıplak Link Sistemi Aktif ===")
+    print("=== Saf Link Motoru Aktif ===")
     await client.start()
     await client.run_until_disconnected()
 
