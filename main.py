@@ -3,7 +3,6 @@ import re
 import time
 import json
 import base64
-import html
 import asyncio
 import threading
 from urllib.parse import quote, urlparse, parse_qs
@@ -33,38 +32,23 @@ class RequestHandler(BaseHTTPRequestHandler):
         if parsed_path.path == '/tiktok':
             qs = parse_qs(parsed_path.query)
             room = qs.get('room', [''])[0]
-            user = qs.get('user', [''])[0]
             
             html_content = f"""<!DOCTYPE html>
             <html>
             <head>
                 <meta charset="utf-8">
                 <meta name="viewport" content="width=device-width, initial-scale=1">
-                <title>Odaya Dalınıyor...</title>
+                <title>Odaya Bağlanıyor</title>
                 <script>
-                    // 1. Aşama: En güncel Android TikTok protokolü
                     setTimeout(function() {{
                         if("{room}" !== "") {{
-                            window.location.href = "snssdk1233://live?room_id={room}";
+                            window.location.href = "intent://webcast/room/{room}#Intent;scheme=snssdk1233;package=com.zhiliaoapp.musically;end;";
                         }}
-                    }}, 100);
-                    
-                    // 2. Aşama: Uygulama uyanmazsa agresif Android Intent zorlaması
-                    setTimeout(function() {{
-                        if("{room}" !== "") {{
-                            window.location.href = "intent://live?room_id={room}#Intent;scheme=tiktok;package=com.zhiliaoapp.musically;end;";
-                        }}
-                    }}, 500);
-
-                    // 3. Aşama: Hiçbiri çalışmazsa standart web linki
-                    setTimeout(function() {{
-                        window.location.href = "https://www.tiktok.com/@{user}/live";
-                    }}, 1500);
+                    }}, 10);
                 </script>
             </head>
-            <body style="background:#000; color:#fff; text-align:center; padding: 50px; font-family: sans-serif;">
-                <h2>⚡ TikTok Odasına Zorla Giriliyor...</h2>
-                <p style="color:#666;">Eğer profilin açılırsa yayın çoktan kapanmıştır.</p>
+            <body style="background:#000; color:#fff; text-align:center; padding: 50px;">
+                <h2>⚡ Odaya Bağlanıyor...</h2>
             </body>
             </html>"""
             self.send_response(200)
@@ -75,7 +59,6 @@ class RequestHandler(BaseHTTPRequestHandler):
             self.send_response(200)
             self.end_headers()
             self.wfile.write(b"OK")
-    
     def do_HEAD(self):
         self.send_response(200)
         self.end_headers()
@@ -92,17 +75,12 @@ def send_alert(msg):
     payload = {
         "chat_id": TARGET_CHAT_ID,
         "text": msg,
-        "parse_mode": "HTML",
         "disable_web_page_preview": True
+        # HTML kaldırıldı, çıplak link uyarı vermeden açılacak
     }
     try:
         r = requests.post(url, json=payload, timeout=5)
-        res = r.json()
-        if not res.get("ok"):
-            err = res.get("description", "")
-            if "retry after" in err:
-                sec = int(re.search(r'\d+', err).group()) if re.search(r'\d+', err) else 5
-                time.sleep(sec + 1)
+        r.json()
     except Exception:
         pass
 
@@ -114,7 +92,6 @@ def extract_room_id(text):
             qs = parse_qs(parsed.query)
             p_val = qs.get('p', [None])[0]
             r_val = qs.get('r', [None])[0]
-            
             if p_val:
                 p_val += "=" * ((4 - len(p_val) % 4) % 4)
                 decoded = base64.b64decode(p_val).decode('utf-8', errors='ignore').strip()
@@ -152,21 +129,18 @@ def parse_tiktok_message(text, chat_title):
         clean_lines.append(line)
     
     body = "\n".join(clean_lines).strip()
-    escaped_body = html.escape(body)
-    escaped_title = html.escape(chat_title)
     
-    safe_user = quote(username) if username else ""
+    msg = f"🚨 YENİ SANDIK!\nKaynak: {chat_title}\n\n{body}\n\n"
     
-    msg = f"🚨 <b>YENİ SANDIK!</b>\nKaynak: <i>{escaped_title}</i>\n\n{escaped_body}\n\n"
+    if username:
+        # Vietnamlıların eklediği sahte '_' işaretlerini temizle
+        clean_user = username.replace("_", "")
+        safe_user = quote(clean_user)
+        msg += f"🔗 TİKTOK DİREKT LİNK (Uyarı Vermez):\nhttps://www.tiktok.com/@{safe_user}/live\n\n"
     
-    if room_id and safe_user:
-        redirect_link = f"{APP_URL}/tiktok?room={room_id}&user={safe_user}"
-        msg += f"🔥 <a href='{redirect_link}'>DİREKT ODAYA GİR (Gizli Link)</a>\n\n"
-        msg += f"👤 <code>{username}</code> (Kopyalamak için tıkla)"
-    elif safe_user:
-        live_link = f"https://www.tiktok.com/@{safe_user}/live"
-        msg += f"🔗 <a href='{live_link}'>TIKLA VE YAYINA GİT</a>"
-    
+    if room_id:
+        msg += f"🔥 ODA LİNKİ (Alternatif):\n{APP_URL}/tiktok?room={room_id}"
+        
     return msg
 
 client = TelegramClient(StringSession(STRING_SESSION), API_ID, API_HASH)
@@ -182,7 +156,7 @@ async def message_listener(event):
     await asyncio.sleep(1.2)
 
 async def main():
-    print("=== DeepLink Motoru Aktif ===")
+    print("=== Uyarı Vermeyen Çıplak Link Sistemi Aktif ===")
     await client.start()
     await client.run_until_disconnected()
 
