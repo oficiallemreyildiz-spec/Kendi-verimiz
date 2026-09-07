@@ -1,3 +1,10 @@
+import os
+import re
+import asyncio
+import threading
+from urllib.parse import quote
+from http.server import HTTPServer, BaseHTTPRequestHandler
+import aiohttp
 from telethon import TelegramClient, events
 
 from telethon.sessions import StringSession
@@ -18,11 +25,3 @@ SOURCE_CHATS = [
 ]
 
 # ---------------------------------------------------------------------------
-# Health-check server (Render port bağlaması için)
-# ---------------------------------------------------------------------------
-
-class HealthCheck(BaseHTTPRequestHandler):
-    def do_GET(self):
-        self.send_response(200)
-        self.end_headers()
-        self.wfile.write(b"OK")
