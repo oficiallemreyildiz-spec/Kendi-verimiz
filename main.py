@@ -71,7 +71,7 @@ async def sender_worker(session: aiohttp.ClientSession):
             payload = {
                 "chat_id": TARGET_CHAT_ID,
                 "text": msg,
-                "parse_mode": "HTML",  # HTML formatı aktif edildi
+                "parse_mode": "HTML",
                 "disable_web_page_preview": True,
             }
 
@@ -100,20 +100,21 @@ async def sender_worker(session: aiohttp.ClientSession):
             send_queue.task_done()
 
 # ---------------------------------------------------------------------------
-# Mesaj ayrıştırma (YENİ VE KESİN ÇÖZÜM)
+# Mesaj ayrıştırma (NİHAİ DÜZELTME)
 # ---------------------------------------------------------------------------
 
 def get_username(text: str):
     """
-    @ID> kullanici_adi formatını ve diğer formatları kusursuz çözer.
+    @T66066> s.yth.ai78_9 VEYA ## T19444> \n dayana_mo.rale.s18 formatlarını
+    ve aradaki alt satır (\n) boşluklarını %100 kusursuz çözer.
     """
-    # 1. Asıl formatı yakala (Örn: @T66066> s.yth.ai78_9)
-    match = re.search(r'@\w+>\s*([a-zA-Z0-9_.]+)', text)
+    # 1. Asıl formatı yakala (Örn: @T66066> isim veya ## T19444> \n isim)
+    match = re.search(r'(?:@|##)\s*[A-Za-z0-9_]+>\s*([a-zA-Z0-9_.]+)', text)
     if match: 
         return match.group(1)
         
-    # 2. Eskiden kalan ## formatı varsa
-    match = re.search(r'##\s*([a-zA-Z0-9_.]+)', text)
+    # 2. Eğer sadece > varsa
+    match = re.search(r'>\s*([a-zA-Z0-9_.]+)', text)
     if match: 
         return match.group(1)
         
@@ -125,18 +126,9 @@ def get_username(text: str):
     return None
 
 def build_tiktok_links(username: str) -> tuple[str, str]:
-    """
-    PC Parametreleri tamamen silindi. 
-    Tertemiz Evrensel Mobil Linkler üretir.
-    """
     safe_user = quote(username.strip(), safe="._")
-    
-    # 1. Direkt Canlı Yayın Linki
     live_link = f"https://www.tiktok.com/@{safe_user}/live"
-    
-    # 2. Profil Linki (Garanti uygulama açıcı yedek link)
     profile_link = f"https://www.tiktok.com/@{safe_user}"
-    
     return live_link, profile_link
 
 def parse_tiktok_message(text: str, chat_title: str) -> str:
@@ -147,8 +139,17 @@ def parse_tiktok_message(text: str, chat_title: str) -> str:
         # Çöp linkleri filtrele
         if any(bad in line for bad in ["dichvu321", "junb.io.vn", "box-countdown", "http"]):
             continue
-        # Gereksiz işaretleri filtrele
+            
+        # Gereksiz boşluk ve işaretleri filtrele
         if line.strip() in [">", "=", "-", "", "##"]:
+            continue
+            
+        # @T66066> veya ## T19444> gibi kafa karıştıran bot ID satırlarını gizle
+        if re.search(r'(?:@|##)\s*[A-Za-z0-9_]+>', line):
+            continue
+            
+        # Kullanıcının adının tek başına yazdığı satırı da gizle
+        if username and line.strip() == username:
             continue
             
         clean_lines.append(line)
