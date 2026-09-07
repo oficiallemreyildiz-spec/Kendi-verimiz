@@ -15,7 +15,7 @@ BOT_TOKEN = os.getenv("BOT_TOKEN")
 TARGET_CHAT_ID = -1003999489709
 
 SOURCE_CHATS = [
-    -1004421946217,  # Yeni eklenen kaynak kanal
+    -1004421946217,
     -1004427105311,
     -1003965749742,
     -1002223772922,
@@ -41,6 +41,7 @@ def start_server():
 
 async def send_alert(session, msg):
     if not BOT_TOKEN:
+        print("❌ HATA: BOT_TOKEN tanımlı değil!")
         return
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
     payload = {
@@ -49,10 +50,14 @@ async def send_alert(session, msg):
         "disable_web_page_preview": True
     }
     try:
-        async with session.post(url, json=payload, timeout=3) as res:
-            await res.read()
-    except Exception:
-        pass
+        async with session.post(url, json=payload, timeout=5) as res:
+            resp_data = await res.json()
+            if not resp_data.get("ok"):
+                print(f"❌ Telegram API Red Etti: {resp_data}")
+            else:
+                print("🚀 Mesaj başarıyla hedefe iletildi!")
+    except Exception as e:
+        print(f"❌ Telegram Gönderim Hatası: {e}")
 
 def get_username(text):
     for line in text.splitlines():
@@ -75,6 +80,11 @@ def parse_tiktok_message(text, chat_title):
         clean_lines.append(line)
     
     body = "\n".join(clean_lines).strip()
+    
+    # Filtre sonrası boş kalırsa ham metni kurtar
+    if not body and not username:
+        body = text.strip()
+
     msg = f"🚨 YENİ SANDIK!\nKaynak: {chat_title}\n\n{body}\n\n"
     
     if username:
@@ -89,21 +99,31 @@ http_session = None
 
 @client.on(events.NewMessage(chats=SOURCE_CHATS))
 async def message_listener(event):
-    chat = await event.get_chat()
-    chat_title = getattr(chat, 'title', f"Grup ({event.chat_id})")
+    print(f"\n📥 YAKALANDI! Kanal ID: {event.chat_id}")
     text = event.raw_text or ""
+    print(f"📄 Ham Metin: {text[:80]}...")
+
+    try:
+        chat = await event.get_chat()
+        chat_title = getattr(chat, 'title', f"Grup ({event.chat_id})")
+    except Exception:
+        chat_title = f"Kanal ({event.chat_id})"
 
     formatted_msg = parse_tiktok_message(text, chat_title)
+    
     if http_session:
         asyncio.create_task(send_alert(http_session, formatted_msg))
+    else:
+        print("⚠️ HTTP Session henüz hazır değil!")
 
 async def main():
     global http_session
-    print("=== VIP Kaynak Dinleyici Aktif ===")
+    print("=== VIP Kaynak Dinleyici Başlatılıyor... ===")
     connector = aiohttp.TCPConnector(limit=100)
     async with aiohttp.ClientSession(connector=connector) as session:
         http_session = session
         await client.start()
+        print("✅ Telegram Hesabı Bağlandı ve Kanalları Dinliyor!")
         await client.run_until_disconnected()
 
 if __name__ == "__main__":
