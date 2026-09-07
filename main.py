@@ -12,10 +12,12 @@ API_ID = 36135300
 API_HASH = "737566711ac17fecd1ebeab1e2123773"
 STRING_SESSION = os.getenv("STRING_SESSION")
 BOT_TOKEN = os.getenv("BOT_TOKEN")
-TARGET_CHAT_ID = -1003999489709
 
+# YENİ HEDEF GRUBUN (Mesajların yönlendirileceği yer)
+TARGET_CHAT_ID = -1004421946217
+
+# KAYNAK KANALLAR (Sitenin sandık bastığı kanallar)
 SOURCE_CHATS = [
-    -1004421946217,
     -1004427105311,
     -1003965749742,
     -1002223772922,
@@ -55,7 +57,7 @@ async def send_alert(session, msg):
             if not resp_data.get("ok"):
                 print(f"❌ Telegram API Red Etti: {resp_data}")
             else:
-                print("🚀 Mesaj başarıyla hedefe iletildi!")
+                print(f"🚀 Mesaj yeni hedefe iletildi: {TARGET_CHAT_ID}")
     except Exception as e:
         print(f"❌ Telegram Gönderim Hatası: {e}")
 
@@ -81,7 +83,6 @@ def parse_tiktok_message(text, chat_title):
     
     body = "\n".join(clean_lines).strip()
     
-    # Filtre sonrası boş kalırsa ham metni kurtar
     if not body and not username:
         body = text.strip()
 
@@ -99,9 +100,9 @@ http_session = None
 
 @client.on(events.NewMessage(chats=SOURCE_CHATS))
 async def message_listener(event):
-    print(f"\n📥 YAKALANDI! Kanal ID: {event.chat_id}")
+    print(f"\n📥 YAKALANDI! Kaynak ID: {event.chat_id}")
     text = event.raw_text or ""
-    print(f"📄 Ham Metin: {text[:80]}...")
+    print(f"📄 Metin: {text[:80]}...")
 
     try:
         chat = await event.get_chat()
@@ -123,7 +124,7 @@ async def main():
     async with aiohttp.ClientSession(connector=connector) as session:
         http_session = session
         await client.start()
-        print("✅ Telegram Hesabı Bağlandı ve Kanalları Dinliyor!")
+        print(f"✅ Dinleme aktif! Hedef Grup: {TARGET_CHAT_ID}")
         await client.run_until_disconnected()
 
 if __name__ == "__main__":
