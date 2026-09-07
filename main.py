@@ -6,6 +6,7 @@ from urllib.parse import quote
 from http.server import HTTPServer, BaseHTTPRequestHandler
 import aiohttp
 from telethon import TelegramClient, events
+
 from telethon.sessions import StringSession
 
 API_ID = int(os.getenv("API_ID", "36135300"))
@@ -23,7 +24,10 @@ SOURCE_CHATS = [
     -1002583301445,
 ]
 
+# ---------------------------------------------------------------------------
 # Health-check server (Render port bağlaması için)
+# ---------------------------------------------------------------------------
+
 class HealthCheck(BaseHTTPRequestHandler):
     def do_GET(self):
         self.send_response(200)
@@ -37,14 +41,22 @@ class HealthCheck(BaseHTTPRequestHandler):
     def log_message(self, *args):
         pass
 
+
 def start_server():
     port = int(os.getenv("PORT", 10000))
     server = HTTPServer(("0.0.0.0", port), HealthCheck)
     server.serve_forever()
 
+
+# ---------------------------------------------------------------------------
 # Gönderim kuyruğu: tek worker + rate-limit + 429 backoff
+# ---------------------------------------------------------------------------
+
 send_queue: "asyncio.Queue[str]" = asyncio.Queue()
+
+# Aynı hedef sohbete Telegram Bot API ~1 msg/sn öneriyor.
 MIN_INTERVAL = 1.0
+
 
 async def sender_worker(session: aiohttp.ClientSession):
     """Kuyruktaki mesajları sırayla, rate-limit'e uyarak gönderir."""
@@ -92,7 +104,11 @@ async def sender_worker(session: aiohttp.ClientSession):
         finally:
             send_queue.task_done()
 
+
+# ---------------------------------------------------------------------------
 # Mesaj ayrıştırma
+# ---------------------------------------------------------------------------
+
 def get_username(text: str):
     for line in text.splitlines():
         if "##" in line:
@@ -102,14 +118,22 @@ def get_username(text: str):
                 return cleaned
     return None
 
-def build_tiktok_link(username: str) -> str:
+
+def build_tiktok_links(username: str) -> tuple[str, str]:
     """
     TikTok kullanıcı adında _ ve . geçerli karakterlerdir, SİLİNMEMELİDİR.
     quote() zaten bunlara dokunmaz; sadece güvenlik için encode ediyoruz.
-    Universal link olduğu için hem tarayıcıda hem uygulamada direkt açılır.
+
+    /live linki resmi olarak dokümante edilmiş bir deep-link değil;
+    TikTok bazen doğrudan yayına değil profil/arama sayfasına düşürüyor.
+    Bu yüzden hem /live hem düz profil linkini birlikte veriyoruz —
+    biri açılmazsa kullanıcı diğerinden devam edebilir.
     """
-    safe_user = quote(username, safe="._~")
-    return f"https://www.tiktok.com/@{safe_user}/live"
+    safe_user = quote(username, safe="._-")
+    live_link = f"https://www.tiktok.com/@{safe_user}/live"
+    profile_link = f"https://www.tiktok.com/@{safe_user}"
+    return live_link, profile_link
+
 
 def parse_tiktok_message(text: str, chat_title: str) -> str:
     username = get_username(text)
@@ -129,20 +153,29 @@ def parse_tiktok_message(text: str, chat_title: str) -> str:
     msg = f"🚨 YENİ SANDIK!\nKaynak: {chat_title}\n\n{body}\n\n"
 
     if username:
-        msg += f"🔗 DİREKT LİNK:\n{build_tiktok_link(username)}"
+        live_link, profile_link = build_tiktok_links(username)
+        msg += (
+            f"🔴 CANLIYA GİT:\n{live_link}\n\n"
+            f"👤 Açılmazsa profil üzerinden:\n{profile_link}"
+        )
 
     return msg
 
+
+# ---------------------------------------------------------------------------
 # Telethon client
+# ---------------------------------------------------------------------------
+
 client = TelegramClient(
     StringSession(STRING_SESSION),
     API_ID,
     API_HASH,
-    connection_retries=None,  # sonsuz yeniden bağlanma denemesi
+    connection_retries=None,   # sonsuz yeniden bağlanma denemesi
     retry_delay=1,
     auto_reconnect=True,
     request_retries=5,
 )
+
 
 @client.on(events.NewMessage(chats=SOURCE_CHATS))
 async def message_listener(event):
@@ -159,6 +192,7 @@ async def message_listener(event):
     formatted_msg = parse_tiktok_message(text, chat_title)
     await send_queue.put(formatted_msg)
 
+
 async def main():
     print("=== VIP Kaynak Dinleyici Başlatılıyor... ===")
 
@@ -166,6 +200,7 @@ async def main():
     async with aiohttp.ClientSession(connector=connector) as session:
         worker_task = asyncio.create_task(sender_worker(session))
 
+        # catch_up=True: bağlantı kopukken gelen mesajları da yakalar.
         await client.start()
 
         # Kritik adım: entity/peer cache'ini önceden ısıt.
@@ -178,6 +213,7 @@ async def main():
             await client.run_until_disconnected()
         finally:
             worker_task.cancel()
+
 
 if __name__ == "__main__":
     threading.Thread(target=start_server, daemon=True).start()
