@@ -4,7 +4,7 @@ import asyncio
 import threading
 from urllib.parse import quote
 from http.server import HTTPServer, BaseHTTPRequestHandler
-import requests
+import aiohttp
 from telethon import TelegramClient, events
 from telethon.sessions import StringSession
 
@@ -15,6 +15,7 @@ BOT_TOKEN = os.getenv("BOT_TOKEN")
 TARGET_CHAT_ID = -1003999489709
 
 SOURCE_CHATS = [
+    -1004421946217,  # Yeni eklenen kaynak kanal
     -1004427105311,
     -1003965749742,
     -1002223772922,
@@ -30,13 +31,15 @@ class HealthCheck(BaseHTTPRequestHandler):
     def do_HEAD(self):
         self.send_response(200)
         self.end_headers()
+    def log_message(self, *args):
+        pass
 
 def start_server():
     port = int(os.getenv("PORT", 10000))
     server = HTTPServer(("0.0.0.0", port), HealthCheck)
     server.serve_forever()
 
-def send_alert(msg):
+async def send_alert(session, msg):
     if not BOT_TOKEN:
         return
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
@@ -46,8 +49,9 @@ def send_alert(msg):
         "disable_web_page_preview": True
     }
     try:
-        requests.post(url, json=payload, timeout=5)
-    except:
+        async with session.post(url, json=payload, timeout=3) as res:
+            await res.read()
+    except Exception:
         pass
 
 def get_username(text):
@@ -74,7 +78,6 @@ def parse_tiktok_message(text, chat_title):
     msg = f"🚨 YENİ SANDIK!\nKaynak: {chat_title}\n\n{body}\n\n"
     
     if username:
-        # Sadece çalışan alt tiresiz linki bırakıyoruz
         clean_user = username.replace("_", "")
         safe_clean = quote(clean_user)
         msg += f"🔗 DİREKT LİNK:\nhttps://www.tiktok.com/@{safe_clean}/live"
@@ -82,6 +85,7 @@ def parse_tiktok_message(text, chat_title):
     return msg
 
 client = TelegramClient(StringSession(STRING_SESSION), API_ID, API_HASH)
+http_session = None
 
 @client.on(events.NewMessage(chats=SOURCE_CHATS))
 async def message_listener(event):
@@ -90,12 +94,17 @@ async def message_listener(event):
     text = event.raw_text or ""
 
     formatted_msg = parse_tiktok_message(text, chat_title)
-    send_alert(formatted_msg)
+    if http_session:
+        asyncio.create_task(send_alert(http_session, formatted_msg))
 
 async def main():
-    print("=== Tek Linkli Sistem Aktif ===")
-    await client.start()
-    await client.run_until_disconnected()
+    global http_session
+    print("=== VIP Kaynak Dinleyici Aktif ===")
+    connector = aiohttp.TCPConnector(limit=100)
+    async with aiohttp.ClientSession(connector=connector) as session:
+        http_session = session
+        await client.start()
+        await client.run_until_disconnected()
 
 if __name__ == "__main__":
     threading.Thread(target=start_server, daemon=True).start()
