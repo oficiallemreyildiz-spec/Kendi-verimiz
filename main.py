@@ -158,8 +158,10 @@ def parse_tiktok_message(text: str, chat_title: str) -> str:
     if username:
         live_link, profile_link = build_tiktok_links(username)
         msg += (
-            f"🔴 CANLIYA GİT:\n{live_link}\n\n"
-            f"👤 Açılmazsa profil üzerinden:\n{profile_link}"
+            f"👤 PROFİL (güvenilir):\n{profile_link}\n"
+            f"↳ Canlıysa üstte kırmızı rozete dokun\n\n"
+            f"🔴 DİREKT CANLI DENE:\n{live_link}\n"
+            f"↳ Bazen açılmayıp başka yayına düşebilir"
         )
 
     return msg
