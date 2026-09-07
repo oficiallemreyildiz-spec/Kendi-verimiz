@@ -119,23 +119,21 @@ def get_username(text: str):
     return None
 
 
-def build_tiktok_links(username: str) -> tuple[str, str]:
+def build_tiktok_link(username: str) -> tuple[str, bool]:
     """
-    Kaynak kanal, bot/algoritma tespitinden kaçınmak için kullanıcı adını
-    nokta ile obfuske ediyor (ör. "da.n.iel.leal1743" -> gerçek hesap
-    "danielleal1743"). TikTok araması noktalamayı yok sayar, bu yüzden
-    arama sonucunda doğru hesap bulunuyor; ama /live veya profil URL'i
-    tam eşleşme istediği için noktalı haliyle 404/"bulunamadı" davranışına
-    düşüyor. Bu yüzden linki oluştururken noktaları temizliyoruz.
+    Kaynak kanal kullanıcı adını nokta ile obfuske ediyor
+    (ör. "da.n.iel.leal1743" -> gerçek hesap "danielleal1743").
+    Bu yüzden linki oluştururken noktaları temizliyoruz.
 
-    Alt tire (_) ise gerçek TikTok kullanıcı adlarında normal bir karakter
-    olduğu için DOKUNULMUYOR.
+    Alt tire (_) içeren kullanıcı adlarında /live linki güvenilir
+    çalışmıyor (gözlemlenen davranış: başka bir yayına düşüyor).
+    Bu yüzden bu durumda link ÜRETMİYORUZ, sadece uyarı veriyoruz.
     """
     clean_username = username.replace(".", "")
+    has_underscore = "_" in clean_username
     safe_user = quote(clean_username, safe="_-")
     live_link = f"https://www.tiktok.com/@{safe_user}/live"
-    profile_link = f"https://www.tiktok.com/@{safe_user}"
-    return live_link, profile_link
+    return live_link, has_underscore
 
 
 def parse_tiktok_message(text: str, chat_title: str) -> str:
@@ -156,13 +154,11 @@ def parse_tiktok_message(text: str, chat_title: str) -> str:
     msg = f"🚨 YENİ SANDIK!\nKaynak: {chat_title}\n\n{body}\n\n"
 
     if username:
-        live_link, profile_link = build_tiktok_links(username)
-        msg += (
-            f"👤 PROFİL (güvenilir):\n{profile_link}\n"
-            f"↳ Canlıysa üstte kırmızı rozete dokun\n\n"
-            f"🔴 DİREKT CANLI DENE:\n{live_link}\n"
-            f"↳ Bazen açılmayıp başka yayına düşebilir"
-        )
+        live_link, has_underscore = build_tiktok_link(username)
+        if has_underscore:
+            msg += "🔴 Link yok"
+        else:
+            msg += f"🟢 CANLIYA GİT:\n{live_link}"
 
     return msg
 
