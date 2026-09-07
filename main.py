@@ -100,23 +100,28 @@ async def sender_worker(session: aiohttp.ClientSession):
             send_queue.task_done()
 
 # ---------------------------------------------------------------------------
-# Mesaj ayrıştırma (NİHAİ DÜZELTME)
+# Mesaj ayrıştırma (PRO FİLTRE)
 # ---------------------------------------------------------------------------
 
 def get_username(text: str):
     """
-    @T66066> s.yth.ai78_9 VEYA ## T19444> \n dayana_mo.rale.s18 formatlarını
-    ve aradaki alt satır (\n) boşluklarını %100 kusursuz çözer.
+    > işaretinden sonra ne gelirse gelsin (+ veya emoji bile olsa) yakalar,
+    sonra TikTok'ta geçerli olmayan tüm karakterleri söküp sadece saf ismi bırakır.
     """
-    # 1. Asıl formatı yakala (Örn: @T66066> isim veya ## T19444> \n isim)
-    match = re.search(r'(?:@|##)\s*[A-Za-z0-9_]+>\s*([a-zA-Z0-9_.]+)', text)
+    # 1. Asıl formatı yakala (Örn: @T66066> +isim+ veya ## T19444> \n +isim+)
+    match = re.search(r'(?:@|##)\s*[A-Za-z0-9_]+>\s*(\S+)', text)
     if match: 
-        return match.group(1)
+        raw_user = match.group(1)
+        # Sadece harf, rakam, alt tire ve noktayı tut, geri kalanı sil
+        clean_user = re.sub(r'[^a-zA-Z0-9_.]', '', raw_user)
+        if clean_user: return clean_user
         
-    # 2. Eğer sadece > varsa
-    match = re.search(r'>\s*([a-zA-Z0-9_.]+)', text)
+    # 2. Eğer sadece > varsa (Alternatif koruma)
+    match = re.search(r'>\s*(\S+)', text)
     if match: 
-        return match.group(1)
+        raw_user = match.group(1)
+        clean_user = re.sub(r'[^a-zA-Z0-9_.]', '', raw_user)
+        if clean_user: return clean_user
         
     # 3. Direkt link ile geliyorsa
     match = re.search(r'tiktok\.com/@([a-zA-Z0-9_.]+)', text)
@@ -148,9 +153,12 @@ def parse_tiktok_message(text: str, chat_title: str) -> str:
         if re.search(r'(?:@|##)\s*[A-Za-z0-9_]+>', line):
             continue
             
-        # Kullanıcının adının tek başına yazdığı satırı da gizle
-        if username and line.strip() == username:
-            continue
+        # Kullanıcının adının ham halinin (+ işaretli vs) tek başına yazdığı satırı gizle
+        if username and line.strip() and (username in line or line.strip() in username):
+            # Eğer satırda sadece kullanıcı adı kalıntıları varsa gizler
+            temp_clean = re.sub(r'[^a-zA-Z0-9_.]', '', line)
+            if temp_clean == username:
+                continue
             
         clean_lines.append(line)
     
