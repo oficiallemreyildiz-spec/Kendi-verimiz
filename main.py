@@ -6,6 +6,7 @@ from urllib.parse import quote
 from http.server import HTTPServer, BaseHTTPRequestHandler
 import aiohttp
 from telethon import TelegramClient, events
+
 from telethon.sessions import StringSession
 
 API_ID = int(os.getenv("API_ID", "36135300"))
@@ -24,7 +25,7 @@ SOURCE_CHATS = [
 ]
 
 # ---------------------------------------------------------------------------
-# Health-check server (Render)
+# Health-check server (Render port bağlaması için)
 # ---------------------------------------------------------------------------
 
 class HealthCheck(BaseHTTPRequestHandler):
@@ -32,25 +33,33 @@ class HealthCheck(BaseHTTPRequestHandler):
         self.send_response(200)
         self.end_headers()
         self.wfile.write(b"OK")
+
     def do_HEAD(self):
         self.send_response(200)
         self.end_headers()
+
     def log_message(self, *args):
         pass
+
 
 def start_server():
     port = int(os.getenv("PORT", 10000))
     server = HTTPServer(("0.0.0.0", port), HealthCheck)
     server.serve_forever()
 
+
 # ---------------------------------------------------------------------------
-# Gönderim kuyruğu
+# Gönderim kuyruğu: tek worker + rate-limit + 429 backoff
 # ---------------------------------------------------------------------------
 
 send_queue: "asyncio.Queue[str]" = asyncio.Queue()
+
+# Aynı hedef sohbete Telegram Bot API ~1 msg/sn öneriyor.
 MIN_INTERVAL = 1.0
 
+
 async def sender_worker(session: aiohttp.ClientSession):
+    """Kuyruktaki mesajları sırayla, rate-limit'e uyarak gönderir."""
     if not BOT_TOKEN:
         print("❌ HATA: BOT_TOKEN tanımlı değil!")
         return
@@ -65,7 +74,6 @@ async def sender_worker(session: aiohttp.ClientSession):
             if elapsed < MIN_INTERVAL:
                 await asyncio.sleep(MIN_INTERVAL - elapsed)
 
-            # HTML parse_mode TAMAMEN KALDIRILDI. Telegram artık hata veremez.
             payload = {
                 "chat_id": TARGET_CHAT_ID,
                 "text": msg,
@@ -96,71 +104,65 @@ async def sender_worker(session: aiohttp.ClientSession):
         finally:
             send_queue.task_done()
 
+
 # ---------------------------------------------------------------------------
-# Mesaj ayrıştırma (HTML'SİZ TANK GİBİ SÜRÜM)
+# Mesaj ayrıştırma
 # ---------------------------------------------------------------------------
 
 def get_username(text: str):
-    # İsmin başındaki sonundaki +, emoji vb. şeyleri atıp sadece saf ismi bırakır.
-    match = re.search(r'(?:@|##)\s*[A-Za-z0-9_]+>\s*(\S+)', text)
-    if match: 
-        raw_user = match.group(1)
-        clean_user = re.sub(r'[^a-zA-Z0-9_.]', '', raw_user)
-        if clean_user: return clean_user
-        
-    match = re.search(r'>\s*(\S+)', text)
-    if match: 
-        raw_user = match.group(1)
-        clean_user = re.sub(r'[^a-zA-Z0-9_.]', '', raw_user)
-        if clean_user: return clean_user
-        
-    match = re.search(r'tiktok\.com/@([a-zA-Z0-9_.]+)', text)
-    if match: 
-        return match.group(1)
-        
+    for line in text.splitlines():
+        if "##" in line:
+            cleaned = re.sub(r'##\s*\S+', '', line).strip()
+            cleaned = re.sub(r'^[\s>›:|-]+', '', cleaned).strip()
+            if cleaned:
+                return cleaned
     return None
 
-def build_tiktok_links(username: str) -> tuple[str, str]:
-    safe_user = quote(username.strip(), safe="._")
+
+def build_tiktok_link(username: str) -> tuple[str, bool]:
+    """
+    Kaynak kanal username'i nokta ile obfuske ediyor (ör. "da.n.iel.leal1743"
+    -> gerçek hesap "danielleal1743"). Nokta HER ZAMAN temizlenir.
+
+    Alt tire (_) TikTok'ta geçerli bir karakter olduğu için silinmiyor,
+    ama gözlemlere göre alt tireli kullanıcı adlarında /live linki
+    tutarsız çalışıyor. TikTok'un kendi sunucusuna otomatik istek atıp
+    "bu hesap var mı" diye doğrulamaya çalışmak da güvenilmez sonuç
+    veriyor (bot koruması nedeniyle TikTok gerçek durumu değil generik
+    içerik döndürüyor) — bu yüzden onu denemiyoruz. Bunun yerine linki
+    HER ZAMAN veriyoruz, güven seviyesini emoji ile işaretliyoruz.
+    """
+    clean_username = username.replace(".", "")
+    has_underscore = "_" in clean_username
+    safe_user = quote(clean_username, safe="_-")
     live_link = f"https://www.tiktok.com/@{safe_user}/live"
-    profile_link = f"https://www.tiktok.com/@{safe_user}"
-    return live_link, profile_link
+    return live_link, has_underscore
+
 
 def parse_tiktok_message(text: str, chat_title: str) -> str:
     username = get_username(text)
-    
+
     clean_lines = []
     for line in text.splitlines():
         if any(bad in line for bad in ["dichvu321", "junb.io.vn", "box-countdown", "http"]):
             continue
-            
-        if line.strip() in [">", "=", "-", "", "##"]:
+        if line.strip() in [">", "=", "-", ""]:
             continue
-            
-        if re.search(r'(?:@|##)\s*[A-Za-z0-9_]+>', line):
-            continue
-            
-        if username and line.strip() and (username in line or line.strip() in username):
-            temp_clean = re.sub(r'[^a-zA-Z0-9_.]', '', line)
-            if temp_clean == username:
-                continue
-            
         clean_lines.append(line)
-    
+
     body = "\n".join(clean_lines).strip()
     if not body and not username:
         body = text.strip()
 
-    # DÜZ METİN: Bütün <b> ve <code> etiketleri silindi!
-    msg = f"🚨 YENİ SANDIK!\n📍 Kaynak: {chat_title}\n\n{body}\n\n"
-    
+    msg = f"🚨 YENİ SANDIK!\nKaynak: {chat_title}\n\n{body}\n\n"
+
     if username:
-        live_link, profile_link = build_tiktok_links(username)
-        msg += f"👤 Yayıncı: {username}\n\n"
-        msg += f"🟢 CANLI YAYIN:\n{live_link}\n\n"
-        msg += f"📱 AÇILMAZSA PROFİLDEN GİR:\n{profile_link}"
+        live_link, has_underscore = build_tiktok_link(username)
+        marker = "🟡" if has_underscore else "🟢"
+        msg += f"{marker} CANLIYA GİT:\n{live_link}"
 
     return msg
+
 
 # ---------------------------------------------------------------------------
 # Telethon client
@@ -170,11 +172,14 @@ client = TelegramClient(
     StringSession(STRING_SESSION),
     API_ID,
     API_HASH,
-    connection_retries=None,
+    connection_retries=None,   # sonsuz yeniden bağlanma denemesi
     retry_delay=1,
     auto_reconnect=True,
     request_retries=5,
 )
+
+http_session: aiohttp.ClientSession | None = None
+
 
 @client.on(events.NewMessage(chats=SOURCE_CHATS))
 async def message_listener(event):
@@ -188,24 +193,37 @@ async def message_listener(event):
     except Exception:
         chat_title = f"Kanal ({event.chat_id})"
 
-    formatted_msg = parse_tiktok_message(text, chat_title)
+    if http_session is None:
+        print("⚠️ HTTP session henüz hazır değil, mesaj atlandı.")
+        return
+
+    formatted_msg = await parse_tiktok_message(http_session, text, chat_title)
     await send_queue.put(formatted_msg)
 
+
 async def main():
+    global http_session
     print("=== VIP Kaynak Dinleyici Başlatılıyor... ===")
+
     connector = aiohttp.TCPConnector(limit=50, ttl_dns_cache=300)
     async with aiohttp.ClientSession(connector=connector) as session:
+        http_session = session
         worker_task = asyncio.create_task(sender_worker(session))
 
+        # catch_up=True: bağlantı kopukken gelen mesajları da yakalar.
         await client.start()
+
+        # Kritik adım: entity/peer cache'ini önceden ısıt.
+        # Bu olmadan bazı kanallarda event tetiklenmeyebiliyor.
         await client.get_dialogs()
         print("✅ Dialog/entity cache yüklendi.")
+
         print(f"✅ Dinleme aktif! Hedef Grup: {TARGET_CHAT_ID}")
-        
         try:
             await client.run_until_disconnected()
         finally:
             worker_task.cancel()
+
 
 if __name__ == "__main__":
     threading.Thread(target=start_server, daemon=True).start()
