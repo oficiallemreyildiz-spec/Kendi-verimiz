@@ -100,44 +100,56 @@ async def sender_worker(session: aiohttp.ClientSession):
             send_queue.task_done()
 
 # ---------------------------------------------------------------------------
-# Mesaj ayrıştırma
+# Mesaj ayrıştırma (YENİ VE KESİN ÇÖZÜM)
 # ---------------------------------------------------------------------------
 
 def get_username(text: str):
     """
-    Geçerli bir TikTok kullanıcı adını kusursuz yakalar.
+    @ID> kullanici_adi formatını ve diğer formatları kusursuz çözer.
     """
-    match = re.search(r'@([a-zA-Z0-9_.]+)', text)
-    if match: return match.group(1)
+    # 1. Asıl formatı yakala (Örn: @T66066> s.yth.ai78_9)
+    match = re.search(r'@\w+>\s*([a-zA-Z0-9_.]+)', text)
+    if match: 
+        return match.group(1)
         
+    # 2. Eskiden kalan ## formatı varsa
     match = re.search(r'##\s*([a-zA-Z0-9_.]+)', text)
-    if match: return match.group(1)
+    if match: 
+        return match.group(1)
         
+    # 3. Direkt link ile geliyorsa
     match = re.search(r'tiktok\.com/@([a-zA-Z0-9_.]+)', text)
-    if match: return match.group(1)
+    if match: 
+        return match.group(1)
         
     return None
 
-def build_tiktok_link(username: str) -> str:
+def build_tiktok_links(username: str) -> tuple[str, str]:
     """
-    Nokta ve alt tireleri korur, Telegram içi tarayıcıyı bypass eden ekler koyar.
+    PC Parametreleri tamamen silindi. 
+    Tertemiz Evrensel Mobil Linkler üretir.
     """
     safe_user = quote(username.strip(), safe="._")
-    return f"https://www.tiktok.com/@{safe_user}/live?is_from_webapp=1&sender_device=pc"
+    
+    # 1. Direkt Canlı Yayın Linki
+    live_link = f"https://www.tiktok.com/@{safe_user}/live"
+    
+    # 2. Profil Linki (Garanti uygulama açıcı yedek link)
+    profile_link = f"https://www.tiktok.com/@{safe_user}"
+    
+    return live_link, profile_link
 
 def parse_tiktok_message(text: str, chat_title: str) -> str:
     username = get_username(text)
     
     clean_lines = []
     for line in text.splitlines():
+        # Çöp linkleri filtrele
         if any(bad in line for bad in ["dichvu321", "junb.io.vn", "box-countdown", "http"]):
             continue
+        # Gereksiz işaretleri filtrele
         if line.strip() in [">", "=", "-", "", "##"]:
             continue
-        
-        # İçinde ## varsa ama ismi bulduysak, temiz @ formatına çevir
-        if "##" in line and username:
-            line = re.sub(r'##\s*[a-zA-Z0-9_.]+', f"@{username}", line)
             
         clean_lines.append(line)
     
@@ -148,8 +160,10 @@ def parse_tiktok_message(text: str, chat_title: str) -> str:
     msg = f"🚨 <b>YENİ SANDIK!</b>\n📍 Kaynak: {chat_title}\n\n{body}\n\n"
     
     if username:
-        msg += f"👤 <b>Yayıncı:</b> <code>{username}</code> (Kopyalamak için tıkla)\n"
-        msg += f"🔗 <b>DİREKT LİNK:</b>\n{build_tiktok_link(username)}"
+        live_link, profile_link = build_tiktok_links(username)
+        msg += f"👤 <b>Yayıncı:</b> <code>{username}</code>\n\n"
+        msg += f"🟢 <b>CANLI YAYIN:</b>\n{live_link}\n\n"
+        msg += f"📱 <b>AÇILMAZSA PROFİLDEN GİR:</b>\n{profile_link}"
 
     return msg
 
