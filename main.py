@@ -91,28 +91,34 @@ async def sender_worker(session: aiohttp.ClientSession):
             send_queue.task_done()
 
 def extract_username(text: str):
-    # a-z, 0-9, alt tire (_), nokta (.) ve normal tire (-) tanımlı
+    # İsim içindeki tüm görünmez boşlukları ve zararlı karakterleri yok edip saf ismi bırakan filtre
+    def sanitize(raw_user):
+        cleaned = re.sub(r'[^a-zA-Z0-9_.-]', '', raw_user)
+        return cleaned if cleaned and cleaned.lower() != "canli_yayin" else None
+
     for line in text.splitlines():
         if "##" in line:
             parts = re.split(r'[>›|:]', line, maxsplit=1)
-            if len(parts) > 1:
-                raw_user = parts[1].strip()
-            else:
-                raw_user = line.split("##", 1)[1].strip()
-            
-            m = re.search(r'([a-zA-Z0-9_.-]+)', raw_user)
+            raw = parts[1] if len(parts) > 1 else line.split("##", 1)[1]
+            m = re.search(r'([a-zA-Z0-9_.-]+)', raw)
             if m:
-                u = m.group(1).strip(". -")
-                if u.lower() != "canli_yayin": return u
+                u = sanitize(m.group(1))
+                if u: return u
 
     m_url = re.search(r'tiktok\.com/@([a-zA-Z0-9_.-]+)', text)
-    if m_url: return m_url.group(1).strip(". -")
+    if m_url: 
+        u = sanitize(m_url.group(1))
+        if u: return u
 
     m_user = re.search(r'@([a-zA-Z0-9_.-]+)', text)
-    if m_user: return m_user.group(1).strip(". -")
+    if m_user: 
+        u = sanitize(m_user.group(1))
+        if u: return u
 
     m_bot = re.search(r'(?:user|host|yayıncı|kullanıcı|id|kênh|channel)[\s:]+([a-zA-Z0-9_.-]+)', text, re.IGNORECASE)
-    if m_bot: return m_bot.group(1).strip(". -")
+    if m_bot: 
+        u = sanitize(m_bot.group(1))
+        if u: return u
 
     return None
 
@@ -157,7 +163,7 @@ def process_message(text: str, chat_title: str) -> str:
     else:
         LIVE_CHESTS.append(box_data)
 
-    live_link = f"https://www.tiktok.com/@{quote(display_user, safe='_-')}/live"
+    live_link = f"https://www.tiktok.com/@{quote(display_user, safe='_-')}/live" if username else "https://www.tiktok.com/live"
     header = "🎒 YENİ GOODY BAG!" if is_goody else "🚨 YENİ SANDIK!"
     
     msg = f"{header}\nKaynak: {chat_title}\n💎 Değer: {coins} Coin\n⏱️ Süre: ~{duration}sn\n\n🟢 CANLIYA GİT:\n{live_link}"
