@@ -91,15 +91,10 @@ def extract_token_from_event(event):
     except Exception:
         return None
 
-
     patterns = [
-
         r'https?://[^ \n\]\)]+/t\.php\?token=([^&\s\]\)]+)',
-
         r'https?://[^ \n\]\)]+t\.php\?token=([^&\s\]\)]+)',
-
     ]
-
 
     for pattern in patterns:
 
@@ -120,7 +115,6 @@ def extract_token_from_event(event):
             )
 
             return token
-
 
     try:
 
@@ -162,7 +156,6 @@ def extract_token_from_event(event):
             repr(e)
         )
 
-
     try:
 
         for entity, entity_text in message.get_entities_text():
@@ -200,7 +193,6 @@ def extract_token_from_event(event):
             "[TOKEN ENTITY TEXT HATASI]",
             repr(e)
         )
-
 
     print(
         "[TOKEN] bulunamadı"
@@ -267,11 +259,8 @@ def extract_p_room(text):
         return None
 
     patterns = [
-
         r'https?://live\.dichvu321\.com/t/\?p=([A-Za-z0-9_\-+/=]+)',
-
         r'https?://[^ \n]+/t/\?p=([A-Za-z0-9_\-+/=]+)',
-
     ]
 
     for pattern in patterns:
@@ -331,11 +320,8 @@ def extract_username_from_text(text):
         return None
 
     patterns = [
-
         r'^\s*##\s*T\d+\s*[›>:]\s*([^\s\n]+)',
-
         r'^\s*T\d+\s*[›>:]\s*([^\s\n]+)',
-
     ]
 
     for pattern in patterns:
@@ -369,7 +355,6 @@ def extract_coins(text, token_data=None):
         if m:
             return safe_int(m.group(1))
 
-
         m = re.search(
             r'BOX\s*:\s*(\d+)\s*/',
             text,
@@ -379,7 +364,6 @@ def extract_coins(text, token_data=None):
         if m:
             return safe_int(m.group(1))
 
-
         m = re.search(
             r'(\d+)\s*/\s*(\d+)',
             text
@@ -387,7 +371,6 @@ def extract_coins(text, token_data=None):
 
         if m:
             return safe_int(m.group(1))
-
 
     if token_data:
 
@@ -423,7 +406,6 @@ def extract_people_from_message(text):
     if not text:
         return 0
 
-
     m = re.search(
         r'(?:TÚI|TUI)\s*:\s*\d+\s*/\s*(\d+)',
         text,
@@ -432,7 +414,6 @@ def extract_people_from_message(text):
 
     if m:
         return safe_int(m.group(1))
-
 
     m = re.search(
         r'BOX\s*:\s*\d+\s*/\s*(\d+)',
@@ -443,7 +424,6 @@ def extract_people_from_message(text):
     if m:
         return safe_int(m.group(1))
 
-
     m = re.search(
         r'(\d+)\s*/\s*(\d+)',
         text
@@ -451,7 +431,6 @@ def extract_people_from_message(text):
 
     if m:
         return safe_int(m.group(2))
-
 
     return 0
 
@@ -466,13 +445,9 @@ def extract_joined(text):
         return 0
 
     patterns = [
-
         r'Đã\s*join\s*:\s*(\d+)',
-
         r'joined\s*:\s*(\d+)',
-
         r'join\s*:\s*(\d+)',
-
     ]
 
     for pattern in patterns:
@@ -526,7 +501,6 @@ def extract_rate(text, token_data=None):
         if m:
             return safe_float(m.group(1))
 
-
     if token_data:
 
         for key in [
@@ -556,7 +530,6 @@ def detect_type(text, token_data):
         text or ""
     ).upper()
 
-
     if re.search(
         r'TÚI|TUI',
         text_upper
@@ -567,7 +540,6 @@ def detect_type(text, token_data):
         )
 
         return True
-
 
     if re.search(
         r'GOODY\s*BAG|REWARD\s*BAG',
@@ -580,7 +552,6 @@ def detect_type(text, token_data):
 
         return True
 
-
     if re.search(
         r'\bBOX\b|RƯƠNG|TREO|HAZİNE',
         text_upper
@@ -592,7 +563,6 @@ def detect_type(text, token_data):
 
         return False
 
-
     if "🟡" in text:
 
         print(
@@ -600,7 +570,6 @@ def detect_type(text, token_data):
         )
 
         return False
-
 
     if token_data:
 
@@ -622,7 +591,6 @@ def detect_type(text, token_data):
 
             return True
 
-
         if value in [
             False,
             0,
@@ -636,7 +604,6 @@ def detect_type(text, token_data):
             )
 
             return False
-
 
     print(
         "[TÜR] belirlenemedi"
@@ -654,7 +621,6 @@ def calculate_target_time(text, token_data=None):
     now = int(
         time.time()
     )
-
 
     if token_data:
 
@@ -688,7 +654,6 @@ def calculate_target_time(text, token_data=None):
             except Exception:
                 pass
 
-
     if text:
 
         m = re.search(
@@ -714,7 +679,6 @@ def calculate_target_time(text, token_data=None):
 
             if duration > 0:
                 return now + duration
-
 
     return now + 180
 
@@ -752,7 +716,6 @@ def get_live_link(
 
                     return value
 
-
     if room:
 
         return (
@@ -760,14 +723,12 @@ def get_live_link(
             f"share/live/{room}"
         )
 
-
     if username:
 
         return (
             "https://www.tiktok.com/"
             f"@{username}/live"
         )
-
 
     return ""
 
@@ -782,7 +743,6 @@ def parse_source_message(event):
         event.message.raw_text
         or ""
     )
-
 
     print(
         "\n"
@@ -799,7 +759,6 @@ def parse_source_message(event):
         "=" * 70
     )
 
-
     token = extract_token_from_event(
         event
     )
@@ -808,12 +767,10 @@ def parse_source_message(event):
         token
     )
 
-
     is_goody = detect_type(
         text,
         token_data
     )
-
 
     if is_goody is None:
 
@@ -823,9 +780,7 @@ def parse_source_message(event):
 
         return None
 
-
     username = None
-
 
     if token_data:
 
@@ -844,20 +799,16 @@ def parse_source_message(event):
 
                 break
 
-
     if not username:
 
         username = extract_username_from_text(
             text
         )
 
-
     if not username:
         username = "bilinmiyor"
 
-
     room = None
-
 
     if token_data:
 
@@ -877,13 +828,11 @@ def parse_source_message(event):
 
                 break
 
-
     if not room:
 
         room = extract_p_room(
             text
         )
-
 
     if not room:
 
@@ -898,17 +847,14 @@ def parse_source_message(event):
             room
         )
 
-
     coins = extract_coins(
         text,
         token_data
     )
 
-
     people = extract_people_from_message(
         text
     )
-
 
     if not people and token_data:
 
@@ -931,11 +877,9 @@ def parse_source_message(event):
                 if people:
                     break
 
-
     joined = extract_joined(
         text
     )
-
 
     if not joined and token_data:
 
@@ -958,17 +902,14 @@ def parse_source_message(event):
                 if joined:
                     break
 
-
     rate = extract_rate(
         text,
         token_data
     )
 
-
     viewers = extract_viewers(
         text
     )
-
 
     if not viewers and token_data:
 
@@ -991,24 +932,20 @@ def parse_source_message(event):
                 if viewers:
                     break
 
-
     target_time = calculate_target_time(
         text,
         token_data
     )
 
-
     detected_at = int(
         time.time()
     )
-
 
     live_link = get_live_link(
         username,
         room,
         token_data
     )
-
 
     result = {
 
@@ -1060,7 +997,6 @@ def parse_source_message(event):
             event.message.id,
 
     }
-
 
     print(
         "\n[PARSE SONUCU]"
@@ -1116,14 +1052,13 @@ def parse_source_message(event):
         result["detected_at"]
     )
 
-
     return result
 
 
 # =========================================================
 # RADARA EKLE
 #
-# ARTIK SÜREYE GÖRE SİLME YOK
+# SÜREYE GÖRE SİLME YOK
 # =========================================================
 
 def add_to_radar(data):
@@ -1131,7 +1066,6 @@ def add_to_radar(data):
     room = data.get(
         "room"
     )
-
 
     if not room:
 
@@ -1141,7 +1075,6 @@ def add_to_radar(data):
 
         return False
 
-
     if data["type"] == "GOODY BAG":
 
         target = LIVE_GOODY_BAGS
@@ -1149,7 +1082,6 @@ def add_to_radar(data):
     else:
 
         target = LIVE_CHESTS
-
 
     if room in target:
 
@@ -1166,7 +1098,6 @@ def add_to_radar(data):
             time.time()
         )
 
-
         if (
             now
             -
@@ -1182,15 +1113,12 @@ def add_to_radar(data):
 
             return False
 
-
         print(
             "[GÜNCELLEME] Aynı oda yeniden geldi:",
             room
         )
 
-
     target[room] = data
-
 
     print(
         "\n"
@@ -1240,7 +1168,6 @@ def add_to_radar(data):
         "=" * 70
     )
 
-
     return True
 
 
@@ -1252,10 +1179,8 @@ async def send_telegram_message(data):
 
     global http_session
 
-
     if not http_session:
         return False
-
 
     if data["type"] == "GOODY BAG":
 
@@ -1264,7 +1189,6 @@ async def send_telegram_message(data):
     else:
 
         baslik = "🟨 HAZİNE SANDIĞI"
-
 
     text = (
 
@@ -1290,7 +1214,6 @@ async def send_telegram_message(data):
 
     )
 
-
     if data.get("live"):
 
         text += (
@@ -1305,7 +1228,6 @@ async def send_telegram_message(data):
 
         )
 
-
     url = (
 
         "https://api.telegram.org/bot"
@@ -1313,7 +1235,6 @@ async def send_telegram_message(data):
         f"{BOT_TOKEN}/sendMessage"
 
     )
-
 
     payload = {
 
@@ -1331,9 +1252,7 @@ async def send_telegram_message(data):
 
     }
 
-
     max_attempts = 8
-
 
     for attempt in range(
         1,
@@ -1349,7 +1268,6 @@ async def send_telegram_message(data):
 
                 result_text = await response.text()
 
-
                 if response.status == 200:
 
                     print(
@@ -1359,7 +1277,6 @@ async def send_telegram_message(data):
                     )
 
                     return True
-
 
                 if response.status == 429:
 
@@ -1385,7 +1302,6 @@ async def send_telegram_message(data):
 
                         retry_after = 30
 
-
                     retry_after = max(
                         1,
                         safe_int(
@@ -1394,20 +1310,17 @@ async def send_telegram_message(data):
                         )
                     )
 
-
                     print(
                         "[TELEGRAM]",
                         retry_after,
                         "saniye bekleniyor..."
                     )
 
-
                     await asyncio.sleep(
                         retry_after
                     )
 
                     continue
-
 
                 if response.status in [
                     500,
@@ -1421,20 +1334,17 @@ async def send_telegram_message(data):
                         30
                     )
 
-
                     print(
                         "[TELEGRAM] Sunucu hatası:",
                         wait,
                         "s"
                     )
 
-
                     await asyncio.sleep(
                         wait
                     )
 
                     continue
-
 
                 print(
                     "[TELEGRAM HATA]",
@@ -1444,7 +1354,6 @@ async def send_telegram_message(data):
 
                 return False
 
-
         except Exception as e:
 
             print(
@@ -1452,14 +1361,12 @@ async def send_telegram_message(data):
                 repr(e)
             )
 
-
             await asyncio.sleep(
                 min(
                     5 * attempt,
                     30
                 )
             )
-
 
     return False
 
@@ -1493,11 +1400,12 @@ async def telegram_sender():
 
 
 # =========================================================
-# YENİ RADAR HTML
+# NEON JİMİN RADAR HTML
 # =========================================================
 
 RADAR_HTML = r"""
 <!DOCTYPE html>
+
 <html lang="tr">
 
 <head>
@@ -1509,7 +1417,7 @@ RADAR_HTML = r"""
     content="width=device-width, initial-scale=1.0"
 >
 
-<title>🏆 ÖDÜL AVCISI</title>
+<title>⚡ JİMİN • ÖDÜL AVCISI</title>
 
 <style>
 
@@ -1521,271 +1429,546 @@ html,
 body {
 
     margin: 0;
+
     padding: 0;
 
-    background:
-        radial-gradient(
-            circle at top,
-            #18233d 0%,
-            #080b12 48%,
-            #05070c 100%
-        );
+    min-height: 100%;
 
-    color: #fff;
+    background:
+        #05060c;
+
+    color: white;
 
     font-family:
         Arial,
         Helvetica,
         sans-serif;
-
-    min-height: 100%;
 }
 
 body {
-    padding: 16px;
+
+    padding: 12px;
+
+    overflow-x: hidden;
+
+    background:
+        radial-gradient(
+            circle at 50% -10%,
+            rgba(106, 52, 255, .32),
+            transparent 34%
+        ),
+        radial-gradient(
+            circle at 0% 50%,
+            rgba(0, 174, 255, .08),
+            transparent 30%
+        ),
+        radial-gradient(
+            circle at 100% 50%,
+            rgba(180, 0, 255, .10),
+            transparent 30%
+        ),
+        #05060c;
 }
 
 .wrapper {
 
     max-width: 1200px;
 
-    margin: auto;
+    margin: 0 auto;
 }
+
+
+/* =====================================================
+   HEADER
+   ===================================================== */
 
 .header {
 
     text-align: center;
 
     padding:
-        22px 10px 18px;
+        12px 5px 18px;
 
+    position: relative;
 }
 
-.logo {
 
-    font-size:
-        clamp(28px, 6vw, 46px);
+/* =====================================================
+   NEON JİMİN
+   ===================================================== */
 
-    font-weight: 900;
+.jimin-wrap {
 
-    letter-spacing: 1px;
+    position: relative;
 
-    text-shadow:
-        0 0 15px
-        rgba(255,255,255,.25);
-
-    margin-bottom: 7px;
-}
-
-.subtitle {
-
-    color: #aab4c7;
-
-    font-size: 14px;
-
-    font-weight: bold;
-
-    letter-spacing: .5px;
-
-    margin-bottom: 13px;
-}
-
-.status {
-
-    display: inline-flex;
-
-    align-items: center;
-
-    justify-content: center;
-
-    gap: 6px;
+    display: inline-block;
 
     padding:
-        8px 15px;
-
-    border-radius: 999px;
-
-    background:
-        rgba(255,255,255,.06);
-
-    border:
-        1px solid
-        rgba(255,255,255,.1);
-
-    font-size: 12px;
-
-    font-weight: 800;
-}
-
-.status.online {
-    color: #69ff8a;
-}
-
-.status.error {
-    color: #ff7474;
-}
-
-.stats {
-
-    display: grid;
-
-    grid-template-columns:
-        repeat(4, 1fr);
-
-    gap: 10px;
-
-    margin-bottom: 18px;
-}
-
-.stat {
-
-    background:
-        rgba(18,24,36,.9);
-
-    border:
-        1px solid
-        #273146;
-
-    border-radius: 14px;
-
-    padding: 12px;
-
-    text-align: center;
-}
-
-.stat-number {
-
-    font-size: 22px;
-
-    font-weight: 900;
+        10px 25px 8px;
 
     margin-bottom: 4px;
 }
 
-.stat-label {
+.jimin {
 
-    color: #78849a;
+    position: relative;
 
-    font-size: 10px;
+    font-size:
+        clamp(42px, 11vw, 82px);
 
-    font-weight: bold;
+    font-weight: 1000;
+
+    letter-spacing:
+        clamp(2px, 1vw, 9px);
+
+    line-height: 1;
+
+    color: #fff;
+
+    text-transform: uppercase;
+
+    text-shadow:
+
+        0 0 3px #fff,
+
+        0 0 8px #d9c5ff,
+
+        0 0 18px #9d5cff,
+
+        0 0 32px #713cff,
+
+        0 0 55px #5c2bff,
+
+        0 0 85px #3e16ff;
+
+    animation:
+        neonPulse 2.2s ease-in-out infinite;
 }
+
+@keyframes neonPulse {
+
+    0%,
+    100% {
+
+        filter:
+            brightness(1);
+
+        text-shadow:
+
+            0 0 3px #fff,
+
+            0 0 8px #d9c5ff,
+
+            0 0 18px #9d5cff,
+
+            0 0 32px #713cff,
+
+            0 0 55px #5c2bff;
+
+    }
+
+    50% {
+
+        filter:
+            brightness(1.28);
+
+        text-shadow:
+
+            0 0 4px #fff,
+
+            0 0 12px #fff,
+
+            0 0 24px #c084ff,
+
+            0 0 45px #8b45ff,
+
+            0 0 75px #662cff,
+
+            0 0 105px #3d12ff;
+
+    }
+}
+
+
+/* =====================================================
+   YILDIRIMLAR
+   ===================================================== */
+
+.bolt {
+
+    position: absolute;
+
+    color: #fff;
+
+    font-size:
+        clamp(25px, 6vw, 48px);
+
+    filter:
+
+        drop-shadow(
+            0 0 5px #fff
+        )
+
+        drop-shadow(
+            0 0 15px #6f4cff
+        )
+
+        drop-shadow(
+            0 0 30px #7c35ff
+        );
+
+    animation:
+        boltFlash 1.8s infinite;
+}
+
+.bolt.left {
+
+    left:
+        -8px;
+
+    top:
+        0;
+
+    transform:
+        rotate(-12deg);
+}
+
+.bolt.right {
+
+    right:
+        -8px;
+
+    bottom:
+        0;
+
+    transform:
+        rotate(12deg);
+
+    animation-delay:
+        .7s;
+}
+
+@keyframes boltFlash {
+
+    0%,
+    100% {
+
+        opacity:
+            .65;
+
+        transform:
+            scale(1);
+    }
+
+    8% {
+
+        opacity:
+            1;
+
+        filter:
+
+            drop-shadow(
+                0 0 7px #fff
+            )
+
+            drop-shadow(
+                0 0 25px #a66cff
+            )
+
+            drop-shadow(
+                0 0 45px #703cff
+            );
+    }
+
+    14% {
+
+        opacity:
+            .4;
+    }
+
+    20% {
+
+        opacity:
+            1;
+    }
+
+    40% {
+
+        opacity:
+            .7;
+    }
+}
+
+
+/* =====================================================
+   ALT BAŞLIK
+   ===================================================== */
+
+.subtitle {
+
+    color:
+        #b8b1cf;
+
+    font-size:
+        12px;
+
+    font-weight:
+        800;
+
+    letter-spacing:
+        1.2px;
+
+    margin-top:
+        8px;
+
+    text-shadow:
+        0 0 10px
+        rgba(150,100,255,.5);
+}
+
+.status {
+
+    display:
+        inline-flex;
+
+    align-items:
+        center;
+
+    justify-content:
+        center;
+
+    margin-top:
+        11px;
+
+    padding:
+        7px 14px;
+
+    border-radius:
+        999px;
+
+    background:
+        rgba(20,20,40,.8);
+
+    border:
+        1px solid
+        rgba(157,92,255,.4);
+
+    color:
+        #74ff9a;
+
+    font-size:
+        11px;
+
+    font-weight:
+        900;
+
+    box-shadow:
+        0 0 18px
+        rgba(111,76,255,.18);
+}
+
+.status.error {
+
+    color:
+        #ff7474;
+
+    border-color:
+        rgba(255,80,80,.45);
+}
+
+
+/* =====================================================
+   RADAR GRID
+   ===================================================== */
 
 .radar-grid {
 
-    display: grid;
+    display:
+        grid;
 
     grid-template-columns:
         1fr 1fr;
 
-    gap: 16px;
+    gap:
+        14px;
 
-    align-items: start;
+    align-items:
+        start;
 }
+
+
+/* =====================================================
+   PANELS
+   ===================================================== */
 
 .panel {
 
+    min-width:
+        0;
+
     background:
-        rgba(10,14,23,.82);
+        rgba(9,12,21,.88);
 
     border:
         1px solid
         #273146;
 
-    border-radius: 18px;
+    border-radius:
+        18px;
 
-    padding: 13px;
+    padding:
+        12px;
 
     box-shadow:
-        0 10px 35px
-        rgba(0,0,0,.3);
+        0 12px 38px
+        rgba(0,0,0,.42);
 
-    min-width: 0;
+    backdrop-filter:
+        blur(10px);
 }
 
 .panel.goody {
-    border-color: #7136c8;
+
+    border-color:
+        rgba(157,81,255,.65);
+
+    box-shadow:
+        0 0 25px
+        rgba(157,81,255,.10);
 }
 
 .panel.chest {
-    border-color: #b99722;
+
+    border-color:
+        rgba(241,200,75,.55);
+
+    box-shadow:
+        0 0 25px
+        rgba(241,200,75,.07);
 }
 
 .panel-title {
 
-    display: flex;
+    display:
+        flex;
 
-    align-items: center;
+    align-items:
+        center;
 
     justify-content:
         space-between;
 
-    gap: 10px;
+    gap:
+        8px;
 
     padding:
-        5px 3px 13px;
-
+        3px 2px 12px;
 }
 
 .panel-name {
 
-    font-size: 17px;
+    font-size:
+        17px;
 
-    font-weight: 900;
+    font-weight:
+        950;
 
-    white-space: nowrap;
+    white-space:
+        nowrap;
 
-    overflow: hidden;
+    overflow:
+        hidden;
 
-    text-overflow: ellipsis;
+    text-overflow:
+        ellipsis;
+}
+
+.goody .panel-name {
+
+    color:
+        #d5a8ff;
+
+    text-shadow:
+        0 0 13px
+        rgba(157,81,255,.65);
+}
+
+.chest .panel-name {
+
+    color:
+        #ffe37b;
+
+    text-shadow:
+        0 0 13px
+        rgba(241,200,75,.55);
 }
 
 .panel-count {
 
-    flex-shrink: 0;
+    flex-shrink:
+        0;
 
-    min-width: 30px;
+    min-width:
+        28px;
 
     padding:
-        5px 9px;
+        4px 8px;
 
-    border-radius: 999px;
+    border-radius:
+        999px;
 
     background:
         rgba(255,255,255,.07);
 
-    text-align: center;
+    color:
+        #fff;
 
-    font-size: 12px;
+    text-align:
+        center;
 
-    font-weight: 900;
+    font-size:
+        10px;
+
+    font-weight:
+        900;
 }
+
+
+/* =====================================================
+   CARD
+   ===================================================== */
 
 .card {
 
-    position: relative;
+    position:
+        relative;
+
+    overflow:
+        hidden;
 
     background:
         linear-gradient(
             145deg,
-            #151d2d,
-            #0e131e
+            rgba(23,29,45,.98),
+            rgba(10,14,23,.98)
         );
 
     border:
         1px solid
         #293448;
 
-    border-radius: 14px;
+    border-radius:
+        13px;
 
-    padding: 13px;
+    padding:
+        11px;
 
-    margin-bottom: 10px;
-
-    overflow: hidden;
+    margin-bottom:
+        9px;
 
     transition:
         transform .2s,
+        box-shadow .2s,
         border-color .2s;
 }
 
@@ -1799,56 +1982,128 @@ body {
 }
 
 .goody .card {
+
     border-left:
-        3px solid #9d51ff;
+        3px solid
+        #9d51ff;
 }
 
 .chest .card {
+
     border-left:
-        3px solid #f1c84b;
+        3px solid
+        #f1c84b;
 }
+
+
+/* =====================================================
+   YENİ KART
+   ===================================================== */
 
 .new-card {
 
     animation:
-        newCard .8s ease-out;
+        cardIn .65s ease-out;
 }
 
-@keyframes newCard {
+@keyframes cardIn {
+
+    0% {
+
+        opacity:
+            0;
+
+        transform:
+            translateY(-8px)
+            scale(.97);
+    }
+
+    100% {
+
+        opacity:
+            1;
+
+        transform:
+            translateY(0)
+            scale(1);
+    }
+}
+
+.new-card::after {
+
+    content:
+        "";
+
+    position:
+        absolute;
+
+    top:
+        0;
+
+    left:
+        -100%;
+
+    width:
+        60%;
+
+    height:
+        100%;
+
+    background:
+        linear-gradient(
+            90deg,
+            transparent,
+            rgba(255,255,255,.08),
+            transparent
+        );
+
+    animation:
+        shine 1.5s ease-out;
+}
+
+@keyframes shine {
 
     from {
-        transform:
-            scale(.96);
-        opacity: .3;
+        left:
+            -100%;
     }
 
     to {
-        transform:
-            scale(1);
-        opacity: 1;
+        left:
+            150%;
     }
-
 }
+
+
+/* =====================================================
+   KULLANICI
+   ===================================================== */
 
 .user-row {
 
-    display: flex;
+    display:
+        flex;
 
-    align-items: center;
+    align-items:
+        center;
 
     justify-content:
         space-between;
 
-    gap: 8px;
+    gap:
+        6px;
 
-    margin-bottom: 10px;
+    margin-bottom:
+        9px;
 }
 
 .user {
 
-    font-size: 17px;
+    font-size:
+        15px;
 
-    font-weight: 900;
+    font-weight:
+        950;
 
     word-break:
         break-word;
@@ -1856,32 +2111,61 @@ body {
 
 .badge {
 
-    flex-shrink: 0;
+    flex-shrink:
+        0;
 
-    font-size: 9px;
+    font-size:
+        8px;
 
-    font-weight: 900;
+    font-weight:
+        950;
 
     padding:
-        4px 7px;
+        4px 6px;
 
-    border-radius: 6px;
+    border-radius:
+        6px;
 
     background:
         rgba(255,255,255,.07);
 
-    color: #aeb9cc;
+    color:
+        #aeb9cc;
 }
+
+.goody .badge {
+
+    color:
+        #d2a7ff;
+
+    background:
+        rgba(157,81,255,.13);
+}
+
+.chest .badge {
+
+    color:
+        #ffe17a;
+
+    background:
+        rgba(241,200,75,.10);
+}
+
+
+/* =====================================================
+   BİLGİLER
+   ===================================================== */
 
 .info-grid {
 
-    display: grid;
+    display:
+        grid;
 
     grid-template-columns:
         1fr 1fr;
 
-    gap: 6px;
-
+    gap:
+        5px;
 }
 
 .info {
@@ -1889,101 +2173,170 @@ body {
     background:
         rgba(255,255,255,.035);
 
-    border-radius: 8px;
+    border-radius:
+        7px;
 
-    padding: 7px;
+    padding:
+        6px;
 
-    font-size: 11px;
+    font-size:
+        9px;
 
-    color: #8f9bad;
+    color:
+        #818da1;
 }
 
 .info b {
 
-    display: block;
+    display:
+        block;
 
-    color: #fff;
+    color:
+        #fff;
 
-    font-size: 14px;
+    font-size:
+        12px;
 
-    margin-top: 2px;
+    margin-top:
+        2px;
 }
+
+
+/* =====================================================
+   CANLI BUTON
+   ===================================================== */
 
 .live-button {
 
-    display: block;
+    display:
+        block;
 
-    text-align: center;
+    text-align:
+        center;
 
-    text-decoration: none;
+    text-decoration:
+        none;
 
-    color: #fff;
+    color:
+        white;
 
     background:
         linear-gradient(
             135deg,
-            #ef2454,
-            #a90f38
+            #f12657,
+            #a90d38
         );
 
-    padding: 10px;
+    padding:
+        9px;
 
-    margin-top: 10px;
+    margin-top:
+        9px;
 
-    border-radius: 9px;
+    border-radius:
+        8px;
 
-    font-size: 12px;
+    font-size:
+        10px;
 
-    font-weight: 900;
+    font-weight:
+        950;
 
+    box-shadow:
+        0 5px 18px
+        rgba(225,25,75,.2);
+
+    transition:
+        transform .15s,
+        filter .15s;
 }
 
-.live-button:active {
-    transform: scale(.98);
+.live-button:hover {
+
+    filter:
+        brightness(1.15);
+
+    transform:
+        translateY(-1px);
 }
+
+
+/* =====================================================
+   BOŞ
+   ===================================================== */
 
 .empty {
 
-    text-align: center;
+    text-align:
+        center;
 
     padding:
-        28px 10px;
+        25px 8px;
 
-    border-radius: 12px;
+    border-radius:
+        11px;
 
     background:
         rgba(255,255,255,.025);
 
-    color: #626e82;
+    color:
+        #626e82;
 
-    font-size: 12px;
+    font-size:
+        11px;
 }
+
+
+/* =====================================================
+   FOOTER
+   ===================================================== */
 
 .footer {
 
-    text-align: center;
+    text-align:
+        center;
 
-    color: #566176;
+    color:
+        #59647a;
 
-    font-size: 10px;
+    font-size:
+        9px;
 
     padding:
-        18px 0 8px;
+        16px 0 5px;
+
+    letter-spacing:
+        .4px;
 }
+
+
+/* =====================================================
+   MOBİL
+   ===================================================== */
 
 @media (max-width: 700px) {
 
     body {
-        padding: 9px;
+        padding: 7px;
     }
 
     .header {
-        padding-top: 14px;
+        padding-top: 7px;
     }
 
-    .stats {
-        grid-template-columns:
-            repeat(2, 1fr);
+    .jimin-wrap {
+        padding-left: 21px;
+        padding-right: 21px;
+    }
+
+    .subtitle {
+        font-size: 9px;
+        letter-spacing: .7px;
+    }
+
+    .status {
+        font-size: 9px;
+        padding: 6px 10px;
     }
 
     .radar-grid {
@@ -1991,64 +2344,107 @@ body {
         grid-template-columns:
             1fr 1fr;
 
-        gap: 7px;
+        gap:
+            6px;
     }
 
     .panel {
 
-        padding: 8px;
+        padding:
+            7px;
 
-        border-radius: 13px;
+        border-radius:
+            13px;
     }
 
     .panel-title {
-        padding-bottom: 9px;
+
+        padding-bottom:
+            8px;
     }
 
     .panel-name {
-        font-size: 12px;
+
+        font-size:
+            11px;
     }
 
     .panel-count {
-        min-width: 24px;
-        padding: 4px 6px;
-        font-size: 10px;
+
+        min-width:
+            23px;
+
+        padding:
+            3px 5px;
+
+        font-size:
+            9px;
     }
 
     .card {
-        padding: 9px;
-        border-radius: 10px;
-        margin-bottom: 7px;
+
+        padding:
+            8px;
+
+        border-radius:
+            9px;
+
+        margin-bottom:
+            6px;
     }
 
     .user {
-        font-size: 12px;
+
+        font-size:
+            11px;
     }
 
     .badge {
-        display: none;
+
+        display:
+            none;
     }
 
     .info-grid {
-        grid-template-columns:
-            1fr 1fr;
 
-        gap: 4px;
+        gap:
+            3px;
     }
 
     .info {
-        padding: 5px;
-        font-size: 9px;
+
+        padding:
+            4px;
+
+        font-size:
+            7px;
     }
 
     .info b {
-        font-size: 11px;
+
+        font-size:
+            10px;
     }
 
     .live-button {
-        padding: 8px 4px;
-        font-size: 9px;
-        margin-top: 7px;
+
+        padding:
+            7px 3px;
+
+        font-size:
+            8px;
+
+        margin-top:
+            6px;
+    }
+
+    .empty {
+
+        padding:
+            20px 4px;
+
+        font-size:
+            9px;
     }
 
 }
@@ -2062,93 +2458,56 @@ body {
 
 <div class="wrapper">
 
+
+    <!-- =================================================
+         HEADER
+         ================================================= -->
+
     <div class="header">
 
-        <div class="logo">
-            🏆 ÖDÜL AVCISI
+        <div class="jimin-wrap">
+
+            <div class="bolt left">
+                ⚡
+            </div>
+
+            <div class="jimin">
+                JİMİN
+            </div>
+
+            <div class="bolt right">
+                ⚡
+            </div>
+
         </div>
 
+
         <div class="subtitle">
-            🟪 GOODY BAG • 🟨 HAZİNE SANDIĞI
+
+            🏆 ÖDÜL AVCISI
+            •
+            🟪 GOODY BAG
+            •
+            🟨 HAZİNE SANDIĞI
+
         </div>
+
 
         <div
             id="status"
             class="status"
         >
-            🟡 SUNUCU BAĞLANIYOR...
-        </div>
 
-    </div>
-
-
-    <div class="stats">
-
-        <div class="stat">
-
-            <div
-                id="goodyTotal"
-                class="stat-number"
-            >
-                0
-            </div>
-
-            <div class="stat-label">
-                🟪 GOODY
-            </div>
-
-        </div>
-
-
-        <div class="stat">
-
-            <div
-                id="chestTotal"
-                class="stat-number"
-            >
-                0
-            </div>
-
-            <div class="stat-label">
-                🟨 SANDIK
-            </div>
-
-        </div>
-
-
-        <div class="stat">
-
-            <div
-                id="total"
-                class="stat-number"
-            >
-                0
-            </div>
-
-            <div class="stat-label">
-                📡 TOPLAM
-            </div>
-
-        </div>
-
-
-        <div class="stat">
-
-            <div
-                id="peopleMax"
-                class="stat-number"
-            >
-                0
-            </div>
-
-            <div class="stat-label">
-                👥 MAX KİŞİ
-            </div>
+            🟡 RADAR BAĞLANIYOR...
 
         </div>
 
     </div>
 
+
+    <!-- =================================================
+         RADAR
+         ================================================= -->
 
     <div class="radar-grid">
 
@@ -2160,7 +2519,9 @@ body {
             <div class="panel-title">
 
                 <div class="panel-name">
+
                     🟪 GOODY BAG
+
                 </div>
 
                 <div
@@ -2171,6 +2532,7 @@ body {
                 </div>
 
             </div>
+
 
             <div id="bags"></div>
 
@@ -2184,7 +2546,9 @@ body {
             <div class="panel-title">
 
                 <div class="panel-name">
+
                     🟨 HAZİNE SANDIĞI
+
                 </div>
 
                 <div
@@ -2196,6 +2560,7 @@ body {
 
             </div>
 
+
             <div id="chests"></div>
 
         </div>
@@ -2206,9 +2571,10 @@ body {
 
     <div class="footer">
 
-        🏆 ÖDÜL AVCISI • Canlı Radar
+        ⚡ JİMİN • ÖDÜL AVCISI • CANLI RADAR ⚡
 
     </div>
+
 
 </div>
 
@@ -2261,13 +2627,21 @@ function escapeHtml(value) {
 function timestamp(item) {
 
     return Number(
+
         item.detected_at
+
         ||
+
         item.created_at
+
         ||
+
         item.timestamp
+
         ||
+
         0
+
     );
 
 }
@@ -2276,20 +2650,28 @@ function timestamp(item) {
 function latestFive(items) {
 
     if (!Array.isArray(items)) {
+
         return [];
+
     }
 
 
     return [...items]
 
         .sort(
+
             (a, b) =>
+
                 timestamp(b)
                 -
                 timestamp(a)
+
         )
 
-        .slice(0, 5);
+        .slice(
+            0,
+            5
+        );
 
 }
 
@@ -2329,7 +2711,7 @@ function renderItems(
 
             '<div class="empty">' +
 
-            'Henüz veri yok.' +
+            '⚡ Henüz veri yok.' +
 
             '</div>';
 
@@ -2349,11 +2731,18 @@ function renderItems(
 
 
                 const badge =
+
                     index === 0
+
                     ?
-                    "YENİ"
+
+                    "⚡ YENİ"
+
                     :
-                    "#" + (index + 1);
+
+                    "#" + (
+                        index + 1
+                    );
 
 
                 return `
@@ -2378,6 +2767,7 @@ function renderItems(
 
                         </div>
 
+
                         <div class="badge">
 
                             ${badge}
@@ -2388,6 +2778,7 @@ function renderItems(
 
 
                     <div class="info-grid">
+
 
                         <div class="info">
 
@@ -2466,11 +2857,13 @@ function renderItems(
 
                         </div>
 
+
                     </div>
 
 
                     ${
                         live
+
                         ?
 
                         `
@@ -2527,75 +2920,29 @@ function renderRadar() {
 
 
     renderItems(
+
         bags,
+
         "bags",
+
         "bagCounter",
+
         "🟪"
+
     );
 
 
     renderItems(
+
         chests,
+
         "chests",
+
         "chestCounter",
+
         "🟨"
+
     );
-
-
-    document.getElementById(
-        "goodyTotal"
-    ).textContent =
-        radarData.goody_bags.length;
-
-
-    document.getElementById(
-        "chestTotal"
-    ).textContent =
-        radarData.chests.length;
-
-
-    document.getElementById(
-        "total"
-    ).textContent =
-        radarData.goody_bags.length
-        +
-        radarData.chests.length;
-
-
-    const all = [
-
-        ...radarData.goody_bags,
-
-        ...radarData.chests
-
-    ];
-
-
-    const maxPeople =
-        all.length
-
-        ?
-
-        Math.max(
-
-            ...all.map(
-                item =>
-                    Number(
-                        item.people || 0
-                    )
-            )
-
-        )
-
-        :
-
-        0;
-
-
-    document.getElementById(
-        "peopleMax"
-    ).textContent =
-        maxPeople;
 
 }
 
@@ -2605,23 +2952,29 @@ async function loadRadar() {
     try {
 
         const response =
+
             await fetch(
+
                 "/api/all?t="
                 +
                 Date.now(),
+
                 {
                     cache:
                         "no-store"
                 }
+
             );
 
 
         if (!response.ok) {
 
             throw new Error(
+
                 "HTTP "
                 +
                 response.status
+
             );
 
         }
@@ -2634,38 +2987,50 @@ async function loadRadar() {
         radarData = {
 
             chests:
+
                 Array.isArray(
                     data.chests
                 )
+
                 ?
+
                 data.chests
+
                 :
+
                 [],
 
+
             goody_bags:
+
                 Array.isArray(
                     data.goody_bags
                 )
+
                 ?
+
                 data.goody_bags
+
                 :
+
                 []
 
         };
 
 
         const status =
+
             document.getElementById(
                 "status"
             );
 
 
         status.className =
-            "status online";
+            "status";
 
 
         status.textContent =
-            "🟢 SUNUCU ONLINE";
+            "🟢 RADAR AKTİF • CANLI VERİ";
 
 
         renderRadar();
@@ -2682,6 +3047,7 @@ async function loadRadar() {
 
 
         const status =
+
             document.getElementById(
                 "status"
             );
@@ -2700,14 +3066,18 @@ async function loadRadar() {
 
 
 setInterval(
+
     loadRadar,
+
     2000
+
 );
 
 
 loadRadar();
 
 </script>
+
 
 </body>
 
@@ -3065,7 +3435,7 @@ async def main():
     )
 
     print(
-        "🏆 ÖDÜL AVCISI BAŞLIYOR"
+        "⚡ JİMİN • ÖDÜL AVCISI BAŞLIYOR"
     )
 
     print(
@@ -3149,6 +3519,10 @@ async def main():
 
     print(
         "[HAZIR] Her bölümde son 5 kayıt gösteriliyor."
+    )
+
+    print(
+        "[HAZIR] ⚡ JİMİN NEON AKTİF."
     )
 
 
