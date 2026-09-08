@@ -42,7 +42,7 @@ class RadarAPIHandler(BaseHTTPRequestHandler):
         now = int(time.time())
         global LIVE_CHESTS, LIVE_GOODY_BAGS
 
-        # Süresi dolan kayıtları bellekten temizle
+        # Süresi dolan kayıtları temizle
         LIVE_CHESTS = [b for b in LIVE_CHESTS if b.get("target_time", 0) > now]
         LIVE_GOODY_BAGS = [b for b in LIVE_GOODY_BAGS if b.get("target_time", 0) > now]
 
@@ -140,23 +140,35 @@ async def sender_worker(session: aiohttp.ClientSession):
 # Çok Dilli Regex ve Ayrıştırma Fonksiyonları
 # ---------------------------------------------------------------------------
 def extract_username(text: str):
-    # '##' kalıbı
+    # 1. '##' formatı
     for line in text.splitlines():
         if "##" in line:
-            cleaned = re.sub(r'##\s*\S+', '', line).strip()
-            cleaned = re.sub(r'^[\s>›:|-]+', '', cleaned).strip()
-            if cleaned:
-                return cleaned.replace(".", "")
+            m = re.search(r'##\s*([a-zA-Z0-9_.]+)', line)
+            if m:
+                u = m.group(1).replace(".", "").strip()
+                if u and u.lower() != "canli_yayin":
+                    return u
 
-    # @kullanici kalıbı
-    m_user = re.search(r'@([a-zA-Z0-9_.]+)', text)
-    if m_user:
-        return m_user.group(1).replace(".", "")
-
-    # TikTok URL kalıbı
+    # 2. tiktok.com/@kullanici formatı
     m_url = re.search(r'tiktok\.com/@([a-zA-Z0-9_.]+)', text)
     if m_url:
-        return m_url.group(1).replace(".", "")
+        u = m_url.group(1).replace(".", "").strip()
+        if u and u.lower() != "canli_yayin":
+            return u
+
+    # 3. @kullanici formatı
+    m_user = re.search(r'@([a-zA-Z0-9_.]+)', text)
+    if m_user:
+        u = m_user.group(1).replace(".", "").strip()
+        if u and u.lower() != "canli_yayin":
+            return u
+
+    # 4. Gruptaki bot formatları (User:, Host:, vb.)
+    m_bot = re.search(r'(?:user|host|yayıncı|kullanıcı|id)[\s:]*([a-zA-Z0-9_.]+)', text, re.IGNORECASE)
+    if m_bot:
+        u = m_bot.group(1).replace(".", "").strip()
+        if u and u.lower() != "canli_yayin":
+            return u
 
     return None
 
@@ -169,10 +181,12 @@ def extract_coins(text: str) -> int:
 
 
 def extract_duration(text: str) -> int:
+    # 02:30 veya 2m30s
     m_min_sec = re.search(r'(\d+)\s*[:m]\s*(\d+)\s*s?', text, re.IGNORECASE)
     if m_min_sec:
         return int(m_min_sec.group(1)) * 60 + int(m_min_sec.group(2))
 
+    # 120s veya Bengalce saniye
     m_sec = re.search(r'(\d+)\s*(?:s|sn|giây|সেকেন্ড)', text, re.IGNORECASE)
     if m_sec:
         return int(m_sec.group(1))
@@ -183,7 +197,7 @@ def extract_duration(text: str) -> int:
 def process_message(text: str, chat_title: str) -> str:
     raw_lower = text.lower()
 
-    # Goody Bag ayrımı: İngilizce, Vietnamca, Türkçe ve Bengalce
+    # Goody Bag ayrımı
     is_goody = any(k in raw_lower for k in [
         "goody", "túi", "bag", "çanta", "গুডিব্যাগ", "ব্যাগ"
     ])
@@ -192,31 +206,29 @@ def process_message(text: str, chat_title: str) -> str:
     coins = extract_coins(text)
     duration = extract_duration(text)
 
-    # Kullanıcı adı regex'e takılmasa bile akışı kesmemesi için yedek etiket
-    display_user = username if username else "Canli_Yayin"
+    # Geçerli bir yayıncı adı bulunamazsa sahte buton oluşmaması için listeye alma
+    if username:
+        now = int(time.time())
+        target_time = now + duration
 
-    now = int(time.time())
-    target_time = now + duration
+        box_data = {
+            "username": username,
+            "coins": coins,
+            "can_open": 5,
+            "viewers": 25,
+            "box_name": "🎒 ŞANS ÇANTASI" if is_goody else "📦 HAZİNE SANDIĞI",
+            "is_gold": (coins >= 100),
+            "target_time": target_time,
+            "total_duration": duration
+        }
 
-    box_data = {
-        "username": display_user,
-        "coins": coins,
-        "can_open": 5,
-        "viewers": 25,
-        "box_name": "🎒 ŞANS ÇANTASI" if is_goody else "📦 HAZİNE SANDIĞI",
-        "is_gold": (coins >= 100),
-        "target_time": target_time,
-        "total_duration": duration
-    }
-
-    # API havuzuna ekleme şartı genişletildi
-    if is_goody:
-        LIVE_GOODY_BAGS.append(box_data)
-    else:
-        LIVE_CHESTS.append(box_data)
+        if is_goody:
+            LIVE_GOODY_BAGS.append(box_data)
+        else:
+            LIVE_CHESTS.append(box_data)
 
     header = "🎒 YENİ GOODY BAG!" if is_goody else "🚨 YENİ SANDIK!"
-    live_link = f"https://www.tiktok.com/@{quote(display_user, safe='_-')}/live" if username else ""
+    live_link = f"https://www.tiktok.com/@{quote(username, safe='_-')}/live" if username else ""
 
     msg = f"{header}\nKaynak: {chat_title}\n💎 Değer: {coins} Coin\n⏱️ Süre: ~{duration}sn\n\n"
     if live_link:
@@ -228,7 +240,7 @@ def process_message(text: str, chat_title: str) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Telethon Dinleyici İstemcisi
+# Telethon İstemcisi
 # ---------------------------------------------------------------------------
 client = TelegramClient(
     StringSession(STRING_SESSION),
