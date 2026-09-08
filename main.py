@@ -1,14 +1,18 @@
 import os
 import re
+import time
+import json
 import asyncio
 import threading
 from urllib.parse import quote
 from http.server import HTTPServer, BaseHTTPRequestHandler
 import aiohttp
 from telethon import TelegramClient, events
-
 from telethon.sessions import StringSession
 
+# ---------------------------------------------------------------------------
+# Yapılandırma ve Ortam Değişkenleri
+# ---------------------------------------------------------------------------
 API_ID = int(os.getenv("API_ID", "36135300"))
 API_HASH = os.getenv("API_HASH", "737566711ac17fecd1ebeab1e2123773")
 STRING_SESSION = os.getenv("STRING_SESSION")
@@ -25,41 +29,68 @@ SOURCE_CHATS = [
 ]
 
 # ---------------------------------------------------------------------------
-# Health-check server (Render port bağlaması için)
+# Bellekte Canlı Tutulan Sandık ve Goody Bag Havuzları
 # ---------------------------------------------------------------------------
+LIVE_CHESTS = []
+LIVE_GOODY_BAGS = []
 
-class HealthCheck(BaseHTTPRequestHandler):
+# ---------------------------------------------------------------------------
+# API & Port Sunucusu (Google Sites için Ayrılmış Çift Katman)
+# ---------------------------------------------------------------------------
+class RadarAPIHandler(BaseHTTPRequestHandler):
     def do_GET(self):
+        now = int(time.time())
+        global LIVE_CHESTS, LIVE_GOODY_BAGS
+
+        # Süresi dolan sandık ve çantaları bellekten temizle
+        LIVE_CHESTS = [b for b in LIVE_CHESTS if b.get("target_time", 0) > now]
+        LIVE_GOODY_BAGS = [b for b in LIVE_GOODY_BAGS if b.get("target_time", 0) > now]
+
+        if self.path.startswith("/api/boxes"):
+            self.send_json_response(LIVE_CHESTS)
+        elif self.path.startswith("/api/goody_bags"):
+            self.send_json_response(LIVE_GOODY_BAGS)
+        else:
+            self.send_response(200)
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.end_headers()
+            self.wfile.write(b"VIP Radar API Aktif")
+
+    def do_OPTIONS(self):
         self.send_response(200)
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.send_header("Access-Control-Allow-Methods", "GET, OPTIONS")
+        self.send_header("Access-Control-Allow-Headers", "*")
         self.end_headers()
-        self.wfile.write(b"OK")
 
     def do_HEAD(self):
         self.send_response(200)
         self.end_headers()
 
+    def send_json_response(self, data):
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.send_header("Access-Control-Allow-Methods", "GET, OPTIONS")
+        self.send_header("Access-Control-Allow-Headers", "*")
+        self.end_headers()
+        self.wfile.write(json.dumps(data, ensure_ascii=False).encode("utf-8"))
+
     def log_message(self, *args):
         pass
 
-
 def start_server():
     port = int(os.getenv("PORT", 10000))
-    server = HTTPServer(("0.0.0.0", port), HealthCheck)
+    server = HTTPServer(("0.0.0.0", port), RadarAPIHandler)
     server.serve_forever()
 
-
 # ---------------------------------------------------------------------------
-# Gönderim kuyruğu: tek worker + rate-limit + 429 backoff
+# Telegram Gönderim Kuyruğu (Rate-limit korumalı)
 # ---------------------------------------------------------------------------
-
 send_queue: "asyncio.Queue[str]" = asyncio.Queue()
-
-# Aynı hedef sohbete Telegram Bot API ~1 msg/sn öneriyor.
 MIN_INTERVAL = 1.0
 
-
 async def sender_worker(session: aiohttp.ClientSession):
-    """Kuyruktaki mesajları sırayla, rate-limit'e uyarak gönderir."""
     if not BOT_TOKEN:
         print("❌ HATA: BOT_TOKEN tanımlı değil!")
         return
@@ -85,17 +116,14 @@ async def sender_worker(session: aiohttp.ClientSession):
                     async with session.post(url, json=payload, timeout=aiohttp.ClientTimeout(total=10)) as res:
                         data = await res.json()
                         if data.get("ok"):
-                            print(f"🚀 Mesaj iletildi -> {TARGET_CHAT_ID}")
+                            print(f"🚀 Telegram'a iletildi -> {TARGET_CHAT_ID}")
                             break
                         if res.status == 429:
                             retry_after = data.get("parameters", {}).get("retry_after", 2)
-                            print(f"⏳ Flood limit, {retry_after}s bekleniyor...")
                             await asyncio.sleep(retry_after)
                             continue
-                        print(f"❌ Telegram API Red Etti: {data}")
                         break
-                except (aiohttp.ClientError, asyncio.TimeoutError) as e:
-                    print(f"⚠️ Gönderim denemesi {attempt + 1}/3 başarısız: {e}")
+                except (aiohttp.ClientError, asyncio.TimeoutError):
                     await asyncio.sleep(1.5 * (attempt + 1))
 
             last_sent = asyncio.get_event_loop().time()
@@ -104,75 +132,96 @@ async def sender_worker(session: aiohttp.ClientSession):
         finally:
             send_queue.task_done()
 
-
 # ---------------------------------------------------------------------------
-# Mesaj ayrıştırma
+# Çok Dilli Regex ve Akıllı Ayrıştırma (İngilizce, Vietnamca, Bengalce, Türkçe)
 # ---------------------------------------------------------------------------
-
-def get_username(text: str):
+def extract_username(text: str):
+    # 1. '##' formatı
     for line in text.splitlines():
         if "##" in line:
             cleaned = re.sub(r'##\s*\S+', '', line).strip()
             cleaned = re.sub(r'^[\s>›:|-]+', '', cleaned).strip()
             if cleaned:
-                return cleaned
+                return cleaned.replace(".", "")
+
+    # 2. Doğrudan @etiketi tespiti
+    m_user = re.search(r'@([a-zA-Z0-9_.]+)', text)
+    if m_user:
+        return m_user.group(1).replace(".", "")
     return None
 
+def extract_coins(text: str) -> int:
+    # İngilizce (coin), Vietnamca (xu), Bengalce (কয়েন), Türkçe ve ikonlar
+    m = re.search(r'(\d+)\s*(?:coin|coins|xu|কয়েন|💎|🪙)', text, re.IGNORECASE)
+    if m:
+        return int(m.group(1))
+    return 10
 
-def build_tiktok_link(username: str) -> tuple[str, bool]:
-    """
-    Kaynak kanal username'i nokta ile obfuske ediyor (ör. "da.n.iel.leal1743"
-    -> gerçek hesap "danielleal1743"). Nokta HER ZAMAN temizlenir.
+def extract_duration(text: str) -> int:
+    # '02:30' veya '2m30s'
+    m_min_sec = re.search(r'(\d+)\s*[:m]\s*(\d+)\s*s?', text, re.IGNORECASE)
+    if m_min_sec:
+        return int(m_min_sec.group(1)) * 60 + int(m_min_sec.group(2))
+    
+    # '120s' veya Bengalce saniye (সেকেন্ড)
+    m_sec = re.search(r'(\d+)\s*(?:s|sn|giây|সেকেন্ড)', text, re.IGNORECASE)
+    if m_sec:
+        return int(m_sec.group(1))
+    
+    return 180  # Varsayılan 3 dakika
 
-    Alt tire (_) TikTok'ta geçerli bir karakter olduğu için silinmiyor,
-    ama gözlemlere göre alt tireli kullanıcı adlarında /live linki
-    tutarsız çalışıyor. TikTok'un kendi sunucusuna otomatik istek atıp
-    "bu hesap var mı" diye doğrulamaya çalışmak da güvenilmez sonuç
-    veriyor (bot koruması nedeniyle TikTok gerçek durumu değil generik
-    içerik döndürüyor) — bu yüzden onu denemiyoruz. Bunun yerine linki
-    HER ZAMAN veriyoruz, güven seviyesini emoji ile işaretliyoruz.
-    """
-    clean_username = username.replace(".", "")
-    has_underscore = "_" in clean_username
-    safe_user = quote(clean_username, safe="_-")
-    live_link = f"https://www.tiktok.com/@{safe_user}/live"
-    return live_link, has_underscore
+def process_message(text: str, chat_title: str) -> str:
+    raw_lower = text.lower()
 
+    # Goody Bag tespiti: İngilizce, Vietnamca, Türkçe ve Bengalce (ব্যাগ / গুডিব্যাগ)
+    is_goody = any(k in raw_lower for k in [
+        "goody", "túi", "bag", "çanta", "গুডিব্যাগ", "ব্যাগ"
+    ])
 
-def parse_tiktok_message(text: str, chat_title: str) -> str:
-    username = get_username(text)
+    username = extract_username(text)
+    coins = extract_coins(text)
+    duration = extract_duration(text)
 
-    clean_lines = []
-    for line in text.splitlines():
-        if any(bad in line for bad in ["dichvu321", "junb.io.vn", "box-countdown", "http"]):
-            continue
-        if line.strip() in [">", "=", "-", ""]:
-            continue
-        clean_lines.append(line)
+    now = int(time.time())
+    target_time = now + duration
 
-    body = "\n".join(clean_lines).strip()
-    if not body and not username:
-        body = text.strip()
+    box_data = {
+        "username": username or "Bilinmiyor",
+        "coins": coins,
+        "can_open": 5,
+        "viewers": 25,
+        "box_name": "🎒 ŞANS ÇANTASI (GOODY BAG)" if is_goody else "📦 HAZİNE SANDIĞI",
+        "is_gold": (coins >= 100),
+        "target_time": target_time,
+        "total_duration": duration
+    }
 
-    msg = f"🚨 YENİ SANDIK!\nKaynak: {chat_title}\n\n{body}\n\n"
-
+    # Ayrıştırılan öğeyi ilgili katman havuzuna ekle
     if username:
-        live_link, has_underscore = build_tiktok_link(username)
-        marker = "🟡" if has_underscore else "🟢"
-        msg += f"{marker} CANLIYA GİT:\n{live_link}"
+        if is_goody:
+            LIVE_GOODY_BAGS.append(box_data)
+        else:
+            LIVE_CHESTS.append(box_data)
+
+    header = "🎒 YENİ GOODY BAG!" if is_goody else "🚨 YENİ SANDIK!"
+    live_link = f"https://www.tiktok.com/@{quote(username or '', safe='_-')}/live" if username else ""
+
+    msg = f"{header}\nKaynak: {chat_title}\n💎 Değer: {coins} Coin\n⏱️ Süre: ~{duration}sn\n\n"
+    if live_link:
+        msg += f"🟢 CANLIYA GİT:\n{live_link}"
+    else:
+        msg += text.strip()
 
     return msg
 
-
 # ---------------------------------------------------------------------------
-# Telethon client
+# Telethon İstemcisi
 # ---------------------------------------------------------------------------
-
 client = TelegramClient(
     StringSession(STRING_SESSION),
     API_ID,
     API_HASH,
-    connection_retries=None,   # sonsuz yeniden bağlanma denemesi
+    connection_retries=None,
     retry_delay=1,
     auto_reconnect=True,
     request_retries=5,
@@ -180,13 +229,9 @@ client = TelegramClient(
 
 http_session: aiohttp.ClientSession | None = None
 
-
 @client.on(events.NewMessage(chats=SOURCE_CHATS))
 async def message_listener(event):
-    print(f"\n📥 YAKALANDI! Kaynak ID: {event.chat_id}")
     text = event.raw_text or ""
-    print(f"📄 Metin: {text[:80]}...")
-
     try:
         chat = await event.get_chat()
         chat_title = getattr(chat, "title", f"Grup ({event.chat_id})")
@@ -194,38 +239,24 @@ async def message_listener(event):
         chat_title = f"Kanal ({event.chat_id})"
 
     if http_session is None:
-        print("⚠️ HTTP session henüz hazır değil, mesaj atlandı.")
         return
 
-    # SADECE BU SATIR DÜZELTİLDİ: Hata veren "await" ve "http_session" kaldırıldı.
-    formatted_msg = parse_tiktok_message(text, chat_title)
-    
+    formatted_msg = process_message(text, chat_title)
     await send_queue.put(formatted_msg)
-
 
 async def main():
     global http_session
-    print("=== VIP Kaynak Dinleyici Başlatılıyor... ===")
+    print("=== VIP Telegram Radar Başlatılıyor... ===")
 
     connector = aiohttp.TCPConnector(limit=50, ttl_dns_cache=300)
     async with aiohttp.ClientSession(connector=connector) as session:
         http_session = session
-        worker_task = asyncio.create_task(sender_worker(session))
+        asyncio.create_task(sender_worker(session))
 
-        # catch_up=True: bağlantı kopukken gelen mesajları da yakalar.
         await client.start()
-
-        # Kritik adım: entity/peer cache'ini önceden ısıt.
-        # Bu olmadan bazı kanallarda event tetiklenmeyebiliyor.
         await client.get_dialogs()
-        print("✅ Dialog/entity cache yüklendi.")
-
-        print(f"✅ Dinleme aktif! Hedef Grup: {TARGET_CHAT_ID}")
-        try:
-            await client.run_until_disconnected()
-        finally:
-            worker_task.cancel()
-
+        print(f"✅ Dinleme aktif! Hedef: {TARGET_CHAT_ID}")
+        await client.run_until_disconnected()
 
 if __name__ == "__main__":
     threading.Thread(target=start_server, daemon=True).start()
