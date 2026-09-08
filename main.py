@@ -3,7 +3,6 @@ import re
 import json
 import base64
 import asyncio
-import threading
 from urllib.parse import unquote
 
 import aiohttp
@@ -14,7 +13,7 @@ from telethon.sessions import StringSession
 
 
 # =========================================================
-# CONFIG
+# AYARLAR
 # =========================================================
 
 API_ID = int(os.environ["API_ID"])
@@ -36,7 +35,7 @@ PORT = int(os.environ.get("PORT", "10000"))
 
 
 # =========================================================
-# STORAGE
+# RADAR HAFIZASI
 # =========================================================
 
 LIVE_GOODY_BAGS = {}
@@ -50,7 +49,7 @@ http_session = None
 
 
 # =========================================================
-# BASIC HELPERS
+# YARDIMCI
 # =========================================================
 
 def safe_int(value, default=0):
@@ -68,14 +67,10 @@ def safe_float(value, default=0):
 
 
 # =========================================================
-# TELEGRAM ENTITY / URL
+# TELEGRAM T.PHP TOKEN BUL
 # =========================================================
 
 def extract_token_from_event(event):
-    """
-    Önce raw_text içinde t.php token arar.
-    Bulamazsa Telegram URL entity'lerini kontrol eder.
-    """
 
     try:
         message = event.message
@@ -84,7 +79,7 @@ def extract_token_from_event(event):
         return None
 
     # -----------------------------------------------------
-    # 1) RAW TEXT
+    # RAW TEXT
     # -----------------------------------------------------
 
     patterns = [
@@ -93,19 +88,31 @@ def extract_token_from_event(event):
     ]
 
     for pattern in patterns:
-        m = re.search(pattern, text, re.I)
+
+        m = re.search(
+            pattern,
+            text,
+            re.I
+        )
+
         if m:
             return unquote(m.group(1))
 
     # -----------------------------------------------------
-    # 2) TELEGRAM URL ENTITIES
+    # TELEGRAM URL ENTITY
     # -----------------------------------------------------
 
     try:
+
         entities = message.entities or []
 
         for entity in entities:
-            url = getattr(entity, "url", None)
+
+            url = getattr(
+                entity,
+                "url",
+                None
+            )
 
             if not url:
                 continue
@@ -117,28 +124,40 @@ def extract_token_from_event(event):
             )
 
             if m:
-                return unquote(m.group(1))
+                return unquote(
+                    m.group(1)
+                )
 
     except Exception:
         pass
 
     # -----------------------------------------------------
-    # 3) get_entities_text()
+    # GET ENTITIES TEXT
     # -----------------------------------------------------
 
     try:
+
         for entity, entity_text in message.get_entities_text():
-            url = getattr(entity, "url", None)
 
-            if url:
-                m = re.search(
-                    r't\.php\?token=([^&\s]+)',
-                    url,
-                    re.I
+            url = getattr(
+                entity,
+                "url",
+                None
+            )
+
+            if not url:
+                continue
+
+            m = re.search(
+                r't\.php\?token=([^&\s]+)',
+                url,
+                re.I
+            )
+
+            if m:
+                return unquote(
+                    m.group(1)
                 )
-
-                if m:
-                    return unquote(m.group(1))
 
     except Exception:
         pass
@@ -147,43 +166,50 @@ def extract_token_from_event(event):
 
 
 # =========================================================
-# TOKEN DECODE
+# TOKEN ÇÖZ
 # =========================================================
 
 def decode_token(token):
+
     if not token:
         return None
 
     try:
-        token = unquote(token).strip()
 
-        padding = "=" * (-len(token) % 4)
+        token = unquote(
+            token
+        ).strip()
+
+        padding = "=" * (
+            -len(token) % 4
+        )
 
         decoded = base64.urlsafe_b64decode(
             token + padding
         )
 
-        text = decoded.decode("utf-8", errors="ignore")
+        text = decoded.decode(
+            "utf-8",
+            errors="ignore"
+        )
 
         return json.loads(text)
 
     except Exception as e:
-        print("[TOKEN ERROR]", repr(e))
+
+        print(
+            "[TOKEN ERROR]",
+            repr(e)
+        )
+
         return None
 
 
 # =========================================================
-# p= BASE64 ROOM
+# P= BASE64 ODA ID
 # =========================================================
 
 def extract_p_room(text):
-    """
-    Örneğin:
-
-    https://live.dichvu321.com/t/?p=NzY4Mjk5...
-
-    p değerini Base64 decode edip room ID çıkarır.
-    """
 
     if not text:
         return None
@@ -200,7 +226,10 @@ def extract_p_room(text):
     encoded = m.group(1)
 
     try:
-        padding = "=" * (-len(encoded) % 4)
+
+        padding = "=" * (
+            -len(encoded) % 4
+        )
 
         decoded = base64.urlsafe_b64decode(
             encoded + padding
@@ -215,16 +244,21 @@ def extract_p_room(text):
             return room
 
     except Exception as e:
-        print("[P ROOM ERROR]", repr(e))
+
+        print(
+            "[P ROOM ERROR]",
+            repr(e)
+        )
 
     return None
 
 
 # =========================================================
-# USERNAME
+# KULLANICI ADI
 # =========================================================
 
 def extract_username_from_text(text):
+
     if not text:
         return None
 
@@ -234,6 +268,7 @@ def extract_username_from_text(text):
     ]
 
     for pattern in patterns:
+
         m = re.search(
             pattern,
             text,
@@ -247,10 +282,11 @@ def extract_username_from_text(text):
 
 
 # =========================================================
-# COINS
+# COIN
 # =========================================================
 
 def extract_coins(text, token_data=None):
+
     if text:
 
         # GOODY BAG
@@ -261,7 +297,9 @@ def extract_coins(text, token_data=None):
         )
 
         if m:
-            return safe_int(m.group(1))
+            return safe_int(
+                m.group(1)
+            )
 
         # BOX
         m = re.search(
@@ -271,18 +309,23 @@ def extract_coins(text, token_data=None):
         )
 
         if m:
-            return safe_int(m.group(1))
+            return safe_int(
+                m.group(1)
+            )
 
-        # Genel 120/80
+        # GENEL 100/25
         m = re.search(
             r'(\d+)\s*/\s*(\d+)',
             text
         )
 
         if m:
-            return safe_int(m.group(1))
+            return safe_int(
+                m.group(1)
+            )
 
     if token_data:
+
         for key in [
             "coins",
             "coin",
@@ -290,19 +333,24 @@ def extract_coins(text, token_data=None):
             "gem_type",
             "item_label",
         ]:
+
             value = token_data.get(key)
 
-            if isinstance(value, (int, float)):
+            if isinstance(
+                value,
+                (int, float)
+            ):
                 return int(value)
 
     return 0
 
 
 # =========================================================
-# PEOPLE
+# KİŞİ SAYISI
 # =========================================================
 
 def extract_people_from_message(text):
+
     if not text:
         return 0
 
@@ -314,9 +362,11 @@ def extract_people_from_message(text):
     )
 
     if m:
-        return safe_int(m.group(1))
+        return safe_int(
+            m.group(1)
+        )
 
-    # BOX: 120/80
+    # BOX: 100/25
     m = re.search(
         r'BOX\s*:\s*\d+\s*/\s*(\d+)',
         text,
@@ -324,16 +374,31 @@ def extract_people_from_message(text):
     )
 
     if m:
-        return safe_int(m.group(1))
+        return safe_int(
+            m.group(1)
+        )
+
+    # RƯƠNG / genel sayı
+    m = re.search(
+        r'(?:RƯƠNG|TREO).*?(\d+)\s*/\s*(\d+)',
+        text,
+        re.I
+    )
+
+    if m:
+        return safe_int(
+            m.group(2)
+        )
 
     return 0
 
 
 # =========================================================
-# JOINED
+# KATILAN
 # =========================================================
 
 def extract_joined(text):
+
     if not text:
         return 0
 
@@ -352,27 +417,25 @@ def extract_joined(text):
         )
 
         if m:
-            return safe_int(m.group(1))
+            return safe_int(
+                m.group(1)
+            )
 
     return 0
 
 
 # =========================================================
-# VIEWERS
+# İZLENME
 # =========================================================
 
 def extract_viewers(text):
-    """
-    ÖNEMLİ:
-
-    👀 229
-    👀 4 | 1
-
-    burada ilk sayı gerçek VIEW değeridir.
-    """
 
     if not text:
         return 0
+
+    # ÖRNEK:
+    # 👀 86
+    # 👀 75 | 13
 
     m = re.search(
         r'👀\s*(\d+)',
@@ -380,16 +443,19 @@ def extract_viewers(text):
     )
 
     if m:
-        return safe_int(m.group(1))
+        return safe_int(
+            m.group(1)
+        )
 
     return 0
 
 
 # =========================================================
-# RATE
+# ORAN
 # =========================================================
 
 def extract_rate(text, token_data=None):
+
     if text:
 
         m = re.search(
@@ -399,30 +465,34 @@ def extract_rate(text, token_data=None):
         )
 
         if m:
-            return safe_float(m.group(1))
+            return safe_float(
+                m.group(1)
+            )
 
     if token_data:
+
         return safe_float(
-            token_data.get("ratio", 0)
+            token_data.get(
+                "ratio",
+                0
+            )
         )
 
     return 0
 
 
 # =========================================================
-# TYPE
+# TÜR BELİRLE
 # =========================================================
 
 def detect_type(text, token_data):
-    """
-    Token varsa is_goody_bag en güvenilir kaynak.
 
-    Token yoksa mesaj formatından karar verilir.
-    """
+    # Önce token
+    if token_data:
 
-    if token_data is not None:
-
-        value = token_data.get("is_goody_bag")
+        value = token_data.get(
+            "is_goody_bag"
+        )
 
         if value in [
             True,
@@ -442,7 +512,10 @@ def detect_type(text, token_data):
         ]:
             return False
 
-    text_upper = (text or "").upper()
+    # Token yoksa mesajdan
+    text_upper = (
+        text or ""
+    ).upper()
 
     # GOODY
     if re.search(
@@ -458,7 +531,6 @@ def detect_type(text, token_data):
     ):
         return False
 
-    # Sarı sandık sembolü
     if "🟡" in text:
         return False
 
@@ -466,22 +538,24 @@ def detect_type(text, token_data):
 
 
 # =========================================================
-# TARGET TIME
+# HEDEF ZAMAN
 # =========================================================
 
-def calculate_target_time(text, token_data=None):
-
-    # -----------------------------------------------------
-    # TOKEN TIME
-    # -----------------------------------------------------
+def calculate_target_time(
+    text,
+    token_data=None
+):
 
     if token_data:
 
-        value = token_data.get("time")
+        value = token_data.get(
+            "time"
+        )
 
         if value is not None:
 
             try:
+
                 value = int(value)
 
                 if value > 0:
@@ -489,10 +563,6 @@ def calculate_target_time(text, token_data=None):
 
             except Exception:
                 pass
-
-    # -----------------------------------------------------
-    # MESSAGE TIME
-    # -----------------------------------------------------
 
     if text:
 
@@ -504,163 +574,215 @@ def calculate_target_time(text, token_data=None):
 
         if m:
 
-            mm = safe_int(m.group(1))
-            ss = safe_int(m.group(2))
+            mm = safe_int(
+                m.group(1)
+            )
 
-            hh2 = safe_int(m.group(3))
-            mm2 = safe_int(m.group(4))
-            ss2 = safe_int(m.group(5))
+            ss = safe_int(
+                m.group(2)
+            )
 
-            # Burada şimdilik mesajdaki süreyi
-            # saniye olarak tutuyoruz.
-            return mm * 60 + ss
+            return (
+                mm * 60
+                + ss
+            )
 
     return 180
 
 
 # =========================================================
-# LIVE LINK
+# TIKTOK CANLI LINK
 # =========================================================
 
-def get_live_link(username, room, token_data=None):
+def get_live_link(
+    username,
+    room,
+    token_data=None
+):
 
     if token_data:
 
-        openitok = token_data.get("openitok")
+        openitok = token_data.get(
+            "openitok"
+        )
 
         if openitok:
-            return str(openitok)
+            return str(
+                openitok
+            )
 
     if room:
+
         return (
-            f"https://www.tiktok.com/share/live/{room}"
+            "https://www.tiktok.com/"
+            f"share/live/{room}"
         )
 
     if username:
+
         return (
-            f"https://www.tiktok.com/@{username}/live"
+            "https://www.tiktok.com/"
+            f"@{username}/live"
         )
 
     return ""
 
 
 # =========================================================
-# PARSE SOURCE MESSAGE
+# MESAJI PARÇALA
 # =========================================================
 
 def parse_source_message(event):
 
-    text = event.message.raw_text or ""
+    text = (
+        event.message.raw_text
+        or ""
+    )
 
-    # -----------------------------------------------------
     # TOKEN
-    # -----------------------------------------------------
+    token = extract_token_from_event(
+        event
+    )
 
-    token = extract_token_from_event(event)
-
-    token_data = decode_token(token)
+    token_data = decode_token(
+        token
+    )
 
     if token_data:
-        print("[TOKEN] çözüldü")
+
+        print(
+            "[TOKEN] çözüldü"
+        )
+
     else:
-        print("[TOKEN] yok -> message fallback")
 
-    # -----------------------------------------------------
-    # TYPE
-    # -----------------------------------------------------
+        print(
+            "[TOKEN] yok -> mesaj yedeği"
+        )
 
+    # TÜR
     is_goody = detect_type(
         text,
         token_data
     )
 
     if is_goody is None:
-        print("[SKIP] tür belirlenemedi")
+
+        print(
+            "[ATLANDI] tür belirlenemedi"
+        )
+
         return None
 
-    # -----------------------------------------------------
-    # USERNAME
-    # -----------------------------------------------------
-
+    # KULLANICI
     username = None
 
     if token_data:
-        username = token_data.get("username")
+
+        username = token_data.get(
+            "username"
+        )
 
     if not username:
-        username = extract_username_from_text(text)
+
+        username = extract_username_from_text(
+            text
+        )
 
     if not username:
-        username = "unknown"
 
-    # -----------------------------------------------------
+        username = "bilinmiyor"
+
     # ROOM
-    # -----------------------------------------------------
-
     room = None
 
     if token_data:
+
         for key in [
             "room",
             "room_id",
             "roomid",
         ]:
-            value = token_data.get(key)
+
+            value = token_data.get(
+                key
+            )
 
             if value:
-                room = str(value)
+
+                room = str(
+                    value
+                )
+
                 break
 
-    # TOKEN YOKSA p= BASE64
+    # TOKEN YOKSA p=
     if not room:
-        room = extract_p_room(text)
 
-    # -----------------------------------------------------
-    # VALUES
-    # -----------------------------------------------------
+        room = extract_p_room(
+            text
+        )
 
+    # VERİLER
     coins = extract_coins(
         text,
         token_data
     )
 
-    message_people = extract_people_from_message(text)
+    message_people = (
+        extract_people_from_message(
+            text
+        )
+    )
 
     if message_people:
+
         people = message_people
 
     elif token_data:
+
         people = safe_int(
-            token_data.get("people", 0)
+            token_data.get(
+                "people",
+                0
+            )
         )
 
     else:
+
         people = 0
 
-    joined = extract_joined(text)
+    joined = extract_joined(
+        text
+    )
 
     rate = extract_rate(
         text,
         token_data
     )
 
-    message_view = extract_viewers(text)
+    message_view = extract_viewers(
+        text
+    )
 
     if message_view:
+
         viewers = message_view
 
     elif token_data:
+
         viewers = safe_int(
-            token_data.get("view", 0)
+            token_data.get(
+                "view",
+                0
+            )
         )
 
     else:
+
         viewers = 0
 
-    # -----------------------------------------------------
-    # EXTRA TOKEN VALUES
-    # -----------------------------------------------------
-
+    # EK BİLGİ
     matxem = 0
     box_tag = ""
     item_label = ""
@@ -669,33 +791,37 @@ def parse_source_message(event):
     if token_data:
 
         matxem = safe_int(
-            token_data.get("matxem", 0)
+            token_data.get(
+                "matxem",
+                0
+            )
         )
 
         box_tag = str(
-            token_data.get("box_tag", "")
+            token_data.get(
+                "box_tag",
+                ""
+            )
         )
 
         item_label = str(
-            token_data.get("item_label", "")
+            token_data.get(
+                "item_label",
+                ""
+            )
         )
 
         time_display = str(
-            token_data.get("time_display", "")
+            token_data.get(
+                "time_display",
+                ""
+            )
         )
-
-    # -----------------------------------------------------
-    # TARGET
-    # -----------------------------------------------------
 
     target_time = calculate_target_time(
         text,
         token_data
     )
-
-    # -----------------------------------------------------
-    # LIVE LINK
-    # -----------------------------------------------------
 
     live_link = get_live_link(
         username,
@@ -703,12 +829,12 @@ def parse_source_message(event):
         token_data
     )
 
-    # -----------------------------------------------------
-    # RESULT
-    # -----------------------------------------------------
-
-    result = {
-        "type": "GOODY BAG" if is_goody else "CHEST",
+    return {
+        "type": (
+            "GOODY BAG"
+            if is_goody
+            else "CHEST"
+        ),
         "username": username,
         "coins": coins,
         "people": people,
@@ -725,23 +851,28 @@ def parse_source_message(event):
         "source_message_id": event.message.id,
     }
 
-    return result
-
 
 # =========================================================
-# RADAR
+# RADARA EKLE
 # =========================================================
 
 def add_to_radar(data):
 
-    room = data.get("room")
-    username = data.get("username")
+    room = data.get(
+        "room"
+    )
+
+    username = data.get(
+        "username"
+    )
 
     if not room:
+
         print(
-            "[SKIP] room bulunamadı:",
+            "[ATLANDI] oda ID bulunamadı:",
             username
         )
+
         return False
 
     target = (
@@ -750,15 +881,13 @@ def add_to_radar(data):
         else LIVE_CHESTS
     )
 
-    # -----------------------------------------------------
-    # DEDUPE ROOM
-    # -----------------------------------------------------
-
     if room in target:
+
         print(
-            "[DUPLICATE] zaten var:",
+            "[TEKRAR] Bu oda zaten radarda:",
             room
         )
+
         return False
 
     target[room] = data
@@ -768,47 +897,47 @@ def add_to_radar(data):
     )
 
     print(
-        "TYPE:",
+        "TÜR:",
         data["type"]
     )
 
     print(
-        "USERNAME:",
+        "KULLANICI:",
         username
     )
 
     print(
-        "COINS:",
+        "COIN:",
         data["coins"]
     )
 
     print(
-        "PEOPLE:",
+        "KİŞİ:",
         data["people"]
     )
 
     print(
-        "JOINED:",
+        "KATILAN:",
         data["joined"]
     )
 
     print(
-        "RATE:",
+        "ORAN:",
         data["rate"]
     )
 
     print(
-        "VIEW:",
+        "İZLENME:",
         data["view"]
     )
 
     print(
-        "ROOM:",
+        "ODA:",
         room
     )
 
     print(
-        "LIVE:",
+        "CANLI:",
         data["live"]
     )
 
@@ -816,7 +945,7 @@ def add_to_radar(data):
 
 
 # =========================================================
-# TELEGRAM BOT
+# TELEGRAM MESAJI
 # =========================================================
 
 async def send_telegram_message(data):
@@ -826,27 +955,31 @@ async def send_telegram_message(data):
     if not http_session:
         return
 
-    emoji = (
-        "🟪"
-        if data["type"] == "GOODY BAG"
-        else "🟨"
-    )
+    if data["type"] == "GOODY BAG":
+
+        baslik = "🟪 ÖDÜL ÇANTASI"
+
+    else:
+
+        baslik = "🟨 HAZİNE SANDIĞI"
 
     text = (
-        f"{emoji} <b>{data['type']}</b>\n\n"
-        f"👤 <b>{data['username']}</b>\n"
-        f"🪙 Coins: <b>{data['coins']}</b>\n"
-        f"👥 People: <b>{data['people']}</b>\n"
-        f"🙋 Joined: <b>{data['joined']}</b>\n"
-        f"📈 Rate: <b>{data['rate']}</b>\n"
-        f"👀 View: <b>{data['view']}</b>\n"
+        f"{baslik}\n\n"
+        f"👤 Kullanıcı: {data['username']}\n"
+        f"🪙 Coin: {data['coins']}\n"
+        f"👥 Kişi: {data['people']}\n"
+        f"🙋 Katılan: {data['joined']}\n"
+        f"📈 Oran: {data['rate']}\n"
+        f"👀 İzlenme: {data['view']}\n"
     )
 
     if data.get("live"):
+
         text += (
-            f"\n🔴 <a href=\"{data['live']}\">"
-            f"TIKTOK LIVE"
-            f"</a>"
+            "\n🔴 "
+            f"<a href=\"{data['live']}\">"
+            "TIKTOK CANLI YAYIN"
+            "</a>"
         )
 
     url = (
@@ -861,35 +994,130 @@ async def send_telegram_message(data):
         "disable_web_page_preview": True,
     }
 
-    try:
+    # -----------------------------------------------------
+    # 429 İÇİN OTOMATİK TEKRAR
+    # -----------------------------------------------------
 
-        async with http_session.post(
-            url,
-            json=payload
-        ) as response:
+    max_attempts = 5
 
-            result = await response.text()
+    for attempt in range(
+        1,
+        max_attempts + 1
+    ):
 
-            if response.status != 200:
+        try:
+
+            async with http_session.post(
+                url,
+                json=payload
+            ) as response:
+
+                result_text = await response.text()
+
+                # BAŞARILI
+                if response.status == 200:
+
+                    print(
+                        "[TELEGRAM] Bildirim gönderildi:",
+                        data["username"]
+                    )
+
+                    return True
+
+                # 429
+                if response.status == 429:
+
+                    try:
+
+                        result_json = json.loads(
+                            result_text
+                        )
+
+                        retry_after = (
+                            result_json
+                            .get(
+                                "parameters",
+                                {}
+                            )
+                            .get(
+                                "retry_after",
+                                30
+                            )
+                        )
+
+                    except Exception:
+
+                        retry_after = 30
+
+                    retry_after = max(
+                        1,
+                        safe_int(
+                            retry_after,
+                            30
+                        )
+                    )
+
+                    print(
+                        f"[TELEGRAM] Hız sınırı. "
+                        f"{retry_after} saniye bekleniyor..."
+                    )
+
+                    await asyncio.sleep(
+                        retry_after
+                    )
+
+                    continue
+
+                # Diğer hata
                 print(
-                    "[TELEGRAM ERROR]",
+                    "[TELEGRAM HATA]",
                     response.status,
-                    result
+                    result_text
                 )
 
-            else:
-                print(
-                    "[TELEGRAM] gönderildi:",
-                    data["username"]
+                # Geçici sunucu hataları
+                if response.status in [
+                    500,
+                    502,
+                    503,
+                    504,
+                ]:
+
+                    await asyncio.sleep(
+                        min(
+                            5 * attempt,
+                            30
+                        )
+                    )
+
+                    continue
+
+                return False
+
+        except Exception as e:
+
+            print(
+                "[TELEGRAM GÖNDERME HATASI]",
+                repr(e)
+            )
+
+            await asyncio.sleep(
+                min(
+                    5 * attempt,
+                    30
                 )
+            )
 
-    except Exception as e:
+    print(
+        "[TELEGRAM] Maksimum tekrar sayısına ulaşıldı."
+    )
 
-        print(
-            "[TELEGRAM SEND ERROR]",
-            repr(e)
-        )
+    return False
 
+
+# =========================================================
+# TELEGRAM KUYRUK
+# =========================================================
 
 async def telegram_sender():
 
@@ -898,16 +1126,20 @@ async def telegram_sender():
         data = await telegram_queue.get()
 
         try:
-            await send_telegram_message(data)
+
+            await send_telegram_message(
+                data
+            )
 
         except Exception as e:
 
             print(
-                "[QUEUE ERROR]",
+                "[KUYRUK HATASI]",
                 repr(e)
             )
 
         finally:
+
             telegram_queue.task_done()
 
 
@@ -918,14 +1150,18 @@ async def telegram_sender():
 async def api_boxes(request):
 
     return web.json_response(
-        list(LIVE_CHESTS.values())
+        list(
+            LIVE_CHESTS.values()
+        )
     )
 
 
 async def api_goody_bags(request):
 
     return web.json_response(
-        list(LIVE_GOODY_BAGS.values())
+        list(
+            LIVE_GOODY_BAGS.values()
+        )
     )
 
 
@@ -933,8 +1169,12 @@ async def api_status(request):
 
     return web.json_response({
         "status": "online",
-        "chests": len(LIVE_CHESTS),
-        "goody_bags": len(LIVE_GOODY_BAGS),
+        "chests": len(
+            LIVE_CHESTS
+        ),
+        "goody_bags": len(
+            LIVE_GOODY_BAGS
+        ),
     })
 
 
@@ -979,7 +1219,9 @@ async def start_http_server():
         api_status
     )
 
-    runner = web.AppRunner(app)
+    runner = web.AppRunner(
+        app
+    )
 
     await runner.setup()
 
@@ -992,12 +1234,12 @@ async def start_http_server():
     await site.start()
 
     print(
-        f"[HTTP] Server başladı: {PORT}"
+        f"[HTTP] Sunucu başladı: {PORT}"
     )
 
 
 # =========================================================
-# TELEGRAM EVENT
+# YENİ MESAJ
 # =========================================================
 
 async def message_listener(event):
@@ -1012,71 +1254,105 @@ async def message_listener(event):
         if key in processed_messages:
             return
 
-        processed_messages.add(key)
+        processed_messages.add(
+            key
+        )
 
-        # Belleğin sonsuza gitmesini önle
-        if len(processed_messages) > 50000:
+        if len(
+            processed_messages
+        ) > 50000:
+
             processed_messages.clear()
 
-        text = event.message.raw_text or ""
+        text = (
+            event.message.raw_text
+            or ""
+        )
 
-        print("\n" + "=" * 70)
-        print("[NEW SOURCE MESSAGE]")
+        print(
+            "\n" + "=" * 70
+        )
+
+        print(
+            "[YENİ KAYNAK MESAJI]"
+        )
+
         print(text)
-        print("=" * 70)
 
-        data = parse_source_message(event)
+        print(
+            "=" * 70
+        )
+
+        data = parse_source_message(
+            event
+        )
 
         if not data:
             return
 
-        added = add_to_radar(data)
+        added = add_to_radar(
+            data
+        )
 
         if added:
-            await telegram_queue.put(data)
+
+            await telegram_queue.put(
+                data
+            )
 
     except Exception as e:
 
         print(
-            "[LISTENER ERROR]",
+            "[DİNLEYİCİ HATASI]",
             repr(e)
         )
 
 
 # =========================================================
-# MAIN
+# ANA
 # =========================================================
 
 async def main():
 
     global http_session
 
-    print("=" * 70)
-    print("TREASURE ALERT")
-    print("=" * 70)
+    print(
+        "=" * 70
+    )
+
+    print(
+        "TREASURE ALERT BAŞLIYOR"
+    )
+
+    print(
+        "=" * 70
+    )
 
     http_session = aiohttp.ClientSession()
 
     # HTTP
     await start_http_server()
 
-    # Telegram
+    # TELEGRAM
     client = TelegramClient(
-        StringSession(STRING_SESSION),
+        StringSession(
+            STRING_SESSION
+        ),
         API_ID,
         API_HASH
     )
 
     await client.start()
 
-    print("[TELEGRAM] Client başladı.")
+    print(
+        "[TELEGRAM] İstemci bağlandı."
+    )
 
     print(
-        "[WATCH]",
+        "[TAKİP EDİLEN KANALLAR]",
         SOURCE_CHATS
     )
 
-    # Event listener
     client.add_event_handler(
         message_listener,
         events.NewMessage(
@@ -1084,13 +1360,12 @@ async def main():
         )
     )
 
-    # Telegram sender
     asyncio.create_task(
         telegram_sender()
     )
 
     print(
-        "[READY] Radar çalışıyor."
+        "[HAZIR] Radar çalışıyor."
     )
 
     try:
@@ -1102,18 +1377,21 @@ async def main():
         await http_session.close()
 
         print(
-            "[STOP] Sistem kapandı."
+            "[DURDU] Sistem kapandı."
         )
 
 
 # =========================================================
-# START
+# BAŞLAT
 # =========================================================
 
 if __name__ == "__main__":
 
     try:
-        asyncio.run(main())
+
+        asyncio.run(
+            main()
+        )
 
     except KeyboardInterrupt:
 
@@ -1124,6 +1402,6 @@ if __name__ == "__main__":
     except Exception as e:
 
         print(
-            "[FATAL]",
+            "[KRİTİK HATA]",
             repr(e)
         )
