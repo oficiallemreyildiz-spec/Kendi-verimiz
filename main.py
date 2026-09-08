@@ -39,6 +39,9 @@ PORT = int(
     )
 )
 
+# Süresi biten kayıtların sitede tutulacağı süre
+RECENT_VISIBLE_SECONDS = 120
+
 
 # =========================================================
 # RADAR HAFIZASI
@@ -61,6 +64,7 @@ http_session = None
 def safe_int(value, default=0):
 
     try:
+
         if value is None:
             return default
 
@@ -70,18 +74,21 @@ def safe_int(value, default=0):
         return int(float(value))
 
     except Exception:
+
         return default
 
 
 def safe_float(value, default=0):
 
     try:
+
         if value is None:
             return default
 
         return float(value)
 
     except Exception:
+
         return default
 
 
@@ -92,16 +99,18 @@ def safe_float(value, default=0):
 def extract_token_from_event(event):
 
     try:
+
         message = event.message
         text = message.raw_text or ""
 
     except Exception:
+
         return None
 
 
-    # =====================================================
-    # 1. RAW TEXT
-    # =====================================================
+    # -----------------------------------------------------
+    # RAW TEXT
+    # -----------------------------------------------------
 
     patterns = [
 
@@ -133,9 +142,9 @@ def extract_token_from_event(event):
             return token
 
 
-    # =====================================================
-    # 2. TELEGRAM URL ENTITY
-    # =====================================================
+    # -----------------------------------------------------
+    # TELEGRAM URL ENTITY
+    # -----------------------------------------------------
 
     try:
 
@@ -186,18 +195,15 @@ def extract_token_from_event(event):
         )
 
 
-    # =====================================================
-    # 3. ENTITY TEXT
-    # =====================================================
+    # -----------------------------------------------------
+    # ENTITY TEXT
+    # -----------------------------------------------------
 
     try:
 
-        entities_text = (
+        for entity, entity_text in (
             message.get_entities_text()
-        )
-
-
-        for entity, entity_text in entities_text:
+        ):
 
             url = getattr(
                 entity,
@@ -252,7 +258,6 @@ def extract_token_from_event(event):
 def decode_token(token):
 
     if not token:
-
         return None
 
 
@@ -290,8 +295,7 @@ def decode_token(token):
         ):
 
             print(
-                "[TOKEN] çözüldü:",
-                data
+                "[TOKEN] çözüldü"
             )
 
             return data
@@ -364,7 +368,7 @@ def extract_p_room(text):
             if room.isdigit():
 
                 print(
-                    "[ODA ID] p= üzerinden bulundu:",
+                    "[ODA ID] bulundu:",
                     room
                 )
 
@@ -383,7 +387,7 @@ def extract_p_room(text):
 
 
 # =========================================================
-# KULLANICI ADI
+# USERNAME
 # =========================================================
 
 def extract_username_from_text(text):
@@ -429,9 +433,7 @@ def extract_coins(
 
     if text:
 
-        # -------------------------------------------------
-        # GOODY BAG
-        # -------------------------------------------------
+        # GOODY
 
         m = re.search(
             r'(?:TÚI|TUI)\s*:\s*(\d+)\s*/',
@@ -447,9 +449,7 @@ def extract_coins(
             )
 
 
-        # -------------------------------------------------
         # BOX
-        # -------------------------------------------------
 
         m = re.search(
             r'BOX\s*:\s*(\d+)\s*/',
@@ -465,9 +465,7 @@ def extract_coins(
             )
 
 
-        # -------------------------------------------------
         # GENEL
-        # -------------------------------------------------
 
         m = re.search(
             r'(\d+)\s*/\s*(\d+)',
@@ -481,10 +479,6 @@ def extract_coins(
                 m.group(1)
             )
 
-
-    # -----------------------------------------------------
-    # TOKEN
-    # -----------------------------------------------------
 
     if token_data:
 
@@ -693,7 +687,7 @@ def extract_rate(
 
 
 # =========================================================
-# GOODY / CHEST TESPİTİ
+# TÜR TESPİTİ
 # =========================================================
 
 def detect_type(
@@ -707,9 +701,7 @@ def detect_type(
 
 
     # =====================================================
-    # EN ÖNEMLİ KURAL
-    #
-    # MESAJDA TÚI VARSA KESİNLİKLE GOODY BAG
+    # 1. TÚI = KESİN GOODY BAG
     # =====================================================
 
     if re.search(
@@ -718,59 +710,59 @@ def detect_type(
     ):
 
         print(
-            "[TÜR] TÚI bulundu -> GOODY BAG"
+            "[TÜR] TÚI -> GOODY BAG"
         )
 
         return True
 
 
     # =====================================================
-    # GOODY BAG YAZIYORSA
+    # 2. GOODY BAG YAZISI
     # =====================================================
 
     if re.search(
-        r'GOODY\s*BAG',
+        r'GOODY\s*BAG|REWARD\s*BAG',
         text_upper
     ):
 
         print(
-            "[TÜR] GOODY BAG bulundu"
+            "[TÜR] GOODY BAG -> GOODY BAG"
         )
 
         return True
 
 
     # =====================================================
-    # CHEST MESAJI
+    # 3. CHEST
     # =====================================================
 
     if re.search(
-        r'\bBOX\b|RƯƠNG|TREO',
+        r'\bBOX\b|RƯƠNG|TREO|HAZİNE',
         text_upper
     ):
 
         print(
-            "[TÜR] BOX/RƯƠNG/TREO bulundu -> CHEST"
+            "[TÜR] BOX/RƯƠNG/TREO -> CHEST"
         )
 
         return False
 
 
     # =====================================================
-    # SARI İŞARET
+    # 4. SARI İŞARET
     # =====================================================
 
     if "🟡" in text:
 
         print(
-            "[TÜR] 🟡 bulundu -> CHEST"
+            "[TÜR] 🟡 -> CHEST"
         )
 
         return False
 
 
     # =====================================================
-    # TOKEN
+    # 5. TOKEN
     # =====================================================
 
     if token_data:
@@ -791,7 +783,7 @@ def detect_type(
         ]:
 
             print(
-                "[TÜR] TOKEN is_goody_bag -> GOODY BAG"
+                "[TÜR] TOKEN -> GOODY BAG"
             )
 
             return True
@@ -808,7 +800,7 @@ def detect_type(
         ]:
 
             print(
-                "[TÜR] TOKEN is_goody_bag -> CHEST"
+                "[TÜR] TOKEN -> CHEST"
             )
 
             return False
@@ -822,7 +814,7 @@ def detect_type(
 
 
 # =========================================================
-# ZAMAN
+# HEDEF ZAMAN
 # =========================================================
 
 def calculate_target_time(
@@ -836,7 +828,7 @@ def calculate_target_time(
 
 
     # =====================================================
-    # TOKEN TIME
+    # TOKEN
     # =====================================================
 
     if token_data:
@@ -866,7 +858,7 @@ def calculate_target_time(
                 )
 
 
-                # Milisaniye epoch
+                # Milisaniye
 
                 if value > 10_000_000_000:
 
@@ -882,7 +874,7 @@ def calculate_target_time(
                     return value
 
 
-                # Küçük değer = süre
+                # Süre
 
                 if 0 < value < 86_400:
 
@@ -913,15 +905,16 @@ def calculate_target_time(
                 m.group(1)
             )
 
-
             seconds = safe_int(
                 m.group(2)
             )
 
 
             duration = (
+
                 minutes * 60
                 + seconds
+
             )
 
 
@@ -938,7 +931,7 @@ def calculate_target_time(
 
 
 # =========================================================
-# TIKTOK CANLI LINK
+# TIKTOK LINK
 # =========================================================
 
 def get_live_link(
@@ -971,13 +964,17 @@ def get_live_link(
 
 
                 if (
+
                     value.startswith(
                         "http://"
                     )
+
                     or
+
                     value.startswith(
                         "https://"
                     )
+
                 ):
 
                     return value
@@ -1003,7 +1000,7 @@ def get_live_link(
 
 
 # =========================================================
-# MESAJI PARÇALA
+# MESAJ PARSE
 # =========================================================
 
 def parse_source_message(event):
@@ -1020,7 +1017,11 @@ def parse_source_message(event):
     )
 
     print(
-        "[PARSE] Yeni mesaj işleniyor"
+        "[YENİ KAYNAK MESAJI]"
+    )
+
+    print(
+        text
     )
 
     print(
@@ -1040,19 +1041,6 @@ def parse_source_message(event):
     token_data = decode_token(
         token
     )
-
-
-    if token_data:
-
-        print(
-            "[PARSE] TOKEN başarıyla çözüldü"
-        )
-
-    else:
-
-        print(
-            "[PARSE] TOKEN yok/çözülemedi -> mesaj verileri kullanılacak"
-        )
 
 
     # =====================================================
@@ -1159,6 +1147,27 @@ def parse_source_message(event):
 
 
     # =====================================================
+    # ROOM YOKSA MESAJ ID FALLBACK
+    # =====================================================
+
+    if not room:
+
+        room = (
+            "msg:"
+            +
+            str(
+                event.message.id
+            )
+        )
+
+
+        print(
+            "[ROOM YOK] Mesaj ID kullanılıyor:",
+            room
+        )
+
+
+    # =====================================================
     # COIN
     # =====================================================
 
@@ -1172,21 +1181,12 @@ def parse_source_message(event):
     # PEOPLE
     # =====================================================
 
-    message_people = (
-        extract_people_from_message(
-            text
-        )
+    people = extract_people_from_message(
+        text
     )
 
 
-    if message_people:
-
-        people = message_people
-
-    elif token_data:
-
-        people = 0
-
+    if not people and token_data:
 
         for key in [
 
@@ -1206,12 +1206,9 @@ def parse_source_message(event):
                     )
                 )
 
+
                 if people:
                     break
-
-    else:
-
-        people = 0
 
 
     # =====================================================
@@ -1243,6 +1240,7 @@ def parse_source_message(event):
                     )
                 )
 
+
                 if joined:
                     break
 
@@ -1261,19 +1259,12 @@ def parse_source_message(event):
     # VIEW
     # =====================================================
 
-    message_view = extract_viewers(
+    viewers = extract_viewers(
         text
     )
 
 
-    if message_view:
-
-        viewers = message_view
-
-    elif token_data:
-
-        viewers = 0
-
+    if not viewers and token_data:
 
         for key in [
 
@@ -1293,16 +1284,13 @@ def parse_source_message(event):
                     )
                 )
 
+
                 if viewers:
                     break
 
-    else:
-
-        viewers = 0
-
 
     # =====================================================
-    # TARGET TIME
+    # TARGET
     # =====================================================
 
     target_time = calculate_target_time(
@@ -1312,7 +1300,16 @@ def parse_source_message(event):
 
 
     # =====================================================
-    # LIVE LINK
+    # DETECTED
+    # =====================================================
+
+    detected_at = int(
+        time.time()
+    )
+
+
+    # =====================================================
+    # LIVE
     # =====================================================
 
     live_link = get_live_link(
@@ -1361,7 +1358,7 @@ def parse_source_message(event):
             viewers,
 
         "room":
-            room or "",
+            room,
 
         "live":
             live_link,
@@ -1369,17 +1366,17 @@ def parse_source_message(event):
         "target_time":
             target_time,
 
+        "detected_at":
+            detected_at,
+
         "source_message_id":
             event.message.id,
-
-        "detected_at":
-            int(time.time()),
 
     }
 
 
     print(
-        "[PARSE SONUCU]"
+        "\n[PARSE SONUCU]"
     )
 
     print(
@@ -1428,8 +1425,8 @@ def parse_source_message(event):
     )
 
     print(
-        "CANLI:",
-        result["live"]
+        "ALGILANMA:",
+        result["detected_at"]
     )
 
 
@@ -1437,7 +1434,7 @@ def parse_source_message(event):
 
 
 # =========================================================
-# SÜRESİ GEÇENLERİ TEMİZLE
+# RADAR TEMİZLİĞİ
 # =========================================================
 
 def cleanup_expired():
@@ -1448,7 +1445,6 @@ def cleanup_expired():
 
 
     removed_chests = 0
-
     removed_bags = 0
 
 
@@ -1468,7 +1464,13 @@ def cleanup_expired():
         )
 
 
-        if target_time < now - 60:
+        # Süre bitince 2 dakika daha tut
+
+        if target_time < (
+            now
+            -
+            RECENT_VISIBLE_SECONDS
+        ):
 
             del LIVE_CHESTS[room]
 
@@ -1476,7 +1478,7 @@ def cleanup_expired():
 
 
     # =====================================================
-    # GOODY BAGS
+    # GOODY
     # =====================================================
 
     for room, data in list(
@@ -1491,7 +1493,11 @@ def cleanup_expired():
         )
 
 
-        if target_time < now - 60:
+        if target_time < (
+            now
+            -
+            RECENT_VISIBLE_SECONDS
+        ):
 
             del LIVE_GOODY_BAGS[room]
 
@@ -1526,23 +1532,17 @@ def add_to_radar(data):
     )
 
 
-    username = data.get(
-        "username"
-    )
-
-
     if not room:
 
         print(
-            "[ATLANDI] Oda ID bulunamadı:",
-            username
+            "[ATLANDI] Room yok"
         )
 
         return False
 
 
     # =====================================================
-    # GOODY
+    # HEDEF
     # =====================================================
 
     if data["type"] == "GOODY BAG":
@@ -1555,17 +1555,17 @@ def add_to_radar(data):
 
 
     # =====================================================
-    # AYNI ODA KONTROLÜ
+    # AYNI ROOM KONTROLÜ
     # =====================================================
 
     if room in target:
 
-        old_data = target[room]
+        old = target[room]
 
 
-        old_target = safe_int(
-            old_data.get(
-                "target_time",
+        old_detected = safe_int(
+            old.get(
+                "detected_at",
                 0
             )
         )
@@ -1576,25 +1576,35 @@ def add_to_radar(data):
         )
 
 
-        # Eski kayıt hâlâ gerçekten aktifse tekrar alma
+        # Çok yakın zamanda aynı oda tekrar geldiyse
+        # duplicate kabul et
 
-        if old_target > now:
+        if (
+            now
+            -
+            old_detected
+            <
+            5
+        ):
 
             print(
-                "[TEKRAR] Aktif oda zaten radarda:",
+                "[TEKRAR] Aynı kayıt:",
                 room
             )
 
             return False
 
 
-        # Eski kayıt bitmişse sil
+        # Yeni mesaj geldiyse güncelle
 
-        del target[room]
+        print(
+            "[GÜNCELLEME] Aynı oda yeniden geldi:",
+            room
+        )
 
 
     # =====================================================
-    # EKLE
+    # EKLE / GÜNCELLE
     # =====================================================
 
     target[room] = data
@@ -1605,49 +1615,59 @@ def add_to_radar(data):
         + "=" * 70
     )
 
+
     print(
         f"[RADAR] {data['type']} EKLENDİ"
     )
 
+
     print(
         "KULLANICI:",
-        username
+        data["username"]
     )
+
 
     print(
         "COIN:",
         data["coins"]
     )
 
+
     print(
         "KİŞİ:",
         data["people"]
     )
+
 
     print(
         "KATILAN:",
         data["joined"]
     )
 
+
     print(
         "ORAN:",
         data["rate"]
     )
+
 
     print(
         "İZLENME:",
         data["view"]
     )
 
-    print(
-        "ODA:",
-        room
-    )
 
     print(
-        "HEDEF ZAMAN:",
+        "ODA:",
+        data["room"]
+    )
+
+
+    print(
+        "HEDEF:",
         data["target_time"]
     )
+
 
     print(
         "=" * 70
@@ -1658,7 +1678,7 @@ def add_to_radar(data):
 
 
 # =========================================================
-# TELEGRAM GÖNDER
+# TELEGRAM
 # =========================================================
 
 async def send_telegram_message(data):
@@ -1707,18 +1727,11 @@ async def send_telegram_message(data):
 
     if data.get("live"):
 
-        # HTML içindeki URL için güvenli temel kontrol
-
-        live = str(
-            data["live"]
-        )
-
-
         text += (
 
             "\n🔴 "
 
-            f"<a href=\"{live}\">"
+            f"<a href=\"{data['live']}\">"
 
             "TIKTOK CANLI YAYIN"
 
@@ -1753,16 +1766,15 @@ async def send_telegram_message(data):
     }
 
 
-    # =====================================================
-    # 429 KORUMASI
-    # =====================================================
-
     max_attempts = 8
 
 
     for attempt in range(
+
         1,
+
         max_attempts + 1
+
     ):
 
         try:
@@ -1777,28 +1789,30 @@ async def send_telegram_message(data):
 
 
                 result_text = (
+
                     await response.text()
+
                 )
 
-
-                # -------------------------------------------------
-                # BAŞARILI
-                # -------------------------------------------------
 
                 if response.status == 200:
 
                     print(
+
                         "[TELEGRAM] Bildirim gönderildi:",
+
                         data["type"],
+
                         data["username"]
+
                     )
 
                     return True
 
 
-                # -------------------------------------------------
+                # -----------------------------------------
                 # 429
-                # -------------------------------------------------
+                # -----------------------------------------
 
                 if response.status == 429:
 
@@ -1844,13 +1858,10 @@ async def send_telegram_message(data):
 
 
                     print(
-                        "[TELEGRAM] Hız sınırı."
-                    )
 
-
-                    print(
-                        f"[TELEGRAM] "
+                        "[TELEGRAM] "
                         f"{retry_after} saniye bekleniyor..."
+
                     )
 
 
@@ -1862,9 +1873,9 @@ async def send_telegram_message(data):
                     continue
 
 
-                # -------------------------------------------------
-                # SUNUCU HATASI
-                # -------------------------------------------------
+                # -----------------------------------------
+                # 5xx
+                # -----------------------------------------
 
                 if response.status in [
 
@@ -1875,7 +1886,7 @@ async def send_telegram_message(data):
 
                 ]:
 
-                    bekleme = min(
+                    wait = min(
 
                         5 * attempt,
 
@@ -1885,27 +1896,29 @@ async def send_telegram_message(data):
 
 
                     print(
-                        "[TELEGRAM] Sunucu hatası.",
-                        f"{bekleme} saniye bekleniyor..."
+
+                        "[TELEGRAM] "
+                        f"Sunucu hatası: {wait}s"
+
                     )
 
 
                     await asyncio.sleep(
-                        bekleme
+                        wait
                     )
 
 
                     continue
 
 
-                # -------------------------------------------------
-                # DİĞER
-                # -------------------------------------------------
-
                 print(
+
                     "[TELEGRAM HATA]",
+
                     response.status,
+
                     result_text
+
                 )
 
 
@@ -1915,8 +1928,11 @@ async def send_telegram_message(data):
         except Exception as e:
 
             print(
+
                 "[TELEGRAM GÖNDERME HATASI]",
+
                 repr(e)
+
             )
 
 
@@ -1928,11 +1944,6 @@ async def send_telegram_message(data):
                 )
 
             )
-
-
-    print(
-        "[TELEGRAM] Maksimum tekrar sayısına ulaşıldı."
-    )
 
 
     return False
@@ -1996,62 +2007,43 @@ RADAR_HTML = r"""
     box-sizing: border-box;
 }
 
-
 html,
 body {
 
     margin: 0;
-
     padding: 0;
 
     background: #080b12;
-
-    color: #ffffff;
+    color: white;
 
     font-family:
         Arial,
         Helvetica,
         sans-serif;
-
 }
-
 
 body {
-
     padding: 14px;
-
 }
-
 
 .header {
-
     text-align: center;
-
-    margin-bottom: 18px;
-
+    margin-bottom: 20px;
 }
-
 
 .header h1 {
 
-    margin:
-        0
-        0
-        8px
-        0;
+    margin: 0 0 8px;
 
     font-size: 25px;
-
 }
-
 
 .status {
 
     display: inline-block;
 
     padding:
-        7px
-        14px;
+        7px 14px;
 
     border-radius: 20px;
 
@@ -2060,30 +2052,19 @@ body {
     font-size: 13px;
 
     font-weight: bold;
-
 }
-
 
 .status.online {
-
     color: #72ff8a;
-
 }
-
 
 .status.error {
-
     color: #ff7070;
-
 }
-
 
 .section {
-
-    margin-bottom: 26px;
-
+    margin-bottom: 28px;
 }
-
 
 .section-title {
 
@@ -2096,18 +2077,14 @@ body {
         center;
 
     margin-bottom: 11px;
-
 }
-
 
 .section-title h2 {
 
     margin: 0;
 
     font-size: 20px;
-
 }
-
 
 .counter {
 
@@ -2115,18 +2092,17 @@ body {
 
     text-align: center;
 
-    background: #171d2a;
+    padding:
+        6px 10px;
 
     border-radius: 18px;
 
-    padding:
-        6px
-        10px;
+    background: #171d2a;
+
+    font-weight: bold;
 
     font-size: 13px;
-
 }
-
 
 .card {
 
@@ -2143,23 +2119,23 @@ body {
     margin-bottom: 11px;
 
     box-shadow:
-        0
-        4px
-        15px
+        0 4px 15px
         rgba(0,0,0,.35);
-
 }
 
+.card.expired {
+
+    opacity: .65;
+
+}
 
 .card.urgent {
 
     animation:
         pulse
-        .9s
+        .8s
         infinite;
-
 }
-
 
 @keyframes pulse {
 
@@ -2172,20 +2148,17 @@ body {
 
 }
 
-
 .user {
 
     font-size: 18px;
 
     font-weight: bold;
 
-    margin-bottom: 8px;
-
     word-break:
         break-word;
 
+    margin-bottom: 8px;
 }
-
 
 .countdown {
 
@@ -2194,28 +2167,31 @@ body {
     font-weight: bold;
 
     margin:
-        7px
-        0
-        12px;
-
+        7px 0 12px;
 }
 
+.expired-text {
+
+    color: #ff9c9c;
+
+    font-size: 15px;
+
+    font-weight: bold;
+
+    margin-bottom: 8px;
+}
 
 .info {
 
     font-size: 14px;
 
-    line-height: 1.8;
-
+    line-height: 1.85;
 }
-
 
 .info b {
 
     font-size: 15px;
-
 }
-
 
 .live-button {
 
@@ -2236,26 +2212,20 @@ body {
     border-radius: 10px;
 
     font-weight: bold;
-
 }
-
 
 .empty {
 
     text-align: center;
 
-    padding:
-        22px
-        10px;
+    padding: 22px 10px;
 
     border-radius: 12px;
 
     background: #10151f;
 
     color: #7f8999;
-
 }
-
 
 .footer {
 
@@ -2266,10 +2236,7 @@ body {
     font-size: 11px;
 
     padding:
-        10px
-        0
-        20px;
-
+        10px 0 20px;
 }
 
 </style>
@@ -2303,13 +2270,11 @@ body {
 
 <div class="section">
 
-
     <div class="section-title">
 
         <h2>
             📦 Hazine Sandığı Radarı
         </h2>
-
 
         <div
             id="chestCounter"
@@ -2323,23 +2288,20 @@ body {
 
     <div id="chests"></div>
 
-
 </div>
 
 
 <!-- =====================================================
-     GOODY BAG
+     GOODY
      ===================================================== -->
 
 <div class="section">
-
 
     <div class="section-title">
 
         <h2>
             🎒 Goody Bag Radarı
         </h2>
-
 
         <div
             id="bagCounter"
@@ -2352,7 +2314,6 @@ body {
 
 
     <div id="bags"></div>
-
 
 </div>
 
@@ -2373,6 +2334,9 @@ let radarData = {
     goody_bags: []
 
 };
+
+
+const RECENT_VISIBLE_SECONDS = 120;
 
 
 function escapeHtml(value) {
@@ -2412,10 +2376,13 @@ function escapeHtml(value) {
 function formatTime(seconds) {
 
     seconds = Math.max(
+
         0,
+
         Math.floor(
             Number(seconds) || 0
         )
+
     );
 
 
@@ -2434,7 +2401,9 @@ function formatTime(seconds) {
         String(minutes)
         .padStart(2, "0")
 
-        + ":"
+        +
+
+        ":"
 
         +
 
@@ -2477,7 +2446,7 @@ function renderItems(
         );
 
 
-    const active =
+    const allItems =
 
         (
             Array.isArray(items)
@@ -2485,37 +2454,89 @@ function renderItems(
                 : []
         )
 
-        .map(item => ({
+        .map(item => {
 
-            ...item,
-
-            remaining:
-
+            const target =
                 Number(
                     item.target_time || 0
-                )
-                -
-                now
+                );
 
-        }))
+
+            const remaining =
+                target - now;
+
+
+            const recent =
+                remaining >=
+                -RECENT_VISIBLE_SECONDS;
+
+
+            return {
+
+                ...item,
+
+                remaining:
+                    remaining,
+
+                recent:
+                    recent
+
+            };
+
+        })
 
         .filter(
             item =>
-                item.remaining > 0
+                item.recent
         )
 
         .sort(
-            (a, b) =>
-                a.remaining -
-                b.remaining
+            (a, b) => {
+
+                const aActive =
+                    a.remaining > 0;
+
+                const bActive =
+                    b.remaining > 0;
+
+
+                if (
+                    aActive
+                    &&
+                    !bActive
+                ) {
+
+                    return -1;
+
+                }
+
+
+                if (
+                    !aActive
+                    &&
+                    bActive
+                ) {
+
+                    return 1;
+
+                }
+
+
+                return (
+                    a.remaining
+                    -
+                    b.remaining
+                );
+
+            }
         );
 
 
     counter.textContent =
-        active.length;
+        allItems.length;
 
 
-    if (!active.length) {
+    if (!allItems.length) {
 
         container.innerHTML =
 
@@ -2532,14 +2553,29 @@ function renderItems(
 
     container.innerHTML =
 
-        active.map(item => {
+        allItems.map(item => {
+
+
+            const active =
+                item.remaining > 0;
 
 
             const urgent =
 
+                active
+                &&
                 item.remaining <= 15
 
                     ? "urgent"
+
+                    : "";
+
+
+            const expired =
+
+                !active
+
+                    ? "expired"
 
                     : "";
 
@@ -2548,10 +2584,51 @@ function renderItems(
                 item.live || "";
 
 
+            let timeHtml;
+
+
+            if (active) {
+
+                timeHtml =
+
+                    `
+
+                    <div class="countdown">
+
+                        ⏳
+
+                        ${formatTime(
+                            item.remaining
+                        )}
+
+                    </div>
+
+                    `;
+
+            }
+
+            else {
+
+                timeHtml =
+
+                    `
+
+                    <div class="expired-text">
+
+                        ⚫ SÜRESİ DOLDU
+
+                    </div>
+
+                    `;
+
+            }
+
+
             return `
 
-            <div class="card ${urgent}">
-
+            <div
+                class="card ${urgent} ${expired}"
+            >
 
                 <div class="user">
 
@@ -2564,19 +2641,10 @@ function renderItems(
                 </div>
 
 
-                <div class="countdown">
-
-                    ⏳
-
-                    ${formatTime(
-                        item.remaining
-                    )}
-
-                </div>
+                ${timeHtml}
 
 
                 <div class="info">
-
 
                     🪙 Coin:
 
@@ -2630,13 +2698,13 @@ function renderItems(
                         )}
                     </b>
 
-
                 </div>
 
 
                 ${
                     live
                     ?
+
                     `
 
                     <a
@@ -2658,15 +2726,16 @@ function renderItems(
                     </a>
 
                     `
-                    :
-                    ""
-                }
 
+                    :
+
+                    ""
+
+                }
 
             </div>
 
             `;
-
 
         }).join("");
 
@@ -2674,7 +2743,6 @@ function renderItems(
 
 
 function renderRadar() {
-
 
     renderItems(
 
@@ -2715,7 +2783,9 @@ async function loadRadar() {
 
                 "/api/all?t="
 
-                + Date.now(),
+                +
+
+                Date.now(),
 
                 {
 
@@ -2748,7 +2818,6 @@ async function loadRadar() {
 
 
         radarData = {
-
 
             chests:
 
@@ -2794,7 +2863,6 @@ async function loadRadar() {
 
 
         status.textContent =
-
             "🟢 SUNUCU ONLINE";
 
 
@@ -2824,7 +2892,6 @@ async function loadRadar() {
 
 
         status.textContent =
-
             "🔴 VERİ BAĞLANTISI HATASI";
 
     }
@@ -2832,9 +2899,7 @@ async function loadRadar() {
 }
 
 
-// =====================================================
-// GERİ SAYIM
-// =====================================================
+// Her saniye geri sayım
 
 setInterval(
 
@@ -2845,9 +2910,7 @@ setInterval(
 );
 
 
-// =====================================================
-// VERİ YENİLEME
-// =====================================================
+// Her 2 saniyede API
 
 setInterval(
 
@@ -2858,9 +2921,7 @@ setInterval(
 );
 
 
-// =====================================================
-// İLK YÜKLEME
-// =====================================================
+// İlk yükleme
 
 loadRadar();
 
@@ -2955,7 +3016,7 @@ async def cors_middleware(
 
 
 # =========================================================
-# API
+# API BOXES
 # =========================================================
 
 async def api_boxes(request):
@@ -2972,6 +3033,10 @@ async def api_boxes(request):
     )
 
 
+# =========================================================
+# API GOODY
+# =========================================================
+
 async def api_goody_bags(request):
 
     cleanup_expired()
@@ -2985,6 +3050,10 @@ async def api_goody_bags(request):
 
     )
 
+
+# =========================================================
+# STATUS
+# =========================================================
 
 async def api_status(request):
 
@@ -3013,6 +3082,10 @@ async def api_status(request):
 
     })
 
+
+# =========================================================
+# ALL
+# =========================================================
 
 async def api_all(request):
 
@@ -3119,6 +3192,7 @@ async def start_http_server():
         "/api/boxes",
 
         lambda request:
+
             web.Response(
                 status=204
             )
@@ -3131,6 +3205,7 @@ async def start_http_server():
         "/api/goody_bags",
 
         lambda request:
+
             web.Response(
                 status=204
             )
@@ -3143,6 +3218,7 @@ async def start_http_server():
         "/api/status",
 
         lambda request:
+
             web.Response(
                 status=204
             )
@@ -3155,6 +3231,7 @@ async def start_http_server():
         "/api/all",
 
         lambda request:
+
             web.Response(
                 status=204
             )
@@ -3207,12 +3284,14 @@ async def start_http_server():
 
 
     print(
-        "[HTTP] Radar: /radar"
+        "[HTTP] Radar:",
+        "/radar"
     )
 
 
     print(
-        "[HTTP] API: /api/all"
+        "[HTTP] API:",
+        "/api/all"
     )
 
 
@@ -3234,10 +3313,6 @@ async def message_listener(event):
         )
 
 
-        # =================================================
-        # AYNI MESAJI TEKRAR İŞLEME
-        # =================================================
-
         if key in processed_messages:
 
             return
@@ -3247,8 +3322,6 @@ async def message_listener(event):
             key
         )
 
-
-        # Bellek sınırı
 
         if len(
             processed_messages
@@ -3302,7 +3375,7 @@ async def message_listener(event):
 
 
         # =================================================
-        # RADARA EKLE
+        # RADAR
         # =================================================
 
         added = add_to_radar(
@@ -3310,9 +3383,11 @@ async def message_listener(event):
         )
 
 
-        if added:
+        # =================================================
+        # TELEGRAM
+        # =================================================
 
-            # Telegram kuyruğuna gönder
+        if added:
 
             await telegram_queue.put(
                 data
@@ -3340,9 +3415,11 @@ async def main():
         "=" * 70
     )
 
+
     print(
         "🚨 TREASURE ALERT BAŞLIYOR"
     )
+
 
     print(
         "=" * 70
@@ -3366,7 +3443,7 @@ async def main():
 
 
     # =====================================================
-    # TELEGRAM CLIENT
+    # TELEGRAM
     # =====================================================
 
     client = TelegramClient(
@@ -3439,13 +3516,17 @@ async def main():
     )
 
 
+    print(
+        "[HAZIR] Süresi biten kayıtlar 120 saniye görünür."
+    )
+
+
     try:
 
         await client.run_until_disconnected()
 
 
     finally:
-
 
         if http_session:
 
