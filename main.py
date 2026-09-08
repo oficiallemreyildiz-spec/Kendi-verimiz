@@ -99,7 +99,6 @@ def extract_token_from_event(event):
         r'https?://[^ \n\]\)]+t\.php\?token=([^&\s\]\)]+)',
     ]
 
-
     for pattern in patterns:
 
         m = re.search(
@@ -109,6 +108,7 @@ def extract_token_from_event(event):
         )
 
         if m:
+
             return unquote(
                 m.group(1)
             )
@@ -143,6 +143,7 @@ def extract_token_from_event(event):
             )
 
             if m:
+
                 return unquote(
                     m.group(1)
                 )
@@ -177,6 +178,7 @@ def extract_token_from_event(event):
             )
 
             if m:
+
                 return unquote(
                     m.group(1)
                 )
@@ -301,6 +303,7 @@ def extract_username_from_text(text):
         )
 
         if m:
+
             return m.group(1).strip()
 
     return None
@@ -325,6 +328,7 @@ def extract_coins(
         )
 
         if m:
+
             return safe_int(
                 m.group(1)
             )
@@ -338,6 +342,7 @@ def extract_coins(
         )
 
         if m:
+
             return safe_int(
                 m.group(1)
             )
@@ -350,6 +355,7 @@ def extract_coins(
         )
 
         if m:
+
             return safe_int(
                 m.group(1)
             )
@@ -396,6 +402,7 @@ def extract_people_from_message(text):
     )
 
     if m:
+
         return safe_int(
             m.group(1)
         )
@@ -409,6 +416,7 @@ def extract_people_from_message(text):
     )
 
     if m:
+
         return safe_int(
             m.group(1)
         )
@@ -421,6 +429,7 @@ def extract_people_from_message(text):
     )
 
     if m:
+
         return safe_int(
             m.group(2)
         )
@@ -453,6 +462,7 @@ def extract_joined(text):
         )
 
         if m:
+
             return safe_int(
                 m.group(1)
             )
@@ -475,6 +485,7 @@ def extract_viewers(text):
     )
 
     if m:
+
         return safe_int(
             m.group(1)
         )
@@ -500,6 +511,7 @@ def extract_rate(
         )
 
         if m:
+
             return safe_float(
                 m.group(1)
             )
@@ -527,7 +539,10 @@ def detect_type(
     token_data
 ):
 
+    # -----------------------------------------------------
     # TOKEN
+    # -----------------------------------------------------
+
     if token_data:
 
         value = token_data.get(
@@ -556,7 +571,10 @@ def detect_type(
             return False
 
 
+    # -----------------------------------------------------
     # MESAJ
+    # -----------------------------------------------------
+
     text_upper = (
         text or ""
     ).upper()
@@ -595,18 +613,6 @@ def calculate_target_time(
     text,
     token_data=None
 ):
-    """
-    Her zaman Unix epoch saniyesi döndürür.
-
-    Örnek:
-
-    TIME: 01:30
-
-    => şimdi + 90 saniye
-
-    Token mutlak Unix zamanı veriyorsa
-    onu da otomatik tanır.
-    """
 
     now = int(
         time.time()
@@ -996,6 +1002,76 @@ def parse_source_message(event):
 
 
 # =========================================================
+# ESKİ VERİLERİ TEMİZLE
+# =========================================================
+
+def cleanup_expired():
+
+    now = int(
+        time.time()
+    )
+
+    removed_chests = 0
+    removed_bags = 0
+
+
+    # -----------------------------------------------------
+    # CHESTS
+    # -----------------------------------------------------
+
+    for room, data in list(
+        LIVE_CHESTS.items()
+    ):
+
+        target_time = safe_int(
+            data.get(
+                "target_time",
+                0
+            )
+        )
+
+        if target_time < now - 60:
+
+            del LIVE_CHESTS[room]
+
+            removed_chests += 1
+
+
+    # -----------------------------------------------------
+    # GOODY
+    # -----------------------------------------------------
+
+    for room, data in list(
+        LIVE_GOODY_BAGS.items()
+    ):
+
+        target_time = safe_int(
+            data.get(
+                "target_time",
+                0
+            )
+        )
+
+        if target_time < now - 60:
+
+            del LIVE_GOODY_BAGS[room]
+
+            removed_bags += 1
+
+
+    if (
+        removed_chests
+        or removed_bags
+    ):
+
+        print(
+            "[TEMİZLİK]",
+            f"Sandık: {removed_chests}",
+            f"Goody: {removed_bags}"
+        )
+
+
+# =========================================================
 # RADARA EKLE
 # =========================================================
 
@@ -1264,7 +1340,6 @@ async def send_telegram_message(data):
                         retry_after
                     )
 
-
                     continue
 
 
@@ -1367,6 +1442,637 @@ async def telegram_sender():
 
 
 # =========================================================
+# RADAR WEB SAYFASI
+# =========================================================
+
+RADAR_HTML = r"""
+<!DOCTYPE html>
+<html lang="tr">
+
+<head>
+
+<meta charset="UTF-8">
+
+<meta
+    name="viewport"
+    content="width=device-width, initial-scale=1.0"
+>
+
+<title>Treasure Alert Radar</title>
+
+<style>
+
+* {
+    box-sizing: border-box;
+}
+
+html,
+body {
+    margin: 0;
+    padding: 0;
+    background: #080b12;
+    color: #ffffff;
+    font-family:
+        Arial,
+        Helvetica,
+        sans-serif;
+}
+
+body {
+    padding: 14px;
+}
+
+.header {
+    text-align: center;
+    margin-bottom: 18px;
+}
+
+.header h1 {
+    margin: 0 0 7px 0;
+    font-size: 25px;
+}
+
+.status {
+    display: inline-block;
+    padding: 7px 13px;
+    border-radius: 20px;
+    background: #111827;
+    font-size: 13px;
+    font-weight: bold;
+}
+
+.status.online {
+    color: #72ff8a;
+}
+
+.status.error {
+    color: #ff6b6b;
+}
+
+.section {
+    margin-bottom: 26px;
+}
+
+.section-title {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 11px;
+}
+
+.section-title h2 {
+    margin: 0;
+    font-size: 20px;
+}
+
+.counter {
+    background: #171d2a;
+    border-radius: 15px;
+    padding: 5px 10px;
+    font-size: 12px;
+}
+
+.card {
+    background: #121824;
+    border: 1px solid #202938;
+    border-radius: 15px;
+    padding: 15px;
+    margin-bottom: 11px;
+    box-shadow:
+        0 4px 15px rgba(0,0,0,.35);
+    transition:
+        transform .15s ease;
+}
+
+.card:hover {
+    transform: translateY(-2px);
+}
+
+.card.urgent {
+    animation: pulse 0.9s infinite;
+}
+
+@keyframes pulse {
+
+    50% {
+        transform: scale(1.015);
+    }
+
+}
+
+.user {
+    font-size: 18px;
+    font-weight: bold;
+    margin-bottom: 8px;
+    word-break: break-word;
+}
+
+.countdown {
+    font-size: 27px;
+    font-weight: bold;
+    margin: 7px 0 12px;
+}
+
+.info {
+    font-size: 14px;
+    line-height: 1.8;
+}
+
+.info b {
+    font-size: 15px;
+}
+
+.live-button {
+    display: block;
+    text-align: center;
+    text-decoration: none;
+    color: white;
+    background: #e91e4d;
+    padding: 11px;
+    margin-top: 13px;
+    border-radius: 10px;
+    font-weight: bold;
+}
+
+.empty {
+    text-align: center;
+    padding: 22px 10px;
+    border-radius: 12px;
+    background: #10151f;
+    color: #7f8999;
+}
+
+.footer {
+    text-align: center;
+    color: #687386;
+    font-size: 11px;
+    padding: 10px 0 20px;
+}
+
+</style>
+
+</head>
+
+<body>
+
+<div class="header">
+
+    <h1>🚨 TREASURE ALERT</h1>
+
+    <div
+        id="status"
+        class="status"
+    >
+        🟡 SUNUCU BAĞLANIYOR...
+    </div>
+
+</div>
+
+
+<!-- =====================================================
+     HAZİNE SANDIĞI
+     ===================================================== -->
+
+<div class="section">
+
+    <div class="section-title">
+
+        <h2>
+            📦 Hazine Sandığı Radarı
+        </h2>
+
+        <div
+            id="chestCounter"
+            class="counter"
+        >
+            0
+        </div>
+
+    </div>
+
+    <div id="chests"></div>
+
+</div>
+
+
+<!-- =====================================================
+     GOODY BAG
+     ===================================================== -->
+
+<div class="section">
+
+    <div class="section-title">
+
+        <h2>
+            🎒 Goody Bag Radarı
+        </h2>
+
+        <div
+            id="bagCounter"
+            class="counter"
+        >
+            0
+        </div>
+
+    </div>
+
+    <div id="bags"></div>
+
+</div>
+
+
+<div class="footer">
+    Treasure Alert • Canlı Radar
+</div>
+
+
+<script>
+
+let radarData = {
+
+    chests: [],
+
+    goody_bags: []
+
+};
+
+
+function escapeHtml(value) {
+
+    return String(value ?? "")
+
+        .replace(/&/g, "&amp;")
+
+        .replace(/</g, "&lt;")
+
+        .replace(/>/g, "&gt;")
+
+        .replace(/"/g, "&quot;")
+
+        .replace(/'/g, "&#039;");
+}
+
+
+function formatTime(seconds) {
+
+    seconds = Math.max(
+        0,
+        Math.floor(seconds)
+    );
+
+
+    const minutes =
+        Math.floor(seconds / 60);
+
+
+    const secs =
+        seconds % 60;
+
+
+    return (
+        String(minutes).padStart(2, "0")
+        + ":"
+        + String(secs).padStart(2, "0")
+    );
+}
+
+
+function renderItems(
+    items,
+    elementId,
+    counterId,
+    icon
+) {
+
+    const container =
+        document.getElementById(
+            elementId
+        );
+
+
+    const counter =
+        document.getElementById(
+            counterId
+        );
+
+
+    const now =
+        Math.floor(
+            Date.now() / 1000
+        );
+
+
+    const active =
+        (Array.isArray(items)
+            ? items
+            : []
+        )
+
+        .map(item => ({
+
+            ...item,
+
+            remaining:
+                Number(
+                    item.target_time || 0
+                ) - now
+
+        }))
+
+        .filter(item =>
+            item.remaining > 0
+        )
+
+        .sort(
+            (a, b) =>
+                a.remaining -
+                b.remaining
+        );
+
+
+    counter.textContent =
+        active.length;
+
+
+    if (!active.length) {
+
+        container.innerHTML =
+            '<div class="empty">' +
+            'Şu anda aktif veri yok.' +
+            '</div>';
+
+        return;
+    }
+
+
+    container.innerHTML =
+        active.map(item => {
+
+            const urgent =
+                item.remaining <= 15
+                    ? "urgent"
+                    : "";
+
+
+            const live =
+                item.live || "";
+
+
+            const username =
+                escapeHtml(
+                    item.username
+                );
+
+
+            const coins =
+                escapeHtml(
+                    item.coins
+                );
+
+
+            const people =
+                escapeHtml(
+                    item.people
+                );
+
+
+            const joined =
+                escapeHtml(
+                    item.joined
+                );
+
+
+            const rate =
+                escapeHtml(
+                    item.rate
+                );
+
+
+            const view =
+                escapeHtml(
+                    item.view
+                );
+
+
+            return `
+
+            <div class="card ${urgent}">
+
+                <div class="user">
+                    ${icon}
+                    ${username}
+                </div>
+
+
+                <div class="countdown">
+                    ⏳
+                    ${formatTime(
+                        item.remaining
+                    )}
+                </div>
+
+
+                <div class="info">
+
+                    🪙 Coin:
+                    <b>${coins}</b>
+
+                    <br>
+
+                    👥 Kişi:
+                    <b>${people}</b>
+
+                    <br>
+
+                    🙋 Katılan:
+                    <b>${joined}</b>
+
+                    <br>
+
+                    📈 Oran:
+                    <b>${rate}</b>
+
+                    <br>
+
+                    👀 İzlenme:
+                    <b>${view}</b>
+
+                </div>
+
+
+                ${
+                    live
+                    ?
+                    `
+                    <a
+                        class="live-button"
+                        href="${escapeHtml(live)}"
+                        target="_blank"
+                        rel="noopener"
+                    >
+                        🔴 TIKTOK CANLI YAYIN
+                    </a>
+                    `
+                    :
+                    ""
+                }
+
+            </div>
+
+            `;
+
+        }).join("");
+}
+
+
+function renderRadar() {
+
+    renderItems(
+        radarData.chests || [],
+        "chests",
+        "chestCounter",
+        "🟨"
+    );
+
+
+    renderItems(
+        radarData.goody_bags || [],
+        "bags",
+        "bagCounter",
+        "🟪"
+    );
+}
+
+
+async function loadRadar() {
+
+    try {
+
+        const response =
+            await fetch(
+                "/api/all?t=" +
+                Date.now(),
+                {
+                    cache: "no-store"
+                }
+            );
+
+
+        if (!response.ok) {
+
+            throw new Error(
+                "HTTP " +
+                response.status
+            );
+
+        }
+
+
+        const data =
+            await response.json();
+
+
+        radarData = {
+
+            chests:
+                Array.isArray(
+                    data.chests
+                )
+                ? data.chests
+                : [],
+
+            goody_bags:
+                Array.isArray(
+                    data.goody_bags
+                )
+                ? data.goody_bags
+                : []
+
+        };
+
+
+        const status =
+            document.getElementById(
+                "status"
+            );
+
+
+        status.className =
+            "status online";
+
+
+        status.textContent =
+            "🟢 SUNUCU ONLINE";
+
+
+        renderRadar();
+
+
+    } catch (error) {
+
+        console.error(
+            "Radar hatası:",
+            error
+        );
+
+
+        const status =
+            document.getElementById(
+                "status"
+            );
+
+
+        status.className =
+            "status error";
+
+
+        status.textContent =
+            "🔴 VERİ BAĞLANTISI HATASI";
+
+    }
+
+}
+
+
+// Geri sayımı her saniye yenile
+setInterval(
+    renderRadar,
+    1000
+);
+
+
+// Yeni verileri her 2 saniyede çek
+setInterval(
+    loadRadar,
+    2000
+);
+
+
+// İlk yükleme
+loadRadar();
+
+</script>
+
+</body>
+
+</html>
+"""
+
+
+async def radar_page(request):
+
+    return web.Response(
+
+        text=RADAR_HTML,
+
+        content_type="text/html",
+
+        charset="utf-8"
+
+    )
+
+
+# =========================================================
 # CORS
 # =========================================================
 
@@ -1380,16 +2086,25 @@ async def cors_middleware(
     if request.method == "OPTIONS":
 
         return web.Response(
+
             status=204,
+
             headers={
-                "Access-Control-Allow-Origin": "*",
+
+                "Access-Control-Allow-Origin":
+                    "*",
+
                 "Access-Control-Allow-Methods":
                     "GET, OPTIONS",
+
                 "Access-Control-Allow-Headers":
                     "*",
+
                 "Access-Control-Max-Age":
                     "86400",
+
             }
+
         )
 
 
@@ -1422,6 +2137,8 @@ async def cors_middleware(
 
 async def api_boxes(request):
 
+    cleanup_expired()
+
     return web.json_response(
         list(
             LIVE_CHESTS.values()
@@ -1431,6 +2148,8 @@ async def api_boxes(request):
 
 async def api_goody_bags(request):
 
+    cleanup_expired()
+
     return web.json_response(
         list(
             LIVE_GOODY_BAGS.values()
@@ -1439,6 +2158,8 @@ async def api_goody_bags(request):
 
 
 async def api_status(request):
+
+    cleanup_expired()
 
     return web.json_response({
 
@@ -1453,10 +2174,13 @@ async def api_status(request):
 
         "server_time":
             int(time.time()),
+
     })
 
 
 async def api_all(request):
+
+    cleanup_expired()
 
     return web.json_response({
 
@@ -1475,6 +2199,7 @@ async def api_all(request):
             list(
                 LIVE_GOODY_BAGS.values()
             ),
+
     })
 
 
@@ -1485,11 +2210,27 @@ async def api_all(request):
 async def start_http_server():
 
     app = web.Application(
+
         middlewares=[
             cors_middleware
         ]
+
     )
 
+
+    # -----------------------------------------------------
+    # RADAR
+    # -----------------------------------------------------
+
+    app.router.add_get(
+        "/radar",
+        radar_page
+    )
+
+
+    # -----------------------------------------------------
+    # API
+    # -----------------------------------------------------
 
     app.router.add_get(
         "/api/boxes",
@@ -1515,37 +2256,53 @@ async def start_http_server():
     )
 
 
+    # -----------------------------------------------------
+    # OPTIONS
+    # -----------------------------------------------------
+
     app.router.add_options(
         "/api/boxes",
         lambda request:
-            web.Response(status=204)
+            web.Response(
+                status=204
+            )
     )
 
 
     app.router.add_options(
         "/api/goody_bags",
         lambda request:
-            web.Response(status=204)
+            web.Response(
+                status=204
+            )
     )
 
 
     app.router.add_options(
         "/api/all",
         lambda request:
-            web.Response(status=204)
+            web.Response(
+                status=204
+            )
     )
 
 
     app.router.add_options(
         "/api/status",
         lambda request:
-            web.Response(status=204)
+            web.Response(
+                status=204
+            )
     )
 
 
+    # -----------------------------------------------------
+    # ANA SAYFA
+    # -----------------------------------------------------
+
     app.router.add_get(
         "/",
-        api_status
+        radar_page
     )
 
 
@@ -1571,6 +2328,10 @@ async def start_http_server():
         f"[HTTP] Sunucu başladı: {PORT}"
     )
 
+    print(
+        "[HTTP] Radar: /radar"
+    )
+
 
 # =========================================================
 # TELEGRAM KAYNAK MESAJI
@@ -1587,6 +2348,7 @@ async def message_listener(event):
 
 
         if key in processed_messages:
+
             return
 
 
@@ -1636,6 +2398,7 @@ async def message_listener(event):
 
 
         if not data:
+
             return
 
 
@@ -1686,17 +2449,27 @@ async def main():
     )
 
 
+    # -----------------------------------------------------
     # HTTP
+    # -----------------------------------------------------
+
     await start_http_server()
 
 
+    # -----------------------------------------------------
     # TELEGRAM
+    # -----------------------------------------------------
+
     client = TelegramClient(
+
         StringSession(
             STRING_SESSION
         ),
+
         API_ID,
+
         API_HASH
+
     )
 
 
@@ -1715,14 +2488,20 @@ async def main():
 
 
     client.add_event_handler(
+
         message_listener,
+
         events.NewMessage(
             chats=SOURCE_CHATS
         )
+
     )
 
 
-    # Telegram gönderici
+    # -----------------------------------------------------
+    # TELEGRAM GÖNDERİCİ
+    # -----------------------------------------------------
+
     asyncio.create_task(
         telegram_sender()
     )
@@ -1740,7 +2519,9 @@ async def main():
 
     finally:
 
-        await http_session.close()
+        if http_session:
+
+            await http_session.close()
 
 
         print(
