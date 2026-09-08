@@ -1,3 +1,19 @@
+# ============================================================
+# 🏆 ÖDÜL AVCISI - TAM SÜRÜM
+# ============================================================
+# - Goody Bag ve Hazine Sandığı ayrı
+# - Son 5 kayıt
+# - Yeni gelen kayıt ⚡ YENİ
+# - SQLite kalıcı geçmiş
+# - Güçlü duplicate koruması
+# - Telegram otomatik tekrar deneme
+# - COIN ALARMI -> değeri SEN belirliyorsun
+# - DÜŞÜK KİŞİ ALARMI -> değeri SEN belirliyorsun
+# - Coin + kişi alarmı aynı anda çalışabilir
+# - Alarm aynı kayıt için tekrar tekrar gönderilmez
+# - Telegram linki normal tıklanabilir URL
+# ============================================================
+
 import os
 import re
 import json
@@ -14,9 +30,9 @@ from telethon import TelegramClient, events
 from telethon.sessions import StringSession
 
 
-# =========================================================
-# AYARLAR
-# =========================================================
+# ============================================================
+# 🔧 TELEGRAM / RADAR AYARLARI
+# ============================================================
 
 API_ID = int(os.environ["API_ID"])
 API_HASH = os.environ["API_HASH"]
@@ -30,17 +46,79 @@ SOURCE_CHATS = [
     -1003965749742,
     -1002223772922,
     -1002485768492,
-    -1002583301445
+    -1002583301445,
 ]
 
 PORT = int(os.environ.get("PORT", "10000"))
 
-DB_PATH = os.environ.get(
-    "DATABASE_PATH",
-    "radar.db"
+
+# ============================================================
+# 🚨 ALARM AYARLARI
+# ============================================================
+#
+# BURADAKİ DEĞERLERİ TAMAMEN SEN BELİRLERSİN.
+#
+# ÖRNEK:
+#
+# COIN_ALARM_LIMIT = 500
+# -> 500 coin ve üzeri alarm verir.
+#
+# PEOPLE_ALARM_LIMIT = 5
+# -> 5 kişi ve altı alarm verir.
+#
+# İSTEDİĞİN ZAMAN DEĞİŞTİREBİLİRSİN.
+# ============================================================
+
+COIN_ALARM_LIMIT = 100
+
+PEOPLE_ALARM_LIMIT = 5
+
+
+# ============================================================
+# 💾 DATABASE
+# ============================================================
+
+DB_PATH = os.environ.get("DATABASE_PATH", "radar.db")
+
+db = sqlite3.connect(
+    DB_PATH,
+    check_same_thread=False
 )
 
-MAX_HISTORY = 500
+db.execute("""
+CREATE TABLE IF NOT EXISTS radar_history (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    event_key TEXT UNIQUE,
+    event_type TEXT,
+    username TEXT,
+    coins INTEGER,
+    people INTEGER,
+    joined INTEGER,
+    rate REAL,
+    viewers INTEGER,
+    room TEXT,
+    live TEXT,
+    target_time INTEGER,
+    detected_at INTEGER
+)
+""")
+
+db.execute("""
+CREATE TABLE IF NOT EXISTS alarm_history (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    alarm_key TEXT UNIQUE,
+    event_key TEXT,
+    alarm_type TEXT,
+    created_at INTEGER
+)
+""")
+
+db.commit()
+
+
+# ============================================================
+# 🧠 RAM
+# ============================================================
 
 LIVE_GOODY_BAGS = {}
 LIVE_CHESTS = {}
@@ -51,300 +129,53 @@ processed_signatures = set()
 telegram_queue = asyncio.Queue()
 
 http_session = None
-client = None
 
 
-# =========================================================
-# SQLITE
-# =========================================================
-
-db = sqlite3.connect(
-    DB_PATH,
-    check_same_thread=False
-)
-
-db.row_factory = sqlite3.Row
-
-db.execute("""
-CREATE TABLE IF NOT EXISTS radar_history (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    event_key TEXT UNIQUE,
-    event_type TEXT NOT NULL,
-    username TEXT,
-    coins INTEGER DEFAULT 0,
-    people INTEGER DEFAULT 0,
-    joined INTEGER DEFAULT 0,
-    rate REAL DEFAULT 0,
-    viewers INTEGER DEFAULT 0,
-    room TEXT,
-    live TEXT,
-    target_time INTEGER DEFAULT 0,
-    detected_at INTEGER DEFAULT 0,
-    source_message_id INTEGER DEFAULT 0,
-    source_chat_id INTEGER DEFAULT 0
-)
-""")
-
-db.execute("""
-CREATE INDEX IF NOT EXISTS idx_radar_detected
-ON radar_history(detected_at)
-""")
-
-db.execute("""
-CREATE INDEX IF NOT EXISTS idx_radar_type
-ON radar_history(event_type)
-""")
-
-db.commit()
-
-
-def db_save(d, event_key):
-    try:
-
-        db.execute("""
-        INSERT OR IGNORE INTO radar_history
-        (
-            event_key,
-            event_type,
-            username,
-            coins,
-            people,
-            joined,
-            rate,
-            viewers,
-            room,
-            live,
-            target_time,
-            detected_at,
-            source_message_id,
-            source_chat_id
-        )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """, (
-            event_key,
-            d["type"],
-            d["username"],
-            safe_int(d["coins"]),
-            safe_int(d["people"]),
-            safe_int(d["joined"]),
-            safe_float(d["rate"]),
-            safe_int(d["view"]),
-            str(d["room"]),
-            d.get("live", ""),
-            safe_int(d["target_time"]),
-            safe_int(d["detected_at"]),
-            safe_int(d.get("source_message_id")),
-            safe_int(d.get("source_chat_id"))
-        ))
-
-        db.commit()
-
-        return True
-
-    except Exception as e:
-
-        print(
-            "[SQLITE KAYIT HATASI]",
-            repr(e)
-        )
-
-        return False
-
-
-def db_exists(event_key):
-
-    try:
-
-        row = db.execute(
-            """
-            SELECT 1
-            FROM radar_history
-            WHERE event_key=?
-            LIMIT 1
-            """,
-            (event_key,)
-        ).fetchone()
-
-        return row is not None
-
-    except Exception as e:
-
-        print(
-            "[SQLITE KONTROL HATASI]",
-            repr(e)
-        )
-
-        return False
-
-
-def db_stats():
-
-    try:
-
-        total = db.execute(
-            "SELECT COUNT(*) FROM radar_history"
-        ).fetchone()[0]
-
-        total_coins = db.execute(
-            "SELECT COALESCE(SUM(coins),0) FROM radar_history"
-        ).fetchone()[0]
-
-        goody = db.execute(
-            """
-            SELECT COUNT(*)
-            FROM radar_history
-            WHERE event_type='GOODY BAG'
-            """
-        ).fetchone()[0]
-
-        chest = db.execute(
-            """
-            SELECT COUNT(*)
-            FROM radar_history
-            WHERE event_type='CHEST'
-            """
-        ).fetchone()[0]
-
-        return {
-            "total": total,
-            "total_coins": total_coins,
-            "goody": goody,
-            "chest": chest
-        }
-
-    except Exception as e:
-
-        print(
-            "[SQLITE İSTATİSTİK HATASI]",
-            repr(e)
-        )
-
-        return {
-            "total": 0,
-            "total_coins": 0,
-            "goody": 0,
-            "chest": 0
-        }
-
-
-def db_load_recent():
-
-    try:
-
-        rows = db.execute("""
-        SELECT *
-        FROM radar_history
-        ORDER BY detected_at DESC
-        LIMIT ?
-        """, (MAX_HISTORY,)).fetchall()
-
-        for row in reversed(rows):
-
-            d = {
-                "type": row["event_type"],
-                "box_name":
-                    "Goody Bag"
-                    if row["event_type"] == "GOODY BAG"
-                    else "Hazine Sandığı",
-
-                "username": row["username"],
-                "coins": row["coins"],
-                "people": row["people"],
-                "joined": row["joined"],
-                "rate": row["rate"],
-                "view": row["viewers"],
-                "room": row["room"],
-                "live": row["live"],
-                "target_time": row["target_time"],
-                "detected_at": row["detected_at"],
-                "source_message_id": row["source_message_id"],
-                "source_chat_id": row["source_chat_id"]
-            }
-
-            target = (
-                LIVE_GOODY_BAGS
-                if d["type"] == "GOODY BAG"
-                else LIVE_CHESTS
-            )
-
-            if d["room"]:
-                target[d["room"]] = d
-
-        print(
-            "[SQLITE] Geçmiş kayıtlar yüklendi:",
-            len(rows)
-        )
-
-    except Exception as e:
-
-        print(
-            "[SQLITE YÜKLEME HATASI]",
-            repr(e)
-        )
-
-
-# =========================================================
-# YARDIMCI
-# =========================================================
+# ============================================================
+# 🛡️ YARDIMCI FONKSİYONLAR
+# ============================================================
 
 def safe_int(v, d=0):
-
     try:
         return int(float(v))
-    except:
+    except Exception:
         return d
 
 
 def safe_float(v, d=0):
-
     try:
         return float(v)
-    except:
+    except Exception:
         return d
 
 
-# =========================================================
-# TOKEN
-# =========================================================
+# ============================================================
+# 🔗 TOKEN
+# ============================================================
 
 def token_from_event(e):
-
     try:
         m = e.message
         t = m.raw_text or ""
-    except:
+    except Exception:
         return None
 
-    patterns = [
+    pats = [
         r'https?://[^ \n\]\)]+/t\.php\?token=([^&\s\]\)]+)',
-        r'https?://[^ \n\]\)]+t\.php\?token=([^&\s\]\)]+)'
+        r'https?://[^ \n\]\)]+t\.php\?token=([^&\s\]\)]+)',
     ]
 
-    for p in patterns:
-
-        m1 = re.search(
-            p,
-            t,
-            re.I
-        )
+    for p in pats:
+        m1 = re.search(p, t, re.I)
 
         if m1:
-            return unquote(
-                m1.group(1)
-            )
+            return unquote(m1.group(1))
 
     try:
-
         for ent in m.entities or []:
-
-            u = getattr(
-                ent,
-                "url",
-                None
-            )
+            u = getattr(ent, "url", None)
 
             if u:
-
                 m1 = re.search(
                     r't\.php\?token=([^&\s]+)',
                     u,
@@ -352,29 +183,16 @@ def token_from_event(e):
                 )
 
                 if m1:
-                    return unquote(
-                        m1.group(1)
-                    )
+                    return unquote(m1.group(1))
 
-    except Exception as e:
-
-        print(
-            "[TOKEN ENTITY]",
-            repr(e)
-        )
+    except Exception as x:
+        print("[TOKEN ENTITY]", repr(x))
 
     try:
-
         for ent, _ in m.get_entities_text():
-
-            u = getattr(
-                ent,
-                "url",
-                None
-            )
+            u = getattr(ent, "url", None)
 
             if u:
-
                 m1 = re.search(
                     r't\.php\?token=([^&\s]+)',
                     u,
@@ -382,30 +200,20 @@ def token_from_event(e):
                 )
 
                 if m1:
-                    return unquote(
-                        m1.group(1)
-                    )
+                    return unquote(m1.group(1))
 
-    except Exception as e:
-
-        print(
-            "[TOKEN ENTITY TEXT]",
-            repr(e)
-        )
+    except Exception as x:
+        print("[TOKEN ENTITY TEXT]", repr(x))
 
     return None
 
 
 def decode_token(tok):
-
     if not tok:
         return None
 
     try:
-
-        s = unquote(
-            str(tok)
-        ).strip()
+        s = unquote(str(tok)).strip()
 
         return json.loads(
             base64.urlsafe_b64decode(
@@ -416,66 +224,56 @@ def decode_token(tok):
             )
         )
 
-    except Exception as e:
-
-        print(
-            "[TOKEN HATA]",
-            repr(e)
-        )
-
+    except Exception as x:
+        print("[TOKEN HATA]", repr(x))
         return None
 
 
-# =========================================================
-# ROOM
-# =========================================================
+# ============================================================
+# 🏠 ROOM
+# ============================================================
 
 def room_from_text(t):
 
     patterns = [
         r'https?://live\.dichvu321\.com/t/\?p=([A-Za-z0-9_\-+/=]+)',
-        r'https?://[^ \n]+/t/\?p=([A-Za-z0-9_\-+/=]+)'
+        r'https?://[^ \n]+/t/\?p=([A-Za-z0-9_\-+/=]+)',
     ]
 
     for p in patterns:
 
-        m = re.search(
-            p,
-            t or "",
-            re.I
-        )
+        m = re.search(p, t or "", re.I)
 
         if m:
-
             try:
 
                 s = m.group(1)
 
-                room = base64.urlsafe_b64decode(
+                r = base64.urlsafe_b64decode(
                     s + "=" * (-len(s) % 4)
                 ).decode(
                     "utf-8",
                     errors="ignore"
                 ).strip()
 
-                if room.isdigit():
-                    return room
+                if r.isdigit():
+                    return r
 
-            except:
+            except Exception:
                 pass
 
     return None
 
 
-# =========================================================
-# USERNAME
-# =========================================================
+# ============================================================
+# 👤 USERNAME
+# ============================================================
 
 def username_from_text(t):
 
     patterns = [
         r'^\s*##\s*T\d+\s*[›>:]\s*([^\s\n]+)',
-        r'^\s*T\d+\s*[›>:]\s*([^\s\n]+)'
+        r'^\s*T\d+\s*[›>:]\s*([^\s\n]+)',
     ]
 
     for p in patterns:
@@ -492,16 +290,16 @@ def username_from_text(t):
     return None
 
 
-# =========================================================
-# COIN
-# =========================================================
+# ============================================================
+# 🪙 COIN
+# ============================================================
 
 def coins(t, d=None):
 
     patterns = [
         r'(?:TÚI|TUI)\s*:\s*(\d+)\s*/',
         r'BOX\s*:\s*(\d+)\s*/',
-        r'(\d+)\s*/\s*(\d+)'
+        r'(\d+)\s*/\s*(\d+)',
     ]
 
     for p in patterns:
@@ -513,9 +311,7 @@ def coins(t, d=None):
         )
 
         if m:
-            return safe_int(
-                m.group(1)
-            )
+            return safe_int(m.group(1))
 
     if d:
 
@@ -528,23 +324,21 @@ def coins(t, d=None):
         ]:
 
             if k in d:
-                return safe_int(
-                    d[k]
-                )
+                return safe_int(d[k])
 
     return 0
 
 
-# =========================================================
-# PEOPLE
-# =========================================================
+# ============================================================
+# 👥 KİŞİ
+# ============================================================
 
 def people(t):
 
     patterns = [
         r'(?:TÚI|TUI)\s*:\s*\d+\s*/\s*(\d+)',
         r'BOX\s*:\s*\d+\s*/\s*(\d+)',
-        r'(\d+)\s*/\s*(\d+)'
+        r'(\d+)\s*/\s*(\d+)',
     ]
 
     for p in patterns:
@@ -557,32 +351,24 @@ def people(t):
 
         if m:
 
-            if (
-                "TÚI" in p
-                or "TUI" in p
-                or "BOX" in p
-            ):
-                return safe_int(
-                    m.group(1)
-                )
+            if "TÚI" in p or "TUI" in p or "BOX" in p:
+                return safe_int(m.group(1))
 
-            return safe_int(
-                m.group(2)
-            )
+            return safe_int(m.group(2))
 
     return 0
 
 
-# =========================================================
-# JOINED
-# =========================================================
+# ============================================================
+# 🙋 JOINED
+# ============================================================
 
 def joined(t):
 
     patterns = [
         r'Đã\s*join\s*:\s*(\d+)',
         r'joined\s*:\s*(\d+)',
-        r'join\s*:\s*(\d+)'
+        r'join\s*:\s*(\d+)',
     ]
 
     for p in patterns:
@@ -594,16 +380,14 @@ def joined(t):
         )
 
         if m:
-            return safe_int(
-                m.group(1)
-            )
+            return safe_int(m.group(1))
 
     return 0
 
 
-# =========================================================
-# VIEWERS
-# =========================================================
+# ============================================================
+# 👀 VIEWERS
+# ============================================================
 
 def viewers(t):
 
@@ -612,16 +396,15 @@ def viewers(t):
         t or ""
     )
 
-    return (
-        safe_int(m.group(1))
-        if m
-        else 0
-    )
+    if m:
+        return safe_int(m.group(1))
+
+    return 0
 
 
-# =========================================================
-# RATE
-# =========================================================
+# ============================================================
+# 📈 RATE
+# ============================================================
 
 def rate(t, d=None):
 
@@ -632,9 +415,7 @@ def rate(t, d=None):
     )
 
     if m:
-        return safe_float(
-            m.group(1)
-        )
+        return safe_float(m.group(1))
 
     if d:
 
@@ -644,16 +425,14 @@ def rate(t, d=None):
         ]:
 
             if k in d:
-                return safe_float(
-                    d[k]
-                )
+                return safe_float(d[k])
 
     return 0
 
 
-# =========================================================
-# GOODY / CHEST
-# =========================================================
+# ============================================================
+# 🟪 / 🟨 TİP
+# ============================================================
 
 def is_goody(t, d):
 
@@ -665,13 +444,10 @@ def is_goody(t, d):
     ):
         return True
 
-    if (
-        re.search(
-            r'\bBOX\b|RƯƠNG|TREO|HAZİNE',
-            u
-        )
-        or "🟡" in t
-    ):
+    if re.search(
+        r'\bBOX\b|RƯƠNG|TREO|HAZİNE',
+        u
+    ) or "🟡" in t:
         return False
 
     if d:
@@ -697,9 +473,9 @@ def is_goody(t, d):
     return None
 
 
-# =========================================================
-# TARGET TIME
-# =========================================================
+# ============================================================
+# ⏰ TARGET TIME
+# ============================================================
 
 def target_time(t, d=None):
 
@@ -718,9 +494,7 @@ def target_time(t, d=None):
 
                 try:
 
-                    v = int(
-                        float(d[k])
-                    )
+                    v = int(float(d[k]))
 
                     if v > 10_000_000_000:
                         return v // 1000
@@ -731,7 +505,7 @@ def target_time(t, d=None):
                     if 0 < v < 86400:
                         return now + v
 
-                except:
+                except Exception:
                     pass
 
     m = re.search(
@@ -751,9 +525,9 @@ def target_time(t, d=None):
     return now + 180
 
 
-# =========================================================
-# PARSE
-# =========================================================
+# ============================================================
+# 🔎 PARSE
+# ============================================================
 
 def parse(event):
 
@@ -763,17 +537,16 @@ def parse(event):
         token_from_event(event)
     )
 
-    g = is_goody(
-        t,
-        d
-    )
+    g = is_goody(t, d)
 
     if g is None:
         return None
 
+    # --------------------------------------------------------
     # USERNAME
+    # --------------------------------------------------------
 
-    username = None
+    u = None
 
     for k in [
         "username",
@@ -784,22 +557,20 @@ def parse(event):
 
         if d and d.get(k):
 
-            username = str(
-                d[k]
-            )
-
+            u = str(d[k])
             break
 
-    username = (
-        username
+    u = (
+        u
         or username_from_text(t)
         or "bilinmiyor"
     )
 
-
+    # --------------------------------------------------------
     # ROOM
+    # --------------------------------------------------------
 
-    room = None
+    r = None
 
     for k in [
         "room",
@@ -811,20 +582,18 @@ def parse(event):
 
         if d and d.get(k):
 
-            room = str(
-                d[k]
-            )
-
+            r = str(d[k])
             break
 
-    room = (
-        room
+    r = (
+        r
         or room_from_text(t)
         or "msg:" + str(event.message.id)
     )
 
-
+    # --------------------------------------------------------
     # PEOPLE
+    # --------------------------------------------------------
 
     p = people(t)
 
@@ -839,15 +608,14 @@ def parse(event):
 
             if k in d:
 
-                p = safe_int(
-                    d[k]
-                )
+                p = safe_int(d[k])
 
                 if p:
                     break
 
-
+    # --------------------------------------------------------
     # JOINED
+    # --------------------------------------------------------
 
     j = joined(t)
 
@@ -862,15 +630,14 @@ def parse(event):
 
             if k in d:
 
-                j = safe_int(
-                    d[k]
-                )
+                j = safe_int(d[k])
 
                 if j:
                     break
 
-
+    # --------------------------------------------------------
     # VIEWERS
+    # --------------------------------------------------------
 
     v = viewers(t)
 
@@ -885,15 +652,14 @@ def parse(event):
 
             if k in d:
 
-                v = safe_int(
-                    d[k]
-                )
+                v = safe_int(d[k])
 
                 if v:
                     break
 
-
-    # LIVE
+    # --------------------------------------------------------
+    # LIVE URL
+    # --------------------------------------------------------
 
     live = ""
 
@@ -908,138 +674,277 @@ def parse(event):
 
             if (
                 d.get(k)
-                and str(
-                    d[k]
-                ).startswith(
-                    (
-                        "http://",
-                        "https://"
-                    )
+                and str(d[k]).startswith(
+                    ("http://", "https://")
                 )
             ):
 
-                live = str(
-                    d[k]
-                )
-
+                live = str(d[k])
                 break
 
-    live = live or (
-        f"https://www.tiktok.com/share/live/{room}"
-        if room
-        else f"https://www.tiktok.com/@{username}/live"
-    )
+    if not live:
 
+        live = (
+            f"https://www.tiktok.com/share/live/{r}"
+            if r
+            else f"https://www.tiktok.com/@{u}/live"
+        )
 
     return {
-        "type":
-            "GOODY BAG"
-            if g
-            else "CHEST",
-
-        "box_name":
+        "type": "GOODY BAG" if g else "CHEST",
+        "box_name": (
             "Goody Bag"
             if g
-            else "Hazine Sandığı",
-
-        "username":
-            username,
-
-        "coins":
-            coins(t, d),
-
-        "people":
-            p,
-
-        "joined":
-            j,
-
-        "rate":
-            rate(t, d),
-
-        "view":
-            v,
-
-        "room":
-            room,
-
-        "live":
-            live,
-
-        "target_time":
-            target_time(t, d),
-
-        "detected_at":
-            int(time.time()),
-
-        "source_message_id":
-            event.message.id,
-
-        "source_chat_id":
-            safe_int(
-                event.chat_id
-            )
+            else "Hazine Sandığı"
+        ),
+        "username": u,
+        "coins": coins(t, d),
+        "people": p,
+        "joined": j,
+        "rate": rate(t, d),
+        "view": v,
+        "room": r,
+        "live": live,
+        "target_time": target_time(t, d),
+        "detected_at": int(time.time()),
+        "source_message_id": event.message.id,
     }
 
 
-# =========================================================
-# DUPLICATE ANAHTARI
-# =========================================================
+# ============================================================
+# 🔑 EVENT KEY
+# ============================================================
 
 def make_event_key(d):
 
-    return "|".join([
-        d["type"],
-        str(d.get("room", "")),
-        str(d.get("username", "")).lower(),
-        str(d.get("coins", 0)),
-        str(d.get("people", 0)),
-        str(d.get("source_message_id", 0))
-    ])
+    if not d:
+        return ""
+
+    room = str(d.get("room", ""))
+
+    msg = str(
+        d.get(
+            "source_message_id",
+            ""
+        )
+    )
+
+    username = str(
+        d.get(
+            "username",
+            ""
+        )
+    )
+
+    event_type = str(
+        d.get(
+            "type",
+            ""
+        )
+    )
+
+    return (
+        f"{event_type}|"
+        f"{room}|"
+        f"{msg}|"
+        f"{username}"
+    )
 
 
-# =========================================================
-# RADAR'A EKLE
-# =========================================================
+# ============================================================
+# 💾 DATABASE KAYDET
+# ============================================================
+
+def db_save(d):
+
+    key = make_event_key(d)
+
+    try:
+
+        db.execute("""
+        INSERT OR IGNORE INTO radar_history
+        (
+            event_key,
+            event_type,
+            username,
+            coins,
+            people,
+            joined,
+            rate,
+            viewers,
+            room,
+            live,
+            target_time,
+            detected_at
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (
+            key,
+            d["type"],
+            d["username"],
+            safe_int(d["coins"]),
+            safe_int(d["people"]),
+            safe_int(d["joined"]),
+            safe_float(d["rate"]),
+            safe_int(d["view"]),
+            str(d["room"]),
+            d.get("live", ""),
+            safe_int(d["target_time"]),
+            safe_int(d["detected_at"]),
+        ))
+
+        db.commit()
+
+    except Exception as e:
+
+        print(
+            "[DB SAVE HATA]",
+            repr(e)
+        )
+
+
+# ============================================================
+# 💾 ALARM DATABASE
+# ============================================================
+
+def alarm_exists(alarm_key):
+
+    try:
+
+        row = db.execute(
+            """
+            SELECT 1
+            FROM alarm_history
+            WHERE alarm_key = ?
+            LIMIT 1
+            """,
+            (alarm_key,)
+        ).fetchone()
+
+        return row is not None
+
+    except Exception as e:
+
+        print(
+            "[DB ALARM CHECK]",
+            repr(e)
+        )
+
+        return False
+
+
+def save_alarm(
+    alarm_key,
+    event_key,
+    alarm_type
+):
+
+    try:
+
+        db.execute("""
+        INSERT OR IGNORE INTO alarm_history
+        (
+            alarm_key,
+            event_key,
+            alarm_type,
+            created_at
+        )
+        VALUES (?, ?, ?, ?)
+        """, (
+            alarm_key,
+            event_key,
+            alarm_type,
+            int(time.time())
+        ))
+
+        db.commit()
+
+        return True
+
+    except Exception as e:
+
+        print(
+            "[DB ALARM SAVE]",
+            repr(e)
+        )
+
+        return False
+
+
+# ============================================================
+# 🚨 ALARM KONTROLÜ
+# ============================================================
+
+def get_alarms(d):
+
+    alarms = []
+
+    coin = safe_int(
+        d.get("coins")
+    )
+
+    person = safe_int(
+        d.get("people")
+    )
+
+    event_key = make_event_key(d)
+
+    # --------------------------------------------------------
+    # 🪙 COIN ALARMI
+    # --------------------------------------------------------
+
+    if (
+        COIN_ALARM_LIMIT > 0
+        and coin >= COIN_ALARM_LIMIT
+    ):
+
+        alarms.append({
+            "type": "COIN",
+            "title": "🚨 COIN ALARMI",
+            "key": (
+                f"{event_key}|"
+                f"COIN|"
+                f"{COIN_ALARM_LIMIT}"
+            )
+        })
+
+    # --------------------------------------------------------
+    # 👥 DÜŞÜK KİŞİ ALARMI
+    # --------------------------------------------------------
+    #
+    # people = 0 ise parser veri bulamamış olabilir.
+    # Yanlış alarm vermemesi için 0 dikkate alınmıyor.
+    # --------------------------------------------------------
+
+    if (
+        PEOPLE_ALARM_LIMIT > 0
+        and 0 < person <= PEOPLE_ALARM_LIMIT
+    ):
+
+        alarms.append({
+            "type": "PEOPLE",
+            "title": "⚠️ DÜŞÜK KİŞİ ALARMI",
+            "key": (
+                f"{event_key}|"
+                f"PEOPLE|"
+                f"{PEOPLE_ALARM_LIMIT}"
+            )
+        })
+
+    return alarms
+
+
+# ============================================================
+# ➕ RADARA EKLE
+# ============================================================
 
 def add(d):
 
     if not d:
         return False
 
-    room = d.get("room")
-
-    if not room:
+    if not d.get("room"):
         return False
-
-    event_key = make_event_key(d)
-
-    # RAM duplicate
-
-    if event_key in processed_signatures:
-
-        print(
-            "[DUPLICATE] RAM:",
-            event_key
-        )
-
-        return False
-
-    # SQLITE duplicate
-
-    if db_exists(event_key):
-
-        processed_signatures.add(
-            event_key
-        )
-
-        print(
-            "[DUPLICATE] SQLITE:",
-            d["username"]
-        )
-
-        return False
-
 
     target = (
         LIVE_GOODY_BAGS
@@ -1047,16 +952,14 @@ def add(d):
         else LIVE_CHESTS
     )
 
+    r = d["room"]
 
-    # Aynı oda çok kısa sürede tekrar gelirse
-    # spam oluşturma
-
-    if room in target:
-
-        old = target[room]
+    if r in target:
 
         old_time = safe_int(
-            old.get("detected_at")
+            target[r].get(
+                "detected_at"
+            )
         )
 
         if (
@@ -1064,39 +967,29 @@ def add(d):
             - old_time
             < 5
         ):
-
             return False
 
+    target[r] = d
 
-    db_save(
-        d,
-        event_key
-    )
-
-    processed_signatures.add(
-        event_key
-    )
-
-    target[room] = d
-
+    db_save(d)
 
     print(
         "[RADAR]",
         d["type"],
-        "|",
         d["username"],
-        "| COIN:",
+        "COIN:",
         d["coins"],
-        "| PEOPLE:",
-        d["people"]
+        "KİŞİ:",
+        d["people"],
+        "EKLENDİ"
     )
 
     return True
 
 
-# =========================================================
-# TELEGRAM
-# =========================================================
+# ============================================================
+# 📩 NORMAL TELEGRAM
+# ============================================================
 
 async def send_tg(d):
 
@@ -1105,13 +998,11 @@ async def send_tg(d):
     if not http_session:
         return
 
-
     title = (
         "🟪 GOODY BAG"
         if d["type"] == "GOODY BAG"
         else "🟨 HAZİNE SANDIĞI"
     )
-
 
     text = (
         f"{title}\n\n"
@@ -1124,101 +1015,62 @@ async def send_tg(d):
         f"🏠 Oda: {d['room']}\n"
     )
 
-
-    # BUTON YOK.
-    # NORMAL TIKLANABİLİR URL.
-
+    # NORMAL TIKLANABİLİR URL
     if d.get("live"):
-
-        text += (
-            f"\n🔴 {d['live']}"
-        )
-
+        text += f"\n🔴 {d['live']}"
 
     url = (
         f"https://api.telegram.org/"
         f"bot{BOT_TOKEN}/sendMessage"
     )
 
-
     for attempt in range(1, 9):
 
         try:
 
-            payload = {
-                "chat_id":
-                    TARGET_CHAT_ID,
-
-                "text":
-                    text,
-
-                "disable_web_page_preview":
-                    True
-            }
-
-
             async with http_session.post(
                 url,
-                json=payload
+                json={
+                    "chat_id": TARGET_CHAT_ID,
+                    "text": text,
+                    "disable_web_page_preview": True,
+                }
             ) as response:
 
-                response_text = (
-                    await response.text()
-                )
-
+                response_text = await response.text()
 
                 if response.status == 200:
-
-                    print(
-                        "[TELEGRAM] Gönderildi:",
-                        d["username"]
-                    )
-
                     return
-
 
                 if response.status == 429:
 
                     try:
 
-                        retry_after = (
-                            json.loads(
-                                response_text
-                            )
-                            .get(
-                                "parameters",
-                                {}
-                            )
-                            .get(
-                                "retry_after",
-                                30
-                            )
+                        wait_time = json.loads(
+                            response_text
+                        ).get(
+                            "parameters",
+                            {}
+                        ).get(
+                            "retry_after",
+                            30
                         )
 
-                    except:
+                    except Exception:
 
-                        retry_after = 30
-
-
-                    print(
-                        "[TELEGRAM] RATE LIMIT:",
-                        retry_after,
-                        "sn"
-                    )
-
+                        wait_time = 30
 
                     await asyncio.sleep(
                         max(
                             1,
                             safe_int(
-                                retry_after,
+                                wait_time,
                                 30
                             )
                         )
                     )
 
                     continue
-
 
                 if response.status in [
                     500,
@@ -1236,7 +1088,6 @@ async def send_tg(d):
 
                     continue
 
-
                 print(
                     "[TELEGRAM HATA]",
                     response.status,
@@ -1244,7 +1095,6 @@ async def send_tg(d):
                 )
 
                 return
-
 
         except Exception as e:
 
@@ -1261,15 +1111,176 @@ async def send_tg(d):
             )
 
 
+# ============================================================
+# 🚨 ALARM TELEGRAM
+# ============================================================
+
+async def send_alarm(
+    d,
+    alarm
+):
+
+    global http_session
+
+    if not http_session:
+        return
+
+    if alarm["type"] == "COIN":
+
+        title = "🚨 COIN ALARMI"
+
+        reason = (
+            f"🪙 Coin: {d['coins']}\n"
+            f"🎯 Senin limitin: "
+            f"{COIN_ALARM_LIMIT}"
+        )
+
+    else:
+
+        title = "⚠️ DÜŞÜK KİŞİ ALARMI"
+
+        reason = (
+            f"👥 Kişi: {d['people']}\n"
+            f"🎯 Senin limitin: "
+            f"{PEOPLE_ALARM_LIMIT}"
+        )
+
+    box_title = (
+        "🟪 GOODY BAG"
+        if d["type"] == "GOODY BAG"
+        else "🟨 HAZİNE SANDIĞI"
+    )
+
+    text = (
+        f"{title}\n\n"
+        f"{box_title}\n"
+        f"👤 Kullanıcı: {d['username']}\n"
+        f"{reason}\n"
+        f"🙋 Katılan: {d['joined']}\n"
+        f"📈 Oran: {d['rate']}\n"
+        f"👀 İzlenme: {d['view']}\n"
+        f"🏠 Oda: {d['room']}\n"
+    )
+
+    if d.get("live"):
+        text += f"\n🔴 {d['live']}"
+
+    url = (
+        f"https://api.telegram.org/"
+        f"bot{BOT_TOKEN}/sendMessage"
+    )
+
+    for attempt in range(1, 9):
+
+        try:
+
+            async with http_session.post(
+                url,
+                json={
+                    "chat_id": TARGET_CHAT_ID,
+                    "text": text,
+                    "disable_web_page_preview": True,
+                }
+            ) as response:
+
+                response_text = await response.text()
+
+                if response.status == 200:
+                    return
+
+                if response.status == 429:
+
+                    try:
+
+                        wait_time = json.loads(
+                            response_text
+                        ).get(
+                            "parameters",
+                            {}
+                        ).get(
+                            "retry_after",
+                            30
+                        )
+
+                    except Exception:
+
+                        wait_time = 30
+
+                    await asyncio.sleep(
+                        max(
+                            1,
+                            safe_int(
+                                wait_time,
+                                30
+                            )
+                        )
+                    )
+
+                    continue
+
+                if response.status in [
+                    500,
+                    502,
+                    503,
+                    504
+                ]:
+
+                    await asyncio.sleep(
+                        min(
+                            5 * attempt,
+                            30
+                        )
+                    )
+
+                    continue
+
+                print(
+                    "[ALARM TELEGRAM HATA]",
+                    response.status,
+                    response_text
+                )
+
+                return
+
+        except Exception as e:
+
+            print(
+                "[ALARM TELEGRAM]",
+                repr(e)
+            )
+
+            await asyncio.sleep(
+                min(
+                    5 * attempt,
+                    30
+                )
+            )
+
+
+# ============================================================
+# 📤 TELEGRAM QUEUE
+# ============================================================
+
 async def sender():
 
     while True:
 
-        d = await telegram_queue.get()
+        job = await telegram_queue.get()
 
         try:
 
-            await send_tg(d)
+            if job["kind"] == "normal":
+
+                await send_tg(
+                    job["data"]
+                )
+
+            elif job["kind"] == "alarm":
+
+                await send_alarm(
+                    job["data"],
+                    job["alarm"]
+                )
 
         except Exception as e:
 
@@ -1283,13 +1294,12 @@ async def sender():
             telegram_queue.task_done()
 
 
-# =========================================================
-# HTML
-# =========================================================
+# ============================================================
+# 🌐 RADAR HTML
+# ============================================================
 
-RADAR_HTML = r"""
+RADAR_HTML = """
 <!doctype html>
-
 <html lang="tr">
 
 <head>
@@ -1355,263 +1365,84 @@ font-size:9px;
 font-weight:900
 }
 
-.statsbar{
-display:grid;
-grid-template-columns:repeat(4,1fr);
-gap:5px;
-margin-bottom:8px
-}
-
-.statbox{
-background:#090c15ed;
-border:1px solid #293448;
-border-radius:10px;
-padding:6px;
-text-align:center
-}
-
-.stat-title{
-font-size:6px;
-color:#77849a;
-font-weight:900
-}
-
-.stat-value{
-font-size:12px;
-font-weight:1000;
-margin-top:3px
-}
-
+.last,
 .grid{
 display:grid;
 grid-template-columns:1fr 1fr;
 gap:8px
 }
 
-.column{
-min-width:0
+.last{
+margin-bottom:9px
 }
 
-.maxbox{
-background:#090c15ed;
-border-radius:13px;
-padding:7px;
-margin-bottom:8px
-}
-
-.maxbox.g{
-border:1px solid #9d51ff99
-}
-
-.maxbox.c{
-border:1px solid #f1c84b88
-}
-
-.max-title{
-font-size:11px;
-font-weight:1000;
-margin-bottom:6px
-}
-
-.maxbox.g .max-title{
-color:#d5a8ff
-}
-
-.maxbox.c .max-title{
-color:#ffe37b
-}
-
-.max-card{
-background:#171d2df5;
-border-radius:9px;
-padding:7px
-}
-
-.maxbox.g .max-card{
-border-left:3px solid #9d51ff
-}
-
-.maxbox.c .max-card{
-border-left:3px solid #f1c84b
-}
-
-.max-user{
-display:flex;
-justify-content:space-between;
-align-items:center;
-gap:5px;
-margin-bottom:6px
-}
-
-.max-user-name{
-font-size:9px;
-font-weight:1000;
-word-break:break-word
-}
-
-.max-coin{
-font-size:12px;
-font-weight:1000;
-white-space:nowrap
-}
-
-.maxbox.g .max-coin{
-color:#d9aaff
-}
-
-.maxbox.c .max-coin{
-color:#ffe16b
-}
-
-.max-stats{
-display:grid;
-grid-template-columns:1fr 1fr;
-gap:3px
-}
-
-.max-stat{
-background:#ffffff09;
-border-radius:5px;
-padding:4px;
-font-size:6px;
-color:#818da1
-}
-
-.max-stat b{
-display:block;
-color:#fff;
-font-size:8px;
-margin-top:1px;
-word-break:break-word
-}
-
-.max-live{
-display:block;
-color:#fff;
-text-decoration:none;
-background:#d71950;
-padding:6px;
-margin-top:6px;
-border-radius:6px;
-text-align:center;
-font-size:7px;
-font-weight:1000
-}
-
-.max-link{
-display:block;
-color:#73a7ff;
-font-size:6px;
-margin-top:5px;
-word-break:break-all;
-text-decoration:none
-}
-
-.panel{
+.box{
 min-width:0;
 background:#090c15ed;
+border:1px solid #293448;
 border-radius:13px;
 padding:7px
 }
 
-.panel.g{
-border:1px solid #9d51ff99
+.g{
+border-color:#9d51ff99
 }
 
-.panel.c{
-border:1px solid #f1c84b88
+.c{
+border-color:#f1c84b88
 }
 
-.pnrow{
-display:flex;
-justify-content:space-between;
-align-items:center;
-padding:2px 2px 6px
+.lt{
+font-size:10px;
+font-weight:1000;
+margin-bottom:5px
 }
 
-.pn{
-font-size:11px;
-font-weight:1000
-}
-
+.g .lt,
 .g .pn{
 color:#d5a8ff
 }
 
+.c .lt,
 .c .pn{
 color:#ffe37b
 }
 
-.cnt{
-font-size:7px;
-background:#ffffff12;
-border-radius:99px;
-padding:3px 5px
-}
-
+.lc,
 .card{
-margin-bottom:4px;
-background:linear-gradient(
-145deg,
-#171d2df9,
-#0a0e17f9
-);
+background:#171d2df5;
 border:1px solid #293448;
 border-radius:8px;
 padding:6px
 }
 
-.card:last-child{
-margin-bottom:0
-}
-
-.g .card{
+.lc{
 border-left:3px solid #9d51ff
 }
 
-.c .card{
-border-left:3px solid #f1c84b
+.c .lc{
+border-left-color:#f1c84b
 }
 
+.lu,
 .ur{
 display:flex;
 justify-content:space-between;
 align-items:center;
 gap:4px;
+font-size:9px;
+font-weight:1000;
 margin-bottom:5px
 }
 
-.user{
-font-size:8px;
-font-weight:1000;
-word-break:break-word
-}
-
-.rank{
-font-size:6px;
-color:#77849a
-}
-
-.badge{
-padding:3px 5px;
-border-radius:5px;
-font-size:6px;
-font-weight:1000;
-background:#8d35ff;
-color:#fff
-}
-
-.c .badge{
-background:#f4d35e;
-color:#211700
-}
-
+.stats,
 .ig{
 display:grid;
 grid-template-columns:1fr 1fr;
 gap:3px
 }
 
+.st,
 .info{
 background:#ffffff09;
 border-radius:5px;
@@ -1620,12 +1451,12 @@ font-size:5px;
 color:#818da1
 }
 
+.st b,
 .info b{
 display:block;
 color:#fff;
 font-size:8px;
-margin-top:1px;
-word-break:break-word
+margin-top:1px
 }
 
 .go{
@@ -1641,22 +1472,74 @@ font-size:6px;
 font-weight:1000
 }
 
-.empty{
-text-align:center;
-padding:16px;
-color:#626e82;
-font-size:7px
+.pnrow{
+display:flex;
+justify-content:space-between;
+align-items:center;
+padding:2px 2px 6px
 }
 
-.foot{
-text-align:center;
-color:#59647a;
+.pn{
+font-size:11px;
+font-weight:1000
+}
+
+.cnt{
+font-size:7px;
+background:#ffffff12;
+border-radius:99px;
+padding:3px 5px
+}
+
+.card{
+margin-bottom:4px;
+background:
+linear-gradient(
+145deg,
+#171d2df9,
+#0a0e17f9
+)
+}
+
+.card:last-child{
+margin-bottom:0
+}
+
+.g .card{
+border-left:3px solid #9d51ff
+}
+
+.c .card{
+border-left:3px solid #f1c84b
+}
+
+.user{
+font-size:8px;
+font-weight:1000;
+word-break:break-word
+}
+
+.rank{
 font-size:6px;
-padding:8px
+color:#77849a
 }
 
 .new{
 animation:in .7s ease-out
+}
+
+.badge{
+padding:3px 5px;
+border-radius:5px;
+font-size:6px;
+font-weight:1000;
+background:#8d35ff;
+color:#fff
+}
+
+.c .badge{
+background:#f4d35e;
+color:#211700
 }
 
 @keyframes in{
@@ -1680,6 +1563,20 @@ transform:none
 
 }
 
+.empty{
+text-align:center;
+padding:16px;
+color:#626e82;
+font-size:7px
+}
+
+.foot{
+text-align:center;
+color:#59647a;
+font-size:6px;
+padding:8px
+}
+
 @media(max-width:700px){
 
 body{
@@ -1698,54 +1595,30 @@ font-size:8px
 font-size:7px
 }
 
-.statsbar{
-gap:3px
-}
-
-.statbox{
-padding:5px 2px
-}
-
-.stat-title{
-font-size:5px
-}
-
-.stat-value{
-font-size:9px
-}
-
+.last,
 .grid{
 gap:4px
 }
 
-.maxbox,
-.panel{
+.box{
 padding:5px;
 border-radius:9px
 }
 
-.max-title,
+.lt{
+font-size:7px
+}
+
 .pn{
 font-size:8px
 }
 
-.max-user-name{
-font-size:7px
+.cnt{
+font-size:6px
 }
 
-.max-coin{
-font-size:9px
-}
-
-.max-stat{
-font-size:4px
-}
-
-.max-stat b{
-font-size:7px
-}
-
-.card{
+.card,
+.lc{
 padding:5px
 }
 
@@ -1753,11 +1626,13 @@ padding:5px
 font-size:7px
 }
 
-.info{
+.info,
+.st{
 font-size:4px
 }
 
-.info b{
+.info b,
+.st b{
 font-size:7px
 }
 
@@ -1766,14 +1641,9 @@ font-size:5px;
 padding:2px 4px
 }
 
-.go,
-.max-live{
+.go{
 font-size:5px;
 padding:4px
-}
-
-.max-link{
-font-size:5px
 }
 
 }
@@ -1803,56 +1673,26 @@ font-size:5px
 </div>
 
 
-<div class="statsbar">
+<div class="last">
 
-<div class="statbox">
+<div class="box g">
 
-<div class="stat-title">
-📡 TOPLAM KAYIT
+<div class="lt">
+⚡ SON GOODY BAG
 </div>
 
-<div id="totalRecords" class="stat-value">
-0
-</div>
-
-</div>
-
-
-<div class="statbox">
-
-<div class="stat-title">
-🪙 TOPLAM COIN
-</div>
-
-<div id="totalCoins" class="stat-value">
-0
-</div>
+<div id="lg"></div>
 
 </div>
 
 
-<div class="statbox">
+<div class="box c">
 
-<div class="stat-title">
-🟪 GOODY
+<div class="lt">
+⚡ SON HAZİNE SANDIĞI
 </div>
 
-<div id="totalGoody" class="stat-value">
-0
-</div>
-
-</div>
-
-
-<div class="statbox">
-
-<div class="stat-title">
-🟨 CHEST
-</div>
-
-<div id="totalChest" class="stat-value">
-0
-</div>
+<div id="lc"></div>
 
 </div>
 
@@ -1861,21 +1701,7 @@ font-size:5px
 
 <div class="grid">
 
-
-<div class="column">
-
-<div class="maxbox g">
-
-<div class="max-title">
-🪙 EN YÜKSEK COIN • GOODY BAG
-</div>
-
-<div id="goodyMax"></div>
-
-</div>
-
-
-<div class="panel g">
+<div class="box g">
 
 <div class="pnrow">
 
@@ -1893,23 +1719,8 @@ font-size:5px
 
 </div>
 
-</div>
 
-
-<div class="column">
-
-<div class="maxbox c">
-
-<div class="max-title">
-🪙 EN YÜKSEK COIN • HAZİNE SANDIĞI
-</div>
-
-<div id="chestMax"></div>
-
-</div>
-
-
-<div class="panel c">
+<div class="box c">
 
 <div class="pnrow">
 
@@ -1929,11 +1740,9 @@ font-size:5px
 
 </div>
 
-</div>
-
 
 <div class="foot">
-⚡ ÖDÜL AVCISI • KALICI RADAR • CANLI VERİ
+⚡ ÖDÜL AVCISI • CANLI RADAR
 </div>
 
 </div>
@@ -1966,20 +1775,22 @@ String(v??"")
 
 const key=x=>
 String(
-x.source_message_id ??
-x.room ??
+x.source_message_id??
+x.room??
 (
 (x.username??"")
-+"_"+(x.detected_at??"")
++
+"_"+
+(x.detected_at??"")
 )
 );
 
 
-const time=x=>
+const tm=x=>
 Number(
-x.detected_at ??
-x.created_at ??
-x.timestamp ??
+x.detected_at||
+x.created_at||
+x.timestamp||
 0
 );
 
@@ -1989,20 +1800,23 @@ Array.isArray(a)
 ?
 [...a]
 .sort(
-(a,b)=>time(b)-time(a)
+(a,b)=>tm(b)-tm(a)
 )
 .slice(0,5)
 :
 [];
 
 
-function renderMaxCoin(a,id,type){
+function last(
+x,
+id,
+icon,
+type
+){
 
-const e=document.getElementById(id);
+let e=document.getElementById(id);
 
-const arr=five(a);
-
-if(!arr.length){
+if(!x){
 
 e.innerHTML=
 '<div class="empty">⚡ Henüz veri yok.</div>';
@@ -2011,98 +1825,83 @@ return;
 
 }
 
-
-const max=
-[...arr]
-.sort(
-(a,b)=>
-Number(b.coins||0)
--
-Number(a.coins||0)
-)[0];
-
-
-const icon=
+let ns=
 type==="G"
-?"🟪"
-:"🟨";
+?
+newG
+:
+newC;
 
+let k=key(x);
 
 e.innerHTML=`
 
-<div class="max-card">
+<div class="lc">
 
-<div class="max-user">
+<div class="lu">
 
-<div class="max-user-name">
-${icon} ${esc(max.username)}
+<span>
+${icon} ${esc(x.username)}
+</span>
+
+${
+ns.has(k)
+?
+'<span class="badge">⚡ YENİ</span>'
+:
+""
+}
+
 </div>
 
-<div class="max-coin">
-🪙 ${esc(max.coins)}
-</div>
 
-</div>
+<div class="stats">
 
-
-<div class="max-stats">
-
-<div class="max-stat">
+<div class="st">
 🪙 COIN
-<b>${esc(max.coins)}</b>
+<b>${esc(x.coins)}</b>
 </div>
 
-<div class="max-stat">
+<div class="st">
 👥 KİŞİ
-<b>${esc(max.people)}</b>
+<b>${esc(x.people)}</b>
 </div>
 
-<div class="max-stat">
+<div class="st">
 🙋 KATILAN
-<b>${esc(max.joined)}</b>
+<b>${esc(x.joined)}</b>
 </div>
 
-<div class="max-stat">
+<div class="st">
 📈 ORAN
-<b>${esc(max.rate)}</b>
+<b>${esc(x.rate)}</b>
 </div>
 
-<div class="max-stat">
+<div class="st">
 👀 İZLENME
-<b>${esc(max.view)}</b>
+<b>${esc(x.view)}</b>
 </div>
 
-<div class="max-stat">
+<div class="st">
 🏠 ODA
-<b>${esc(max.room)}</b>
+<b>${esc(x.room)}</b>
 </div>
 
 </div>
 
 
 ${
-max.live
+x.live
 ?
 `
-
 <a
-class="max-live"
-href="${esc(max.live)}"
+class="go"
+href="${esc(x.live)}"
 target="_blank"
 rel="noopener"
 >
-🔴 TIKTOK CANLI YAYIN
+🔴 CANLIYA GİT
 </a>
-
-<a
-class="max-link"
-href="${esc(max.live)}"
-target="_blank"
-rel="noopener"
->
-${esc(max.live)}
-</a>
-
 `
 :
 ""
@@ -2115,16 +1914,20 @@ ${esc(max.live)}
 }
 
 
-function list(a,id,cid,icon,type){
+function list(
+a,
+id,
+cid,
+icon,
+type
+){
 
-const e=document.getElementById(id);
+let e=document.getElementById(id);
+let n=document.getElementById(cid);
 
-const n=document.getElementById(cid);
-
-const arr=five(a);
+let arr=five(a);
 
 n.textContent=arr.length;
-
 
 if(!arr.length){
 
@@ -2135,16 +1938,14 @@ return;
 
 }
 
-
-const seen=
+let seen=
 type==="G"
 ?
 seenG
 :
 seenC;
 
-
-const ns=
+let ns=
 type==="G"
 ?
 newG
@@ -2154,18 +1955,15 @@ newC;
 
 arr.forEach(x=>{
 
-const k=key(x);
+let k=key(x);
 
 if(first){
 
 seen.add(k);
 
-}
-
-else if(!seen.has(k)){
+}else if(!seen.has(k)){
 
 seen.add(k);
-
 ns.add(k);
 
 }
@@ -2174,12 +1972,12 @@ ns.add(k);
 
 
 e.innerHTML=
+arr.map(
+(x,i)=>{
 
-arr.map((x,i)=>{
+let k=key(x);
 
-const k=key(x);
-
-const fresh=ns.has(k);
+let fresh=ns.has(k);
 
 return `
 
@@ -2241,7 +2039,6 @@ ${
 x.live
 ?
 `
-
 <a
 class="go"
 href="${esc(x.live)}"
@@ -2250,7 +2047,6 @@ rel="noopener"
 >
 🔴 CANLIYA GİT
 </a>
-
 `
 :
 ""
@@ -2260,22 +2056,28 @@ rel="noopener"
 
 `;
 
-}).join("");
+}
+).join("");
 
 }
 
 
 function render(){
 
-renderMaxCoin(
-data.goody_bags,
-"goodyMax",
+let g=five(data.goody_bags);
+let c=five(data.chests);
+
+last(
+g[0],
+"lg",
+"🟪",
 "G"
 );
 
-renderMaxCoin(
-data.chests,
-"chestMax",
+last(
+c[0],
+"lc",
+"🟨",
 "C"
 );
 
@@ -2302,25 +2104,19 @@ async function load(){
 
 try{
 
-const r=await fetch(
+let r=await fetch(
 "/api/all?t="+Date.now(),
 {
 cache:"no-store"
 }
 );
 
-if(!r.ok){
-
+if(!r.ok)
 throw Error(r.status);
 
-}
-
-
-const d=await r.json();
-
+let d=await r.json();
 
 data={
-
 goody_bags:
 Array.isArray(d.goody_bags)
 ?
@@ -2333,67 +2129,31 @@ Array.isArray(d.chests)
 ?
 d.chests
 :
-[],
-
-stats:
-d.stats || {}
-
+[]
 };
 
-
-const stats=data.stats;
-
-
-document.getElementById(
-"totalRecords"
-).textContent=
-stats.total ?? 0;
-
-
-document.getElementById(
-"totalCoins"
-).textContent=
-stats.total_coins ?? 0;
-
-
-document.getElementById(
-"totalGoody"
-).textContent=
-stats.goody ?? 0;
-
-
-document.getElementById(
-"totalChest"
-).textContent=
-stats.chest ?? 0;
-
-
-const s=
+let s=
 document.getElementById(
 "status"
 );
-
 
 s.className="status";
 
 s.textContent=
 "🟢 RADAR AKTİF • CANLI VERİ";
 
-
 render();
 
 first=false;
 
-
 }catch(e){
 
-const s=
+let s=
 document.getElementById(
 "status"
 );
 
-s.className=
-"status error";
+s.className="status";
 
 s.textContent=
 "🔴 VERİ BAĞLANTISI HATASI";
@@ -2420,9 +2180,9 @@ load();
 """
 
 
-# =========================================================
-# HTTP
-# =========================================================
+# ============================================================
+# 🌐 HTTP
+# ============================================================
 
 async def radar_page(request):
 
@@ -2444,16 +2204,11 @@ async def cors(request, handler):
                 "Access-Control-Allow-Origin": "*",
                 "Access-Control-Allow-Methods":
                     "GET, OPTIONS",
-                "Access-Control-Allow-Headers":
-                    "*"
+                "Access-Control-Allow-Headers": "*",
             }
         )
 
-
-    response = await handler(
-        request
-    )
-
+    response = await handler(request)
 
     response.headers[
         "Access-Control-Allow-Origin"
@@ -2467,31 +2222,24 @@ async def cors(request, handler):
         "Access-Control-Allow-Headers"
     ] = "*"
 
-
     return response
 
 
+# ============================================================
+# 📡 API
+# ============================================================
+
 async def api_all(request):
 
-    stats = db_stats()
-
     return web.json_response({
-
-        "status":
-            "online",
-
-        "server_time":
-            int(time.time()),
-
-        "chests":
-            list(LIVE_CHESTS.values()),
-
-        "goody_bags":
-            list(LIVE_GOODY_BAGS.values()),
-
-        "stats":
-            stats
-
+        "status": "online",
+        "server_time": int(time.time()),
+        "chests": list(
+            LIVE_CHESTS.values()
+        ),
+        "goody_bags": list(
+            LIVE_GOODY_BAGS.values()
+        ),
     })
 
 
@@ -2515,41 +2263,25 @@ async def api_goody(request):
 
 async def api_status(request):
 
-    stats = db_stats()
-
     return web.json_response({
-
-        "status":
-            "online",
-
-        "chests":
-            len(LIVE_CHESTS),
-
-        "goody_bags":
-            len(LIVE_GOODY_BAGS),
-
-        "history":
-            stats["total"],
-
-        "total_coins":
-            stats["total_coins"],
-
-        "server_time":
-            int(time.time())
-
+        "status": "online",
+        "chests": len(LIVE_CHESTS),
+        "goody_bags": len(LIVE_GOODY_BAGS),
+        "server_time": int(time.time()),
+        "coin_alarm": COIN_ALARM_LIMIT,
+        "people_alarm": PEOPLE_ALARM_LIMIT,
     })
 
 
-# =========================================================
-# HTTP SERVER
-# =========================================================
+# ============================================================
+# 🚀 HTTP BAŞLAT
+# ============================================================
 
 async def start_http():
 
     app = web.Application(
         middlewares=[cors]
     )
-
 
     app.router.add_get(
         "/",
@@ -2581,7 +2313,6 @@ async def start_http():
         api_status
     )
 
-
     for path in [
         "/api/all",
         "/api/boxes",
@@ -2592,27 +2323,18 @@ async def start_http():
         app.router.add_options(
             path,
             lambda request:
-                web.Response(
-                    status=204
-                )
+                web.Response(status=204)
         )
 
-
-    runner = web.AppRunner(
-        app
-    )
+    runner = web.AppRunner(app)
 
     await runner.setup()
 
-
-    site = web.TCPSite(
+    await web.TCPSite(
         runner,
         "0.0.0.0",
         PORT
-    )
-
-    await site.start()
-
+    ).start()
 
     print(
         "[HTTP] Sunucu başladı:",
@@ -2620,54 +2342,83 @@ async def start_http():
     )
 
 
-# =========================================================
-# TELEGRAM LISTENER
-# =========================================================
+# ============================================================
+# 👂 TELEGRAM LISTENER
+# ============================================================
 
 async def listener(event):
 
     try:
 
-        key = (
+        k = (
             event.chat_id,
             event.message.id
         )
 
-
-        if key in processed_messages:
+        if k in processed_messages:
             return
 
+        processed_messages.add(k)
 
-        processed_messages.add(
-            key
-        )
-
-
-        if len(
-            processed_messages
-        ) > 50000:
+        if len(processed_messages) > 50000:
 
             processed_messages.clear()
 
-
         d = parse(event)
-
 
         if not d:
             return
 
-
-        d["source_chat_id"] = safe_int(
-            event.chat_id
-        )
-
+        # ----------------------------------------------------
+        # NORMAL KAYIT
+        # ----------------------------------------------------
 
         if add(d):
 
-            await telegram_queue.put(
-                d
-            )
+            await telegram_queue.put({
+                "kind": "normal",
+                "data": d
+            })
 
+            # ------------------------------------------------
+            # 🚨 ALARMLAR
+            # ------------------------------------------------
+
+            alarms = get_alarms(d)
+
+            event_key = make_event_key(d)
+
+            for alarm in alarms:
+
+                alarm_key = alarm["key"]
+
+                # Aynı alarm daha önce gönderildiyse
+                # tekrar gönderme.
+                if alarm_exists(alarm_key):
+                    continue
+
+                if save_alarm(
+                    alarm_key,
+                    event_key,
+                    alarm["type"]
+                ):
+
+                    print(
+                        "[ALARM]",
+                        alarm["title"],
+                        "|",
+                        d["username"],
+                        "| COIN:",
+                        d["coins"],
+                        "| KİŞİ:",
+                        d["people"]
+                    )
+
+                    await telegram_queue.put({
+                        "kind": "alarm",
+                        "data": d,
+                        "alarm": alarm
+                    })
 
     except Exception as e:
 
@@ -2677,126 +2428,43 @@ async def listener(event):
         )
 
 
-# =========================================================
-# TELEGRAM BAĞLANTI KONTROLÜ
-# =========================================================
-
-async def telegram_connection_watch():
-
-    global client
-
-    while True:
-
-        try:
-
-            if client:
-
-                connected = client.is_connected()
-
-                if not connected:
-
-                    print(
-                        "[TELEGRAM] Bağlantı koptu."
-                    )
-
-                    try:
-
-                        await client.connect()
-
-                    except Exception as e:
-
-                        print(
-                            "[TELEGRAM] Yeniden bağlanma hatası:",
-                            repr(e)
-                        )
-
-
-                else:
-
-                    print(
-                        "[TELEGRAM] Bağlantı OK."
-                    )
-
-
-        except Exception as e:
-
-            print(
-                "[TELEGRAM WATCH]",
-                repr(e)
-            )
-
-
-        await asyncio.sleep(30)
-
-
-# =========================================================
-# ANA PROGRAM
-# =========================================================
+# ============================================================
+# 🚀 MAIN
+# ============================================================
 
 async def main():
 
     global http_session
-    global client
-
 
     print(
         "🏆 ÖDÜL AVCISI BAŞLIYOR"
     )
 
+    print(
+        "🪙 COIN ALARM LİMİTİ:",
+        COIN_ALARM_LIMIT
+    )
 
-    # SQLITE GEÇMİŞİNİ YÜKLE
-
-    db_load_recent()
-
-
-    # HTTP
+    print(
+        "👥 KİŞİ ALARM LİMİTİ:",
+        PEOPLE_ALARM_LIMIT
+    )
 
     http_session = aiohttp.ClientSession()
 
-
     await start_http()
 
-
-    # TELEGRAM
-
     client = TelegramClient(
-        StringSession(
-            STRING_SESSION
-        ),
+        StringSession(STRING_SESSION),
         API_ID,
         API_HASH
     )
 
+    await client.start()
 
-    # İlk bağlantı
-
-    while True:
-
-        try:
-
-            await client.start()
-
-            print(
-                "[TELEGRAM] İstemci bağlandı."
-            )
-
-            break
-
-        except Exception as e:
-
-            print(
-                "[TELEGRAM] İlk bağlantı başarısız:",
-                repr(e)
-            )
-
-            print(
-                "[TELEGRAM] 15 saniye sonra tekrar denenecek."
-            )
-
-            await asyncio.sleep(15)
-
-
-    # EVENT
+    print(
+        "[TELEGRAM] İstemci bağlandı."
+    )
 
     client.add_event_handler(
         listener,
@@ -2805,54 +2473,33 @@ async def main():
         )
     )
 
-
-    # TELEGRAM SENDER
-
     asyncio.create_task(
         sender()
     )
-
-
-    # BAĞLANTI WATCHDOG
-
-    asyncio.create_task(
-        telegram_connection_watch()
-    )
-
 
     print(
         "[HAZIR] Goody Bag + Hazine Sandığı aktif."
     )
 
     print(
-        "[HAZIR] SQLite kalıcı geçmiş aktif."
+        "[HAZIR] Son Goody + Son Chest üstte."
     )
 
     print(
-        "[HAZIR] Güçlü duplicate koruması aktif."
+        "[HAZIR] Yeni gelen HER kayıt ⚡ YENİ."
     )
 
     print(
-        "[HAZIR] Telegram otomatik reconnect aktif."
+        "[HAZIR] 🪙 Coin alarmı aktif."
     )
 
     print(
-        "[HAZIR] Son 5 kayıt gösteriliyor."
+        "[HAZIR] 👥 Düşük kişi alarmı aktif."
     )
-
-    print(
-        "[HAZIR] En yüksek coin ayrı ayrı hesaplanıyor."
-    )
-
-    print(
-        "[HAZIR] Telegram linkleri butonsuz normal link."
-    )
-
 
     try:
 
         await client.run_until_disconnected()
-
 
     finally:
 
@@ -2860,18 +2507,10 @@ async def main():
 
             await http_session.close()
 
-        try:
 
-            db.close()
-
-        except:
-
-            pass
-
-
-# =========================================================
-# START
-# =========================================================
+# ============================================================
+# ▶️ ÇALIŞTIR
+# ============================================================
 
 if __name__ == "__main__":
 
