@@ -1,13 +1,12 @@
 # main.py
-# Bu sürüm:
+# ÖDÜL AVCISI
 # - JİMİN kaldırıldı
-# - Üstte En Yüksek Coin / En Çok Kişi / En Yüksek Rate
-# - Yeni kayıt her zaman en üstte
-# - Eski kayıtlar aşağı kayar
-# - Goody ve Chest ayrı sıralanır
-# - Her bölüm son 5 kaydı gösterir
+# - En Yüksek Coin / En Çok Kişi / En Yüksek Rate
+# - Yeni kayıt en üstte
+# - Goody ve Chest ayrı
+# - Her bölüm son 5 kayıt
 # - Kayıtlar süre dolunca silinmez
-# - En yeni kayıt "⚡ YENİ" olarak işaretlenir
+# - En yeni kayıt ⚡ YENİ
 
 import os
 import re
@@ -74,7 +73,6 @@ def safe_float(value, default=0):
 # =========================================================
 
 def extract_token_from_event(event):
-
     try:
         message = event.message
         text = message.raw_text or ""
@@ -87,7 +85,6 @@ def extract_token_from_event(event):
     ]
 
     for pattern in patterns:
-
         m = re.search(pattern, text, re.I)
 
         if m:
@@ -96,11 +93,9 @@ def extract_token_from_event(event):
             return token
 
     try:
-
         entities = message.entities or []
 
         for entity in entities:
-
             url = getattr(entity, "url", None)
 
             if not url:
@@ -113,7 +108,6 @@ def extract_token_from_event(event):
             )
 
             if m:
-
                 token = unquote(m.group(1))
 
                 print(
@@ -123,16 +117,13 @@ def extract_token_from_event(event):
                 return token
 
     except Exception as e:
-
         print(
             "[TOKEN ENTITY HATASI]",
             repr(e)
         )
 
     try:
-
         for entity, entity_text in message.get_entities_text():
-
             url = getattr(
                 entity,
                 "url",
@@ -149,10 +140,7 @@ def extract_token_from_event(event):
             )
 
             if m:
-
-                token = unquote(
-                    m.group(1)
-                )
+                token = unquote(m.group(1))
 
                 print(
                     "[TOKEN] entity text üzerinden bulundu"
@@ -161,7 +149,6 @@ def extract_token_from_event(event):
                 return token
 
     except Exception as e:
-
         print(
             "[TOKEN ENTITY TEXT HATASI]",
             repr(e)
@@ -173,12 +160,10 @@ def extract_token_from_event(event):
 
 
 def decode_token(token):
-
     if not token:
         return None
 
     try:
-
         token = unquote(
             str(token)
         ).strip()
@@ -199,13 +184,10 @@ def decode_token(token):
         data = json.loads(text)
 
         if isinstance(data, dict):
-
             print("[TOKEN] çözüldü")
-
             return data
 
     except Exception as e:
-
         print(
             "[TOKEN HATASI]",
             repr(e)
@@ -219,7 +201,6 @@ def decode_token(token):
 # =========================================================
 
 def extract_p_room(text):
-
     if not text:
         return None
 
@@ -229,7 +210,6 @@ def extract_p_room(text):
     ]
 
     for pattern in patterns:
-
         m = re.search(
             pattern,
             text,
@@ -242,7 +222,6 @@ def extract_p_room(text):
         encoded = m.group(1)
 
         try:
-
             padding = "=" * (
                 -len(encoded) % 4
             )
@@ -257,7 +236,6 @@ def extract_p_room(text):
             ).strip()
 
             if room.isdigit():
-
                 print(
                     "[ODA ID] bulundu:",
                     room
@@ -266,7 +244,6 @@ def extract_p_room(text):
                 return room
 
         except Exception as e:
-
             print(
                 "[ODA ID HATASI]",
                 repr(e)
@@ -280,7 +257,6 @@ def extract_p_room(text):
 # =========================================================
 
 def extract_username_from_text(text):
-
     if not text:
         return None
 
@@ -290,7 +266,6 @@ def extract_username_from_text(text):
     ]
 
     for pattern in patterns:
-
         m = re.search(
             pattern,
             text,
@@ -308,9 +283,7 @@ def extract_username_from_text(text):
 # =========================================================
 
 def extract_coins(text, token_data=None):
-
     if text:
-
         m = re.search(
             r'(?:TÚI|TUI)\s*:\s*(\d+)\s*/',
             text,
@@ -338,7 +311,6 @@ def extract_coins(text, token_data=None):
             return safe_int(m.group(1))
 
     if token_data:
-
         for key in [
             "coins",
             "coin",
@@ -346,11 +318,9 @@ def extract_coins(text, token_data=None):
             "diamond",
             "amount",
         ]:
-
             value = token_data.get(key)
 
             if value is not None:
-
                 number = safe_int(
                     value,
                     -1
@@ -367,7 +337,6 @@ def extract_coins(text, token_data=None):
 # =========================================================
 
 def extract_people_from_message(text):
-
     if not text:
         return 0
 
@@ -405,7 +374,6 @@ def extract_people_from_message(text):
 # =========================================================
 
 def extract_joined(text):
-
     if not text:
         return 0
 
@@ -416,7 +384,6 @@ def extract_joined(text):
     ]
 
     for pattern in patterns:
-
         m = re.search(
             pattern,
             text,
@@ -434,7 +401,6 @@ def extract_joined(text):
 # =========================================================
 
 def extract_viewers(text):
-
     if not text:
         return 0
 
@@ -454,9 +420,7 @@ def extract_viewers(text):
 # =========================================================
 
 def extract_rate(text, token_data=None):
-
     if text:
-
         m = re.search(
             r'Rate\s*:\s*([0-9]+(?:\.[0-9]+)?)',
             text,
@@ -467,14 +431,11 @@ def extract_rate(text, token_data=None):
             return safe_float(m.group(1))
 
     if token_data:
-
         for key in [
             "ratio",
             "rate",
         ]:
-
             if key in token_data:
-
                 return safe_float(
                     token_data.get(
                         key,
@@ -490,7 +451,6 @@ def extract_rate(text, token_data=None):
 # =========================================================
 
 def detect_type(text, token_data):
-
     text_upper = (
         text or ""
     ).upper()
@@ -499,7 +459,6 @@ def detect_type(text, token_data):
         r'TÚI|TUI',
         text_upper
     ):
-
         print(
             "[TÜR] TÚI -> GOODY BAG"
         )
@@ -510,7 +469,6 @@ def detect_type(text, token_data):
         r'GOODY\s*BAG|REWARD\s*BAG',
         text_upper
     ):
-
         print(
             "[TÜR] GOODY BAG -> GOODY BAG"
         )
@@ -521,7 +479,6 @@ def detect_type(text, token_data):
         r'\bBOX\b|RƯƠNG|TREO|HAZİNE',
         text_upper
     ):
-
         print(
             "[TÜR] BOX/RƯƠNG/TREO -> CHEST"
         )
@@ -529,7 +486,6 @@ def detect_type(text, token_data):
         return False
 
     if "🟡" in text:
-
         print(
             "[TÜR] 🟡 -> CHEST"
         )
@@ -537,7 +493,6 @@ def detect_type(text, token_data):
         return False
 
     if token_data:
-
         value = token_data.get(
             "is_goody_bag"
         )
@@ -549,7 +504,6 @@ def detect_type(text, token_data):
             "true",
             "True",
         ]:
-
             print(
                 "[TÜR] TOKEN -> GOODY BAG"
             )
@@ -563,7 +517,6 @@ def detect_type(text, token_data):
             "false",
             "False",
         ]:
-
             print(
                 "[TÜR] TOKEN -> CHEST"
             )
@@ -582,27 +535,23 @@ def detect_type(text, token_data):
 # =========================================================
 
 def calculate_target_time(text, token_data=None):
-
     now = int(
         time.time()
     )
 
     if token_data:
-
         for key in [
             "time",
             "target_time",
             "end_time",
             "endTime",
         ]:
-
             value = token_data.get(key)
 
             if value is None:
                 continue
 
             try:
-
                 value = int(
                     float(value)
                 )
@@ -620,7 +569,6 @@ def calculate_target_time(text, token_data=None):
                 pass
 
     if text:
-
         m = re.search(
             r'TIME\s*:\s*(\d+):(\d+)',
             text,
@@ -628,7 +576,6 @@ def calculate_target_time(text, token_data=None):
         )
 
         if m:
-
             duration = (
                 safe_int(m.group(1)) * 60
                 +
@@ -650,37 +597,30 @@ def get_live_link(
     room,
     token_data=None
 ):
-
     if token_data:
-
         for key in [
             "openitok",
             "live",
             "live_url",
             "url",
         ]:
-
             value = token_data.get(key)
 
             if value:
-
                 value = str(value)
 
                 if value.startswith(
                     ("http://", "https://")
                 ):
-
                     return value
 
     if room:
-
         return (
             "https://www.tiktok.com/"
             f"share/live/{room}"
         )
 
     if username:
-
         return (
             "https://www.tiktok.com/"
             f"@{username}/live"
@@ -694,7 +634,6 @@ def get_live_link(
 # =========================================================
 
 def parse_source_message(event):
-
     text = (
         event.message.raw_text
         or ""
@@ -728,7 +667,6 @@ def parse_source_message(event):
     )
 
     if is_goody is None:
-
         print(
             "[ATLANDI] Tür belirlenemedi"
         )
@@ -738,24 +676,19 @@ def parse_source_message(event):
     username = None
 
     if token_data:
-
         for key in [
             "username",
             "user",
             "unique_id",
             "uniqueId",
         ]:
-
             value = token_data.get(key)
 
             if value:
-
                 username = str(value)
-
                 break
 
     if not username:
-
         username = extract_username_from_text(
             text
         )
@@ -766,7 +699,6 @@ def parse_source_message(event):
     room = None
 
     if token_data:
-
         for key in [
             "room",
             "room_id",
@@ -774,23 +706,18 @@ def parse_source_message(event):
             "roomId",
             "roomID",
         ]:
-
             value = token_data.get(key)
 
             if value:
-
                 room = str(value)
-
                 break
 
     if not room:
-
         room = extract_p_room(
             text
         )
 
     if not room:
-
         room = (
             "msg:"
             +
@@ -812,16 +739,13 @@ def parse_source_message(event):
     )
 
     if not people and token_data:
-
         for key in [
             "people",
             "person",
             "count",
             "capacity",
         ]:
-
             if key in token_data:
-
                 people = safe_int(
                     token_data.get(
                         key,
@@ -837,16 +761,13 @@ def parse_source_message(event):
     )
 
     if not joined and token_data:
-
         for key in [
             "joined",
             "join",
             "join_count",
             "joined_count",
         ]:
-
             if key in token_data:
-
                 joined = safe_int(
                     token_data.get(
                         key,
@@ -867,16 +788,13 @@ def parse_source_message(event):
     )
 
     if not viewers and token_data:
-
         for key in [
             "view",
             "views",
             "viewer",
             "viewers",
         ]:
-
             if key in token_data:
-
                 viewers = safe_int(
                     token_data.get(
                         key,
@@ -903,54 +821,29 @@ def parse_source_message(event):
     )
 
     result = {
+        "type": (
+            "GOODY BAG"
+            if is_goody
+            else "CHEST"
+        ),
 
-        "type":
-            (
-                "GOODY BAG"
-                if is_goody
-                else "CHEST"
-            ),
+        "box_name": (
+            "Goody Bag"
+            if is_goody
+            else "Hazine Sandığı"
+        ),
 
-        "box_name":
-            (
-                "Goody Bag"
-                if is_goody
-                else "Hazine Sandığı"
-            ),
-
-        "username":
-            username,
-
-        "coins":
-            coins,
-
-        "people":
-            people,
-
-        "joined":
-            joined,
-
-        "rate":
-            rate,
-
-        "view":
-            viewers,
-
-        "room":
-            room,
-
-        "live":
-            live_link,
-
-        "target_time":
-            target_time,
-
-        "detected_at":
-            detected_at,
-
-        "source_message_id":
-            event.message.id,
-
+        "username": username,
+        "coins": coins,
+        "people": people,
+        "joined": joined,
+        "rate": rate,
+        "view": viewers,
+        "room": room,
+        "live": live_link,
+        "target_time": target_time,
+        "detected_at": detected_at,
+        "source_message_id": event.message.id,
     }
 
     print(
@@ -976,13 +869,11 @@ def parse_source_message(event):
 # =========================================================
 
 def add_to_radar(data):
-
     room = data.get(
         "room"
     )
 
     if not room:
-
         print(
             "[ATLANDI] Room yok"
         )
@@ -990,15 +881,11 @@ def add_to_radar(data):
         return False
 
     if data["type"] == "GOODY BAG":
-
         target = LIVE_GOODY_BAGS
-
     else:
-
         target = LIVE_CHESTS
 
     if room in target:
-
         old = target[room]
 
         old_detected = safe_int(
@@ -1019,7 +906,6 @@ def add_to_radar(data):
             <
             5
         ):
-
             print(
                 "[TEKRAR] Aynı kayıt:",
                 room
@@ -1089,7 +975,6 @@ def add_to_radar(data):
 # =========================================================
 
 async def send_telegram_message(data):
-
     global http_session
 
     if not http_session:
@@ -1102,41 +987,27 @@ async def send_telegram_message(data):
     )
 
     text = (
-
         f"{baslik}\n\n"
-
         f"👤 Kullanıcı: "
         f"{data['username']}\n"
-
         f"🪙 Coin: "
         f"{data['coins']}\n"
-
         f"👥 Kişi: "
         f"{data['people']}\n"
-
         f"🙋 Katılan: "
         f"{data['joined']}\n"
-
         f"📈 Oran: "
         f"{data['rate']}\n"
-
         f"👀 İzlenme: "
         f"{data['view']}\n"
-
     )
 
     if data.get("live"):
-
         text += (
-
             "\n🔴 "
-
             f"<a href=\"{data['live']}\">"
-
             "TIKTOK CANLI YAYIN"
-
             "</a>"
-
         )
 
     url = (
@@ -1145,28 +1016,17 @@ async def send_telegram_message(data):
     )
 
     payload = {
-
-        "chat_id":
-            TARGET_CHAT_ID,
-
-        "text":
-            text,
-
-        "parse_mode":
-            "HTML",
-
-        "disable_web_page_preview":
-            True,
-
+        "chat_id": TARGET_CHAT_ID,
+        "text": text,
+        "parse_mode": "HTML",
+        "disable_web_page_preview": True,
     }
 
     for attempt in range(
         1,
         9
     ):
-
         try:
-
             async with http_session.post(
                 url,
                 json=payload
@@ -1175,7 +1035,6 @@ async def send_telegram_message(data):
                 result_text = await response.text()
 
                 if response.status == 200:
-
                     print(
                         "[TELEGRAM] Bildirim gönderildi:",
                         data["type"],
@@ -1185,9 +1044,7 @@ async def send_telegram_message(data):
                     return True
 
                 if response.status == 429:
-
                     try:
-
                         result_json = json.loads(
                             result_text
                         )
@@ -1205,7 +1062,6 @@ async def send_telegram_message(data):
                         )
 
                     except Exception:
-
                         retry_after = 30
 
                     await asyncio.sleep(
@@ -1226,7 +1082,6 @@ async def send_telegram_message(data):
                     503,
                     504,
                 ]:
-
                     await asyncio.sleep(
                         min(
                             5 * attempt,
@@ -1245,7 +1100,6 @@ async def send_telegram_message(data):
                 return False
 
         except Exception as e:
-
             print(
                 "[TELEGRAM GÖNDERME HATASI]",
                 repr(e)
@@ -1262,26 +1116,21 @@ async def send_telegram_message(data):
 
 
 async def telegram_sender():
-
     while True:
-
         data = await telegram_queue.get()
 
         try:
-
             await send_telegram_message(
                 data
             )
 
         except Exception as e:
-
             print(
                 "[KUYRUK HATASI]",
                 repr(e)
             )
 
         finally:
-
             telegram_queue.task_done()
 
 
@@ -1312,13 +1161,10 @@ RADAR_HTML = r"""
 
 html,
 body{
-
     margin:0;
     min-height:100%;
-
     background:#05060c;
     color:white;
-
     font-family:
         Arial,
         Helvetica,
@@ -1326,13 +1172,10 @@ body{
 }
 
 body{
-
     padding:10px;
-
     overflow-x:hidden;
 
     background:
-
         radial-gradient(
             circle at 50% -10%,
             rgba(106,52,255,.22),
@@ -1355,10 +1198,8 @@ body{
 }
 
 .wrapper{
-
     max-width:1200px;
     margin:auto;
-
 }
 
 
@@ -1367,70 +1208,38 @@ body{
    ===================================================== */
 
 .header{
-
     text-align:center;
-
-    padding:
-        8px 4px 14px;
+    padding:8px 4px 14px;
 }
 
 .title{
-
     font-size:
         clamp(25px,7vw,48px);
 
-    font-weight:
-        1000;
-
-    line-height:
-        1;
-
-    letter-spacing:
-        1px;
-
-    color:
-        #fff;
+    font-weight:1000;
+    line-height:1;
+    letter-spacing:1px;
+    color:#fff;
 
     text-shadow:
-
         0 0 5px #fff,
-
         0 0 16px #8b55ff,
-
         0 0 35px #5d25ff;
 }
 
 .subtitle{
-
-    margin-top:
-        7px;
-
-    color:
-        #aeb5c8;
-
-    font-size:
-        11px;
-
-    font-weight:
-        800;
-
-    letter-spacing:
-        .8px;
+    margin-top:7px;
+    color:#aeb5c8;
+    font-size:11px;
+    font-weight:800;
+    letter-spacing:.8px;
 }
 
 .status{
-
-    display:
-        inline-flex;
-
-    margin-top:
-        9px;
-
-    padding:
-        6px 12px;
-
-    border-radius:
-        999px;
+    display:inline-flex;
+    margin-top:9px;
+    padding:6px 12px;
+    border-radius:999px;
 
     background:
         rgba(20,20,40,.8);
@@ -1439,20 +1248,13 @@ body{
         1px solid
         rgba(157,92,255,.35);
 
-    color:
-        #74ff9a;
-
-    font-size:
-        10px;
-
-    font-weight:
-        900;
+    color:#74ff9a;
+    font-size:10px;
+    font-weight:900;
 }
 
 .status.error{
-
-    color:
-        #ff7474;
+    color:#ff7474;
 
     border-color:
         rgba(255,80,80,.45);
@@ -1464,30 +1266,16 @@ body{
    ===================================================== */
 
 .leaders{
-
-    display:
-        grid;
-
-    grid-template-columns:
-        repeat(3,1fr);
-
-    gap:
-        8px;
-
-    margin-bottom:
-        12px;
+    display:grid;
+    grid-template-columns:repeat(3,1fr);
+    gap:8px;
+    margin-bottom:12px;
 }
 
 .leader{
-
-    min-width:
-        0;
-
-    padding:
-        10px;
-
-    border-radius:
-        13px;
+    min-width:0;
+    padding:10px;
+    border-radius:13px;
 
     background:
         linear-gradient(
@@ -1506,7 +1294,6 @@ body{
 }
 
 .leader.purple{
-
     border-color:
         rgba(157,81,255,.55);
 
@@ -1516,7 +1303,6 @@ body{
 }
 
 .leader.gold{
-
     border-color:
         rgba(241,200,75,.5);
 
@@ -1526,54 +1312,29 @@ body{
 }
 
 .leader.blue{
-
     border-color:
         rgba(70,180,255,.5);
 }
 
 .leader-title{
-
-    font-size:
-        9px;
-
-    color:
-        #8d98aa;
-
-    font-weight:
-        900;
-
-    margin-bottom:
-        5px;
+    font-size:9px;
+    color:#8d98aa;
+    font-weight:900;
+    margin-bottom:5px;
 }
 
 .leader-value{
-
-    font-size:
-        20px;
-
-    font-weight:
-        1000;
+    font-size:20px;
+    font-weight:1000;
 }
 
 .leader-user{
-
-    margin-top:
-        3px;
-
-    font-size:
-        9px;
-
-    color:
-        #aeb9cc;
-
-    overflow:
-        hidden;
-
-    text-overflow:
-        ellipsis;
-
-    white-space:
-        nowrap;
+    margin-top:3px;
+    font-size:9px;
+    color:#aeb9cc;
+    overflow:hidden;
+    text-overflow:ellipsis;
+    white-space:nowrap;
 }
 
 
@@ -1582,24 +1343,14 @@ body{
    ===================================================== */
 
 .radar-grid{
-
-    display:
-        grid;
-
-    grid-template-columns:
-        1fr 1fr;
-
-    gap:
-        12px;
-
-    align-items:
-        start;
+    display:grid;
+    grid-template-columns:1fr 1fr;
+    gap:12px;
+    align-items:start;
 }
 
 .panel{
-
-    min-width:
-        0;
+    min-width:0;
 
     background:
         rgba(9,12,21,.9);
@@ -1608,22 +1359,17 @@ body{
         1px solid
         #273146;
 
-    border-radius:
-        17px;
-
-    padding:
-        10px;
+    border-radius:17px;
+    padding:10px;
 
     box-shadow:
         0 12px 38px
         rgba(0,0,0,.42);
 
-    backdrop-filter:
-        blur(10px);
+    backdrop-filter:blur(10px);
 }
 
 .panel.goody{
-
     border-color:
         rgba(157,81,255,.65);
 
@@ -1633,7 +1379,6 @@ body{
 }
 
 .panel.chest{
-
     border-color:
         rgba(241,200,75,.55);
 
@@ -1643,36 +1388,20 @@ body{
 }
 
 .panel-title{
-
-    display:
-        flex;
-
-    align-items:
-        center;
-
-    justify-content:
-        space-between;
-
-    gap:
-        7px;
-
-    padding:
-        2px 2px 10px;
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:7px;
+    padding:2px 2px 10px;
 }
 
 .panel-name{
-
-    font-size:
-        15px;
-
-    font-weight:
-        950;
+    font-size:15px;
+    font-weight:950;
 }
 
 .goody .panel-name{
-
-    color:
-        #d5a8ff;
+    color:#d5a8ff;
 
     text-shadow:
         0 0 13px
@@ -1680,9 +1409,7 @@ body{
 }
 
 .chest .panel-name{
-
-    color:
-        #ffe37b;
+    color:#ffe37b;
 
     text-shadow:
         0 0 13px
@@ -1690,27 +1417,16 @@ body{
 }
 
 .panel-count{
-
-    min-width:
-        25px;
-
-    padding:
-        3px 7px;
-
-    border-radius:
-        999px;
+    min-width:25px;
+    padding:3px 7px;
+    border-radius:999px;
 
     background:
         rgba(255,255,255,.07);
 
-    text-align:
-        center;
-
-    font-size:
-        9px;
-
-    font-weight:
-        900;
+    text-align:center;
+    font-size:9px;
+    font-weight:900;
 }
 
 
@@ -1719,12 +1435,8 @@ body{
    ===================================================== */
 
 .card{
-
-    position:
-        relative;
-
-    overflow:
-        hidden;
+    position:relative;
+    overflow:hidden;
 
     background:
         linear-gradient(
@@ -1737,14 +1449,9 @@ body{
         1px solid
         #293448;
 
-    border-radius:
-        12px;
-
-    padding:
-        10px;
-
-    margin-bottom:
-        7px;
+    border-radius:12px;
+    padding:10px;
+    margin-bottom:7px;
 }
 
 .card:last-child{
@@ -1752,14 +1459,12 @@ body{
 }
 
 .goody .card{
-
     border-left:
         3px solid
         #9d51ff;
 }
 
 .chest .card{
-
     border-left:
         3px solid
         #f1c84b;
@@ -1767,22 +1472,17 @@ body{
 
 
 /* =====================================================
-   GERÇEK YENİ KAYIT
+   YENİ KAYIT ANİMASYONU
    ===================================================== */
 
 .newest{
-
     animation:
         newestIn .7s ease-out;
 }
 
 @keyframes newestIn{
-
     0%{
-
-        opacity:
-            .35;
-
+        opacity:.35;
         transform:
             translateY(-8px)
             scale(.97);
@@ -1793,45 +1493,29 @@ body{
     }
 
     35%{
-
         box-shadow:
             0 0 30px
             rgba(157,81,255,.5);
     }
 
     100%{
-
-        opacity:
-            1;
+        opacity:1;
 
         transform:
             translateY(0)
             scale(1);
 
-        box-shadow:
-            none;
+        box-shadow:none;
     }
 }
 
 .new-badge{
-
-    flex-shrink:
-        0;
-
-    padding:
-        4px 7px;
-
-    border-radius:
-        6px;
-
-    font-size:
-        8px;
-
-    font-weight:
-        1000;
-
-    color:
-        #fff;
+    flex-shrink:0;
+    padding:4px 7px;
+    border-radius:6px;
+    font-size:8px;
+    font-weight:1000;
+    color:#fff;
 
     background:
         linear-gradient(
@@ -1851,7 +1535,6 @@ body{
 }
 
 .chest .new-badge{
-
     background:
         linear-gradient(
             135deg,
@@ -1859,8 +1542,7 @@ body{
             #f4d35e
         );
 
-    color:
-        #211700;
+    color:#211700;
 
     box-shadow:
         0 0 13px
@@ -1868,15 +1550,12 @@ body{
 }
 
 @keyframes badgeGlow{
-
     from{
-        filter:
-            brightness(1);
+        filter:brightness(1);
     }
 
     to{
-        filter:
-            brightness(1.45);
+        filter:brightness(1.45);
     }
 }
 
@@ -1886,48 +1565,24 @@ body{
    ===================================================== */
 
 .user-row{
-
-    display:
-        flex;
-
-    align-items:
-        center;
-
-    justify-content:
-        space-between;
-
-    gap:
-        5px;
-
-    margin-bottom:
-        8px;
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:5px;
+    margin-bottom:8px;
 }
 
 .user{
-
-    font-size:
-        14px;
-
-    font-weight:
-        950;
-
-    word-break:
-        break-word;
+    font-size:14px;
+    font-weight:950;
+    word-break:break-word;
 }
 
 .rank{
-
-    flex-shrink:
-        0;
-
-    font-size:
-        8px;
-
-    color:
-        #77849a;
-
-    font-weight:
-        900;
+    flex-shrink:0;
+    font-size:8px;
+    color:#77849a;
+    font-weight:900;
 }
 
 
@@ -1936,48 +1591,27 @@ body{
    ===================================================== */
 
 .info-grid{
-
-    display:
-        grid;
-
-    grid-template-columns:
-        1fr 1fr;
-
-    gap:
-        4px;
+    display:grid;
+    grid-template-columns:1fr 1fr;
+    gap:4px;
 }
 
 .info{
-
     background:
         rgba(255,255,255,.035);
 
-    border-radius:
-        7px;
+    border-radius:7px;
+    padding:5px;
 
-    padding:
-        5px;
-
-    font-size:
-        8px;
-
-    color:
-        #818da1;
+    font-size:8px;
+    color:#818da1;
 }
 
 .info b{
-
-    display:
-        block;
-
-    color:
-        #fff;
-
-    font-size:
-        11px;
-
-    margin-top:
-        2px;
+    display:block;
+    color:#fff;
+    font-size:11px;
+    margin-top:2px;
 }
 
 
@@ -1986,18 +1620,10 @@ body{
    ===================================================== */
 
 .live-button{
-
-    display:
-        block;
-
-    text-align:
-        center;
-
-    text-decoration:
-        none;
-
-    color:
-        white;
+    display:block;
+    text-align:center;
+    text-decoration:none;
+    color:white;
 
     background:
         linear-gradient(
@@ -2006,20 +1632,12 @@ body{
             #a90d38
         );
 
-    padding:
-        8px;
+    padding:8px;
+    margin-top:8px;
+    border-radius:8px;
 
-    margin-top:
-        8px;
-
-    border-radius:
-        8px;
-
-    font-size:
-        9px;
-
-    font-weight:
-        950;
+    font-size:9px;
+    font-weight:950;
 }
 
 
@@ -2028,24 +1646,15 @@ body{
    ===================================================== */
 
 .empty{
-
-    text-align:
-        center;
-
-    padding:
-        22px 5px;
-
-    border-radius:
-        10px;
+    text-align:center;
+    padding:22px 5px;
+    border-radius:10px;
 
     background:
         rgba(255,255,255,.025);
 
-    color:
-        #626e82;
-
-    font-size:
-        10px;
+    color:#626e82;
+    font-size:10px;
 }
 
 
@@ -2054,18 +1663,10 @@ body{
    ===================================================== */
 
 .footer{
-
-    text-align:
-        center;
-
-    color:
-        #59647a;
-
-    font-size:
-        8px;
-
-    padding:
-        13px 0 4px;
+    text-align:center;
+    color:#59647a;
+    font-size:8px;
+    padding:13px 0 4px;
 }
 
 
@@ -2080,21 +1681,13 @@ body{
     }
 
     .leaders{
-
-        gap:
-            5px;
-
-        margin-bottom:
-            7px;
+        gap:5px;
+        margin-bottom:7px;
     }
 
     .leader{
-
-        padding:
-            7px;
-
-        border-radius:
-            10px;
+        padding:7px;
+        border-radius:10px;
     }
 
     .leader-title{
@@ -2123,21 +1716,13 @@ body{
     }
 
     .radar-grid{
-
-        grid-template-columns:
-            1fr 1fr;
-
-        gap:
-            5px;
+        grid-template-columns:1fr 1fr;
+        gap:5px;
     }
 
     .panel{
-
-        padding:
-            6px;
-
-        border-radius:
-            12px;
+        padding:6px;
+        border-radius:12px;
     }
 
     .panel-name{
@@ -2145,27 +1730,15 @@ body{
     }
 
     .panel-count{
-
-        min-width:
-            21px;
-
-        padding:
-            3px 5px;
-
-        font-size:
-            8px;
+        min-width:21px;
+        padding:3px 5px;
+        font-size:8px;
     }
 
     .card{
-
-        padding:
-            7px;
-
-        border-radius:
-            8px;
-
-        margin-bottom:
-            5px;
+        padding:7px;
+        border-radius:8px;
+        margin-bottom:5px;
     }
 
     .user{
@@ -2182,12 +1755,8 @@ body{
     }
 
     .info{
-
-        padding:
-            4px;
-
-        font-size:
-            6px;
+        padding:4px;
+        font-size:6px;
     }
 
     .info b{
@@ -2195,24 +1764,14 @@ body{
     }
 
     .live-button{
-
-        padding:
-            6px 2px;
-
-        font-size:
-            7px;
-
-        margin-top:
-            5px;
+        padding:6px 2px;
+        font-size:7px;
+        margin-top:5px;
     }
 
     .empty{
-
-        padding:
-            18px 3px;
-
-        font-size:
-            8px;
+        padding:18px 3px;
+        font-size:8px;
     }
 }
 
@@ -2242,10 +1801,6 @@ body{
 
 </div>
 
-
-<!-- =====================================================
-     LİDERLER
-     ===================================================== -->
 
 <div class="leaders">
 
@@ -2320,10 +1875,6 @@ body{
 </div>
 
 
-<!-- =====================================================
-     RADAR
-     ===================================================== -->
-
 <div class="radar-grid">
 
 
@@ -2374,9 +1925,7 @@ body{
 
 
 <div class="footer">
-
     ⚡ ÖDÜL AVCISI • CANLI RADAR
-
 </div>
 
 </div>
@@ -2385,89 +1934,35 @@ body{
 <script>
 
 let radarData = {
-
     chests: [],
-
     goody_bags: []
-
 };
-
-
-/*
-    İlk açılışta mevcut kayıtların hepsi
-    "YENİ" sayılmaz.
-
-    Daha sonra gerçekten yeni kayıt geldiğinde
-    sadece yeni kayıt animasyon alır.
-*/
 
 let firstLoad = true;
 
 let lastNewestGoody = "";
-
 let lastNewestChest = "";
 
 
 function escapeHtml(value){
-
-    return String(
-        value ?? ""
-    )
-
-    .replace(
-        /&/g,
-        "&amp;"
-    )
-
-    .replace(
-        /</g,
-        "&lt;"
-    )
-
-    .replace(
-        />/g,
-        "&gt;"
-    )
-
-    .replace(
-        /"/g,
-        "&quot;"
-    )
-
-    .replace(
-        /'/g,
-        "&#039;"
-    );
-
+    return String(value ?? "")
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#039;");
 }
 
 
 function timestamp(item){
-
     return Number(
-
-        item.detected_at
-
-        ||
-
-        item.created_at
-
-        ||
-
-        item.timestamp
-
-        ||
-
+        item.detected_at ||
+        item.created_at ||
+        item.timestamp ||
         0
-
     );
-
 }
 
-
-/*
-    EN YENİ DAİMA EN ÜSTTE.
-*/
 
 function latestFive(items){
 
@@ -2476,39 +1971,23 @@ function latestFive(items){
     }
 
     return [...items]
-
         .sort(
-
             (a,b) =>
                 timestamp(b)
                 -
                 timestamp(a)
-
         )
-
-        .slice(
-            0,
-            5
-        );
+        .slice(0,5);
 }
 
-
-/*
-    Kaydın benzersiz anahtarı.
-*/
 
 function newestKey(item){
 
     return String(
-
-        item.source_message_id
-        ??
-        item.room
-        ??
-        item.detected_at
-        ??
+        item.source_message_id ??
+        item.room ??
+        item.detected_at ??
         ""
-
     );
 
 }
@@ -2539,7 +2018,6 @@ function renderItems(
     const latest =
         latestFive(items);
 
-
     counter.textContent =
         latest.length;
 
@@ -2555,11 +2033,6 @@ function renderItems(
     }
 
 
-    /*
-        Sadece listenin en üstündeki kayıt
-        gerçek yeni kayıt olduysa animasyon alır.
-    */
-
     const newest =
         newestKey(
             latest[0]
@@ -2567,35 +2040,19 @@ function renderItems(
 
 
     const previousNewest =
-
         type === "GOODY BAG"
-
-        ?
-
-        lastNewestGoody
-
-        :
-
-        lastNewestChest;
+            ? lastNewestGoody
+            : lastNewestChest;
 
 
     const isNew =
-
-        !firstLoad
-
-        &&
-
-        newest
-
-        &&
-
+        !firstLoad &&
+        newest &&
         newest !== previousNewest;
 
 
     container.innerHTML =
-
         latest.map(
-
             (item,index) => {
 
                 const live =
@@ -2627,20 +2084,15 @@ function renderItems(
 
                         </div>
 
-
                         ${
                             isNewest
-
                             ?
-
                             `
                             <div class="new-badge">
                                 ⚡ YENİ
                             </div>
                             `
-
                             :
-
                             `
                             <div class="rank">
                                 #${index + 1}
@@ -2737,33 +2189,20 @@ function renderItems(
 
                     ${
                         live
-
                         ?
-
                         `
-
                         <a
-
                             class="live-button"
-
                             href="${escapeHtml(
                                 live
                             )}"
-
                             target="_blank"
-
                             rel="noopener"
-
                         >
-
                             🔴 CANLI YAYINA GİT
-
                         </a>
-
                         `
-
                         :
-
                         ""
                     }
 
@@ -2772,26 +2211,17 @@ function renderItems(
                 `;
 
             }
-
         ).join("");
 
-
-    /*
-        Son görülen kaydı hatırla.
-    */
 
     if(
         type === "GOODY BAG"
     ){
-
         lastNewestGoody =
             newest;
-
     }else{
-
         lastNewestChest =
             newest;
-
     }
 
 }
@@ -2804,23 +2234,25 @@ function renderItems(
 function allItems(){
 
     return [
-
-        ...(Array.isArray(
+        ...(
+            Array.isArray(
+                radarData.goody_bags
+            )
+            ?
             radarData.goody_bags
-        )
-        ?
-        radarData.goody_bags
-        :
-        []),
+            :
+            []
+        ),
 
-        ...(Array.isArray(
+        ...(
+            Array.isArray(
+                radarData.chests
+            )
+            ?
             radarData.chests
+            :
+            []
         )
-        ?
-        radarData.chests
-        :
-        [])
-
     ];
 
 }
@@ -2900,7 +2332,6 @@ function updateLeaders(){
     document.getElementById(
         "maxCoinUser"
     ).textContent =
-
         `${
             coin.type === "GOODY BAG"
                 ? "🟪"
@@ -2919,7 +2350,6 @@ function updateLeaders(){
     document.getElementById(
         "maxPeopleUser"
     ).textContent =
-
         `${
             people.type === "GOODY BAG"
                 ? "🟪"
@@ -2938,7 +2368,6 @@ function updateLeaders(){
     document.getElementById(
         "maxRateUser"
     ).textContent =
-
         `${
             rate.type === "GOODY BAG"
                 ? "🟪"
@@ -2955,32 +2384,20 @@ function updateLeaders(){
 function renderRadar(){
 
     renderItems(
-
         radarData.goody_bags,
-
         "bags",
-
         "bagCounter",
-
         "🟪",
-
         "GOODY BAG"
-
     );
 
 
     renderItems(
-
         radarData.chests,
-
         "chests",
-
         "chestCounter",
-
         "🟨",
-
         "CHEST"
-
     );
 
 
@@ -2999,24 +2416,19 @@ async function loadRadar(){
 
         const response =
             await fetch(
-
-                "/api/all?t="
-                +
+                "/api/all?t=" +
                 Date.now(),
-
                 {
                     cache:
                         "no-store"
                 }
-
             );
 
 
         if(!response.ok){
 
             throw new Error(
-                "HTTP "
-                +
+                "HTTP " +
                 response.status
             );
 
@@ -3030,32 +2442,21 @@ async function loadRadar(){
         radarData = {
 
             chests:
-
                 Array.isArray(
                     data.chests
                 )
-
                 ?
-
                 data.chests
-
                 :
-
                 [],
 
-
             goody_bags:
-
                 Array.isArray(
                     data.goody_bags
                 )
-
                 ?
-
                 data.goody_bags
-
                 :
-
                 []
 
         };
@@ -3080,7 +2481,6 @@ async function loadRadar(){
 
         firstLoad =
             false;
-
 
     }
 
@@ -3113,7 +2513,6 @@ async function loadRadar(){
 /*
     2 saniyede bir kontrol.
     Kayıtlar kaybolmaz.
-    Sadece yeni gelen kayıt üste geçer.
 */
 
 setInterval(
@@ -3136,15 +2535,10 @@ loadRadar();
 # =========================================================
 
 async def radar_page(request):
-
     return web.Response(
-
         text=RADAR_HTML,
-
         content_type="text/html",
-
         charset="utf-8"
-
     )
 
 
@@ -3157,43 +2551,26 @@ async def cors_middleware(
     if request.method == "OPTIONS":
 
         return web.Response(
-
             status=204,
-
             headers={
-
-                "Access-Control-Allow-Origin":
-                    "*",
-
-                "Access-Control-Allow-Methods":
-                    "GET, OPTIONS",
-
-                "Access-Control-Allow-Headers":
-                    "*",
-
-                "Access-Control-Max-Age":
-                    "86400",
-
+                "Access-Control-Allow-Origin": "*",
+                "Access-Control-Allow-Methods": "GET, OPTIONS",
+                "Access-Control-Allow-Headers": "*",
+                "Access-Control-Max-Age": "86400",
             }
-
         )
 
 
-    response =
-        await handler(
-            request
-        )
+    response = await handler(request)
 
 
     response.headers[
         "Access-Control-Allow-Origin"
     ] = "*"
 
-
     response.headers[
         "Access-Control-Allow-Methods"
     ] = "GET, OPTIONS"
-
 
     response.headers[
         "Access-Control-Allow-Headers"
@@ -3206,31 +2583,25 @@ async def cors_middleware(
 async def api_boxes(request):
 
     return web.json_response(
-
         list(
             LIVE_CHESTS.values()
         )
-
     )
 
 
 async def api_goody_bags(request):
 
     return web.json_response(
-
         list(
             LIVE_GOODY_BAGS.values()
         )
-
     )
 
 
 async def api_status(request):
 
     return web.json_response({
-
-        "status":
-            "online",
+        "status": "online",
 
         "chests":
             len(
@@ -3246,16 +2617,13 @@ async def api_status(request):
             int(
                 time.time()
             ),
-
     })
 
 
 async def api_all(request):
 
     return web.json_response({
-
-        "status":
-            "online",
+        "status": "online",
 
         "server_time":
             int(
@@ -3271,18 +2639,15 @@ async def api_all(request):
             list(
                 LIVE_GOODY_BAGS.values()
             ),
-
     })
 
 
 async def start_http_server():
 
     app = web.Application(
-
         middlewares=[
             cors_middleware
         ]
-
     )
 
 
@@ -3358,21 +2723,17 @@ async def start_http_server():
     )
 
 
-    runner =
-        web.AppRunner(
-            app
-        )
+    runner = web.AppRunner(app)
 
 
     await runner.setup()
 
 
-    site =
-        web.TCPSite(
-            runner,
-            "0.0.0.0",
-            PORT
-        )
+    site = web.TCPSite(
+        runner,
+        "0.0.0.0",
+        PORT
+    )
 
 
     await site.start()
@@ -3425,20 +2786,14 @@ async def message_listener(event):
             processed_messages.clear()
 
 
-        data =
-            parse_source_message(
-                event
-            )
+        data = parse_source_message(event)
 
 
         if not data:
             return
 
 
-        added =
-            add_to_radar(
-                data
-            )
+        added = add_to_radar(data)
 
 
         if added:
@@ -3478,25 +2833,19 @@ async def main():
     )
 
 
-    http_session =
-        aiohttp.ClientSession()
+    http_session = aiohttp.ClientSession()
 
 
     await start_http_server()
 
 
-    client =
-        TelegramClient(
-
-            StringSession(
-                STRING_SESSION
-            ),
-
-            API_ID,
-
-            API_HASH
-
-        )
+    client = TelegramClient(
+        StringSession(
+            STRING_SESSION
+        ),
+        API_ID,
+        API_HASH
+    )
 
 
     await client.start()
@@ -3521,13 +2870,10 @@ async def main():
 
 
     client.add_event_handler(
-
         message_listener,
-
         events.NewMessage(
             chats=SOURCE_CHATS
         )
-
     )
 
 
