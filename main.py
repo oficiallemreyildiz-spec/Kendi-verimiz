@@ -52,9 +52,9 @@ class RadarAPIHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         now = int(time.time())
 
-        with DATA_LOCK:
-            global LIVE_CHESTS, LIVE_GOODY_BAGS
+        global LIVE_CHESTS, LIVE_GOODY_BAGS
 
+        with DATA_LOCK:
             LIVE_CHESTS = [
                 b for b in LIVE_CHESTS
                 if b.get("target_time", 0) > now
@@ -79,14 +79,26 @@ class RadarAPIHandler(BaseHTTPRequestHandler):
             return
 
         self.send_response(200)
-        self.send_header("Content-Type", "text/plain; charset=utf-8")
-        self.send_header("Access-Control-Allow-Origin", "*")
+        self.send_header(
+            "Content-Type",
+            "text/plain; charset=utf-8"
+        )
+        self.send_header(
+            "Access-Control-Allow-Origin",
+            "*"
+        )
         self.end_headers()
-        self.wfile.write(b"VIP Radar API Aktif")
+
+        self.wfile.write(
+            b"VIP Radar API Aktif"
+        )
 
     def do_OPTIONS(self):
         self.send_response(200)
-        self.send_header("Access-Control-Allow-Origin", "*")
+        self.send_header(
+            "Access-Control-Allow-Origin",
+            "*"
+        )
         self.send_header(
             "Access-Control-Allow-Methods",
             "GET, OPTIONS"
@@ -99,14 +111,17 @@ class RadarAPIHandler(BaseHTTPRequestHandler):
 
     def send_json_response(self, data):
         self.send_response(200)
+
         self.send_header(
             "Content-Type",
             "application/json; charset=utf-8"
         )
+
         self.send_header(
             "Access-Control-Allow-Origin",
             "*"
         )
+
         self.end_headers()
 
         self.wfile.write(
@@ -121,14 +136,18 @@ class RadarAPIHandler(BaseHTTPRequestHandler):
 
 
 def start_server():
-    port = int(os.getenv("PORT", "10000"))
+    port = int(
+        os.getenv("PORT", "10000")
+    )
 
     server = HTTPServer(
         ("0.0.0.0", port),
         RadarAPIHandler
     )
 
-    print(f"[WEB] Radar API : {port}")
+    print(
+        f"[WEB] Radar API : {port}"
+    )
 
     server.serve_forever()
 
@@ -142,10 +161,14 @@ send_queue: asyncio.Queue[str] = asyncio.Queue()
 MIN_INTERVAL = 1.0
 
 
-async def sender_worker(session: aiohttp.ClientSession):
+async def sender_worker(
+    session: aiohttp.ClientSession
+):
 
     if not BOT_TOKEN:
-        print("[WARN] BOT_TOKEN yok.")
+        print(
+            "[WARN] BOT_TOKEN yok."
+        )
         return
 
     url = (
@@ -218,25 +241,31 @@ async def sender_worker(session: aiohttp.ClientSession):
             )
 
         finally:
-
             send_queue.task_done()
 
 
 # ============================================================
-# TOKEN BULMA
+# TOKEN URL BUL
 # ============================================================
 
 def extract_token_url(text: str):
     """
-    Mesaj içerisindeki:
+    Kaynak mesajdaki:
 
-    dichvu321.com/tiktok/t.php?token=...
+    https://dichvu321.com/tiktok/t.php?token=...
 
-    bağlantısını bulur.
+    bağlantısını yakalar.
+
+    Markdown link olsa bile token kısmını
+    doğrudan metinden çıkarır.
     """
 
     pattern = (
-        r'https?://[^)\s]+/tiktok/t\.php\?token=([^)\s]+)'
+        r'(?:https?://)?'
+        r'(?:www\.)?'
+        r'dichvu321\.com'
+        r'/tiktok/t\.php\?token='
+        r'([A-Za-z0-9_-]+={0,2})'
     )
 
     m = re.search(
@@ -250,32 +279,25 @@ def extract_token_url(text: str):
 
     token = m.group(1)
 
-    # Markdown / URL sonu temizliği
-    token = token.rstrip(
-        ")]}>\"'"
-    )
-
     return unquote(token)
 
 
 # ============================================================
-# TOKEN ÇÖZME
+# TOKEN ÇÖZ
 # ============================================================
 
 def decode_token(token: str):
-    """
-    Base64 token -> JSON
-    """
 
     try:
 
-        # URL-safe Base64
         token = token.strip()
 
         padding = len(token) % 4
 
         if padding:
-            token += "=" * (4 - padding)
+            token += "=" * (
+                4 - padding
+            )
 
         raw = base64.urlsafe_b64decode(
             token.encode("utf-8")
@@ -300,7 +322,7 @@ def decode_token(token: str):
 
 
 # ============================================================
-# KULLANICI ADI TEMİZLEME
+# USERNAME
 # ============================================================
 
 def clean_username(username):
@@ -308,7 +330,9 @@ def clean_username(username):
     if not username:
         return None
 
-    username = str(username).strip()
+    username = str(
+        username
+    ).strip()
 
     username = username.lstrip("@")
 
@@ -332,24 +356,25 @@ def calculate_target_time(data):
 
     now = int(time.time())
 
-    # Token içerisindeki gerçek zaman
     token_time = data.get("time")
 
     try:
 
-        token_time = int(token_time)
+        token_time = int(
+            token_time
+        )
 
-        # Eğer token zamanı gelecekteyse
-        # doğrudan bunu kullan.
         if token_time > now:
             return token_time
 
     except Exception:
         pass
 
-    # Fallback: time_display
     display = str(
-        data.get("time_display", "")
+        data.get(
+            "time_display",
+            ""
+        )
     )
 
     m = re.search(
@@ -359,8 +384,13 @@ def calculate_target_time(data):
 
     if m:
 
-        minutes = int(m.group(1))
-        seconds = int(m.group(2))
+        minutes = int(
+            m.group(1)
+        )
+
+        seconds = int(
+            m.group(2)
+        )
 
         duration = (
             minutes * 60
@@ -369,12 +399,11 @@ def calculate_target_time(data):
 
         return now + duration
 
-    # Son fallback
     return now + 180
 
 
 # ============================================================
-# TOKEN'DAN VERİ ÇIKAR
+# PARSE TOKEN
 # ============================================================
 
 def parse_source_message(text: str):
@@ -388,6 +417,10 @@ def parse_source_message(text: str):
         )
 
         return None
+
+    print(
+        "[TOKEN] t.php token bulundu."
+    )
 
     data = decode_token(token)
 
@@ -404,46 +437,50 @@ def parse_source_message(text: str):
     )
 
     room = str(
-        data.get("room", "")
+        data.get(
+            "room",
+            ""
+        )
     ).strip()
 
     openitok = str(
-        data.get("openitok", "")
+        data.get(
+            "openitok",
+            ""
+        )
     ).strip()
 
-    # --------------------------------------------------------
-    # Goody Bag
-    # --------------------------------------------------------
+    # ========================================================
+    # GOODY BAG
+    # ========================================================
 
     is_goody = bool(
-        data.get("is_goody_bag", False)
+        data.get(
+            "is_goody_bag",
+            False
+        )
     )
 
-    # --------------------------------------------------------
-    # TÚI / BOX
-    # --------------------------------------------------------
+    # ========================================================
+    # COINS
+    # ========================================================
 
-    item_label = str(
-        data.get("item_label", "")
-    )
-
-    # TÚI: 50/20 gibi değerde ilk sayı
     coins = 10
 
     m = re.search(
-        r"(\d+)\s*/\s*(\d+)",
+        r'(\d+)\s*/\s*(\d+)',
         text
     )
 
     if m:
 
         try:
-            coins = int(m.group(1))
+            coins = int(
+                m.group(1)
+            )
         except Exception:
             pass
 
-    # Token'daki maxzem / benzeri alan varsa
-    # onu sadece fallback olarak kullan.
     if coins == 10:
 
         for key in (
@@ -455,10 +492,15 @@ def parse_source_message(text: str):
 
             try:
 
-                value = data.get(key)
+                value = data.get(
+                    key
+                )
 
                 if value is not None:
-                    value = int(value)
+
+                    value = int(
+                        value
+                    )
 
                     if value > 0:
                         coins = value
@@ -467,67 +509,92 @@ def parse_source_message(text: str):
             except Exception:
                 pass
 
-    # --------------------------------------------------------
-    # People / View / Ratio
-    # --------------------------------------------------------
+    # ========================================================
+    # OTHER DATA
+    # ========================================================
 
-    people = data.get("people", 0)
-    ratio = data.get("ratio", 0)
-    view = data.get("view", 0)
+    people = data.get(
+        "people",
+        0
+    )
+
+    ratio = data.get(
+        "ratio",
+        0
+    )
+
+    view = data.get(
+        "view",
+        0
+    )
 
     try:
-        people = int(people)
+        people = int(
+            people
+        )
     except Exception:
         people = 0
 
     try:
-        ratio = float(ratio)
+        ratio = float(
+            ratio
+        )
     except Exception:
         ratio = 0
 
     try:
-        view = int(view)
+        view = int(
+            view
+        )
     except Exception:
         view = 0
 
-    # --------------------------------------------------------
-    # Target time
-    # --------------------------------------------------------
+    # ========================================================
+    # TIME
+    # ========================================================
 
-    target_time = calculate_target_time(data)
+    target_time = calculate_target_time(
+        data
+    )
 
     remaining = max(
         0,
         target_time - int(time.time())
     )
 
-    # --------------------------------------------------------
+    # ========================================================
     # LIVE LINK
-    # --------------------------------------------------------
+    # ========================================================
 
     if openitok.startswith(
         "https://www.tiktok.com/"
     ):
+
         live_link = openitok
 
     elif room:
+
         live_link = (
             "https://www.tiktok.com/"
             f"share/live/{room}"
         )
 
     elif username:
+
         live_link = (
-            f"https://www.tiktok.com/"
+            "https://www.tiktok.com/"
             f"@{username}/live"
         )
 
     else:
-        live_link = "https://www.tiktok.com/live"
 
-    # --------------------------------------------------------
-    # DATA
-    # --------------------------------------------------------
+        live_link = (
+            "https://www.tiktok.com/live"
+        )
+
+    # ========================================================
+    # RADAR DATA
+    # ========================================================
 
     box_data = {
 
@@ -563,14 +630,16 @@ def parse_source_message(text: str):
 
         "total_duration": remaining,
 
-        "detected_at": int(time.time())
+        "detected_at": int(
+            time.time()
+        )
     }
 
     return box_data, data
 
 
 # ============================================================
-# MESSAGE PROCESS
+# PROCESS MESSAGE
 # ============================================================
 
 def process_message(
@@ -578,22 +647,38 @@ def process_message(
     chat_title: str
 ):
 
-    result = parse_source_message(text)
+    result = parse_source_message(
+        text
+    )
 
     if not result:
         return None
 
     box_data, token_data = result
 
-    username = box_data["username"]
-    coins = box_data["coins"]
-    is_goody = box_data["is_goody"]
-    live_link = box_data["live_link"]
-    target_time = box_data["target_time"]
+    username = box_data[
+        "username"
+    ]
 
-    # --------------------------------------------------------
+    coins = box_data[
+        "coins"
+    ]
+
+    is_goody = box_data[
+        "is_goody"
+    ]
+
+    live_link = box_data[
+        "live_link"
+    ]
+
+    target_time = box_data[
+        "target_time"
+    ]
+
+    # ========================================================
     # RADAR
-    # --------------------------------------------------------
+    # ========================================================
 
     with DATA_LOCK:
 
@@ -609,19 +694,22 @@ def process_message(
                 box_data
             )
 
-    # --------------------------------------------------------
+    # ========================================================
     # LOG
-    # --------------------------------------------------------
+    # ========================================================
 
     print(
         "\n=============================="
     )
 
-    print(
-        "[NEW GOODY BAG]"
-        if is_goody
-        else "[NEW CHEST]"
-    )
+    if is_goody:
+        print(
+            "[NEW GOODY BAG]"
+        )
+    else:
+        print(
+            "[NEW CHEST]"
+        )
 
     print(
         f"username : {username}"
@@ -659,9 +747,9 @@ def process_message(
         "==============================\n"
     )
 
-    # --------------------------------------------------------
+    # ========================================================
     # TELEGRAM
-    # --------------------------------------------------------
+    # ========================================================
 
     header = (
         "🎒 YENİ GOODY BAG!"
@@ -690,7 +778,9 @@ def process_message(
 # ============================================================
 
 client = TelegramClient(
-    StringSession(STRING_SESSION),
+    StringSession(
+        STRING_SESSION
+    ),
     API_ID,
     API_HASH,
 
@@ -705,7 +795,7 @@ http_session: aiohttp.ClientSession | None = None
 
 
 # ============================================================
-# LISTENER
+# TELEGRAM LISTENER
 # ============================================================
 
 @client.on(
@@ -779,7 +869,9 @@ async def main():
             sender_worker(session)
         )
 
-        print("[TELEGRAM] Başlatılıyor...")
+        print(
+            "[TELEGRAM] Başlatılıyor..."
+        )
 
         await client.start()
 
