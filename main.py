@@ -1,12 +1,13 @@
 # main.py
 # ÖDÜL AVCISI
-# - JİMİN kaldırıldı
-# - En Yüksek Coin / En Çok Kişi / En Yüksek Rate
-# - Yeni kayıt en üstte
+# - Üst liderler kaldırıldı
 # - Goody ve Chest ayrı
 # - Her bölüm son 5 kayıt
+# - Yeni gelen HER kayıt ⚡ YENİ
+# - Yeni kayıtlar üstte
+# - Eski kayıtlar aşağı kayar
 # - Kayıtlar süre dolunca silinmez
-# - En yeni kayıt ⚡ YENİ
+# - Countdown yok
 
 import os
 import re
@@ -48,13 +49,20 @@ telegram_queue = asyncio.Queue()
 http_session = None
 
 
+# =========================================================
+# YARDIMCI
+# =========================================================
+
 def safe_int(value, default=0):
     try:
         if value is None:
             return default
+
         if isinstance(value, bool):
             return int(value)
+
         return int(float(value))
+
     except Exception:
         return default
 
@@ -63,7 +71,9 @@ def safe_float(value, default=0):
     try:
         if value is None:
             return default
+
         return float(value)
+
     except Exception:
         return default
 
@@ -73,57 +83,49 @@ def safe_float(value, default=0):
 # =========================================================
 
 def extract_token_from_event(event):
+
     try:
         message = event.message
         text = message.raw_text or ""
+
     except Exception:
         return None
+
 
     patterns = [
         r'https?://[^ \n\]\)]+/t\.php\?token=([^&\s\]\)]+)',
         r'https?://[^ \n\]\)]+t\.php\?token=([^&\s\]\)]+)',
     ]
 
+
     for pattern in patterns:
-        m = re.search(pattern, text, re.I)
 
-        if m:
-            token = unquote(m.group(1))
-            print("[TOKEN] raw text üzerinden bulundu")
-            return token
-
-    try:
-        entities = message.entities or []
-
-        for entity in entities:
-            url = getattr(entity, "url", None)
-
-            if not url:
-                continue
-
-            m = re.search(
-                r't\.php\?token=([^&\s]+)',
-                url,
-                re.I
-            )
-
-            if m:
-                token = unquote(m.group(1))
-
-                print(
-                    "[TOKEN] Telegram entity üzerinden bulundu"
-                )
-
-                return token
-
-    except Exception as e:
-        print(
-            "[TOKEN ENTITY HATASI]",
-            repr(e)
+        m = re.search(
+            pattern,
+            text,
+            re.I
         )
 
+        if m:
+
+            token = unquote(
+                m.group(1)
+            )
+
+            print(
+                "[TOKEN] raw text üzerinden bulundu"
+            )
+
+            return token
+
+
     try:
-        for entity, entity_text in message.get_entities_text():
+
+        entities = message.entities or []
+
+
+        for entity in entities:
+
             url = getattr(
                 entity,
                 "url",
@@ -133,14 +135,61 @@ def extract_token_from_event(event):
             if not url:
                 continue
 
+
             m = re.search(
                 r't\.php\?token=([^&\s]+)',
                 url,
                 re.I
             )
 
+
             if m:
-                token = unquote(m.group(1))
+
+                token = unquote(
+                    m.group(1)
+                )
+
+                print(
+                    "[TOKEN] Telegram entity üzerinden bulundu"
+                )
+
+                return token
+
+
+    except Exception as e:
+
+        print(
+            "[TOKEN ENTITY HATASI]",
+            repr(e)
+        )
+
+
+    try:
+
+        for entity, entity_text in message.get_entities_text():
+
+            url = getattr(
+                entity,
+                "url",
+                None
+            )
+
+            if not url:
+                continue
+
+
+            m = re.search(
+                r't\.php\?token=([^&\s]+)',
+                url,
+                re.I
+            )
+
+
+            if m:
+
+                token = unquote(
+                    m.group(1)
+                )
 
                 print(
                     "[TOKEN] entity text üzerinden bulundu"
@@ -148,50 +197,72 @@ def extract_token_from_event(event):
 
                 return token
 
+
     except Exception as e:
+
         print(
             "[TOKEN ENTITY TEXT HATASI]",
             repr(e)
         )
 
-    print("[TOKEN] bulunamadı")
+
+    print(
+        "[TOKEN] bulunamadı"
+    )
 
     return None
 
 
 def decode_token(token):
+
     if not token:
         return None
 
+
     try:
+
         token = unquote(
             str(token)
         ).strip()
+
 
         padding = "=" * (
             -len(token) % 4
         )
 
+
         decoded = base64.urlsafe_b64decode(
             token + padding
         )
+
 
         text = decoded.decode(
             "utf-8",
             errors="ignore"
         ).strip()
 
-        data = json.loads(text)
+
+        data = json.loads(
+            text
+        )
+
 
         if isinstance(data, dict):
-            print("[TOKEN] çözüldü")
+
+            print(
+                "[TOKEN] çözüldü"
+            )
+
             return data
 
+
     except Exception as e:
+
         print(
             "[TOKEN HATASI]",
             repr(e)
         )
+
 
     return None
 
@@ -201,41 +272,56 @@ def decode_token(token):
 # =========================================================
 
 def extract_p_room(text):
+
     if not text:
         return None
 
+
     patterns = [
+
         r'https?://live\.dichvu321\.com/t/\?p=([A-Za-z0-9_\-+/=]+)',
+
         r'https?://[^ \n]+/t/\?p=([A-Za-z0-9_\-+/=]+)',
+
     ]
 
+
     for pattern in patterns:
+
         m = re.search(
             pattern,
             text,
             re.I
         )
 
+
         if not m:
             continue
 
+
         encoded = m.group(1)
 
+
         try:
+
             padding = "=" * (
                 -len(encoded) % 4
             )
 
+
             decoded = base64.urlsafe_b64decode(
                 encoded + padding
             )
+
 
             room = decoded.decode(
                 "utf-8",
                 errors="ignore"
             ).strip()
 
+
             if room.isdigit():
+
                 print(
                     "[ODA ID] bulundu:",
                     room
@@ -243,11 +329,14 @@ def extract_p_room(text):
 
                 return room
 
+
         except Exception as e:
+
             print(
                 "[ODA ID HATASI]",
                 repr(e)
             )
+
 
     return None
 
@@ -257,23 +346,33 @@ def extract_p_room(text):
 # =========================================================
 
 def extract_username_from_text(text):
+
     if not text:
         return None
 
+
     patterns = [
+
         r'^\s*##\s*T\d+\s*[›>:]\s*([^\s\n]+)',
+
         r'^\s*T\d+\s*[›>:]\s*([^\s\n]+)',
+
     ]
 
+
     for pattern in patterns:
+
         m = re.search(
             pattern,
             text,
             re.M
         )
 
+
         if m:
+
             return m.group(1).strip()
+
 
     return None
 
@@ -282,16 +381,25 @@ def extract_username_from_text(text):
 # COIN
 # =========================================================
 
-def extract_coins(text, token_data=None):
+def extract_coins(
+    text,
+    token_data=None
+):
+
     if text:
+
         m = re.search(
             r'(?:TÚI|TUI)\s*:\s*(\d+)\s*/',
             text,
             re.I
         )
 
+
         if m:
-            return safe_int(m.group(1))
+            return safe_int(
+                m.group(1)
+            )
+
 
         m = re.search(
             r'BOX\s*:\s*(\d+)\s*/',
@@ -299,18 +407,27 @@ def extract_coins(text, token_data=None):
             re.I
         )
 
+
         if m:
-            return safe_int(m.group(1))
+            return safe_int(
+                m.group(1)
+            )
+
 
         m = re.search(
             r'(\d+)\s*/\s*(\d+)',
             text
         )
 
+
         if m:
-            return safe_int(m.group(1))
+            return safe_int(
+                m.group(1)
+            )
+
 
     if token_data:
+
         for key in [
             "coins",
             "coin",
@@ -318,16 +435,23 @@ def extract_coins(text, token_data=None):
             "diamond",
             "amount",
         ]:
-            value = token_data.get(key)
+
+            value = token_data.get(
+                key
+            )
+
 
             if value is not None:
+
                 number = safe_int(
                     value,
                     -1
                 )
 
+
                 if number >= 0:
                     return number
+
 
     return 0
 
@@ -337,8 +461,10 @@ def extract_coins(text, token_data=None):
 # =========================================================
 
 def extract_people_from_message(text):
+
     if not text:
         return 0
+
 
     m = re.search(
         r'(?:TÚI|TUI)\s*:\s*\d+\s*/\s*(\d+)',
@@ -346,8 +472,12 @@ def extract_people_from_message(text):
         re.I
     )
 
+
     if m:
-        return safe_int(m.group(1))
+        return safe_int(
+            m.group(1)
+        )
+
 
     m = re.search(
         r'BOX\s*:\s*\d+\s*/\s*(\d+)',
@@ -355,16 +485,24 @@ def extract_people_from_message(text):
         re.I
     )
 
+
     if m:
-        return safe_int(m.group(1))
+        return safe_int(
+            m.group(1)
+        )
+
 
     m = re.search(
         r'(\d+)\s*/\s*(\d+)',
         text
     )
 
+
     if m:
-        return safe_int(m.group(2))
+        return safe_int(
+            m.group(2)
+        )
+
 
     return 0
 
@@ -374,24 +512,37 @@ def extract_people_from_message(text):
 # =========================================================
 
 def extract_joined(text):
+
     if not text:
         return 0
 
+
     patterns = [
+
         r'Đã\s*join\s*:\s*(\d+)',
+
         r'joined\s*:\s*(\d+)',
+
         r'join\s*:\s*(\d+)',
+
     ]
 
+
     for pattern in patterns:
+
         m = re.search(
             pattern,
             text,
             re.I
         )
 
+
         if m:
-            return safe_int(m.group(1))
+
+            return safe_int(
+                m.group(1)
+            )
+
 
     return 0
 
@@ -401,16 +552,23 @@ def extract_joined(text):
 # =========================================================
 
 def extract_viewers(text):
+
     if not text:
         return 0
+
 
     m = re.search(
         r'👀\s*(\d+)',
         text
     )
 
+
     if m:
-        return safe_int(m.group(1))
+
+        return safe_int(
+            m.group(1)
+        )
+
 
     return 0
 
@@ -419,29 +577,43 @@ def extract_viewers(text):
 # ORAN
 # =========================================================
 
-def extract_rate(text, token_data=None):
+def extract_rate(
+    text,
+    token_data=None
+):
+
     if text:
+
         m = re.search(
             r'Rate\s*:\s*([0-9]+(?:\.[0-9]+)?)',
             text,
             re.I
         )
 
+
         if m:
-            return safe_float(m.group(1))
+
+            return safe_float(
+                m.group(1)
+            )
+
 
     if token_data:
+
         for key in [
             "ratio",
             "rate",
         ]:
+
             if key in token_data:
+
                 return safe_float(
                     token_data.get(
                         key,
                         0
                     )
                 )
+
 
     return 0
 
@@ -450,52 +622,67 @@ def extract_rate(text, token_data=None):
 # TÜR
 # =========================================================
 
-def detect_type(text, token_data):
+def detect_type(
+    text,
+    token_data
+):
+
     text_upper = (
         text or ""
     ).upper()
+
 
     if re.search(
         r'TÚI|TUI',
         text_upper
     ):
+
         print(
             "[TÜR] TÚI -> GOODY BAG"
         )
 
         return True
 
+
     if re.search(
         r'GOODY\s*BAG|REWARD\s*BAG',
         text_upper
     ):
+
         print(
             "[TÜR] GOODY BAG -> GOODY BAG"
         )
 
         return True
 
+
     if re.search(
         r'\bBOX\b|RƯƠNG|TREO|HAZİNE',
         text_upper
     ):
+
         print(
             "[TÜR] BOX/RƯƠNG/TREO -> CHEST"
         )
 
         return False
 
+
     if "🟡" in text:
+
         print(
             "[TÜR] 🟡 -> CHEST"
         )
 
         return False
 
+
     if token_data:
+
         value = token_data.get(
             "is_goody_bag"
         )
+
 
         if value in [
             True,
@@ -504,11 +691,13 @@ def detect_type(text, token_data):
             "true",
             "True",
         ]:
+
             print(
                 "[TÜR] TOKEN -> GOODY BAG"
             )
 
             return True
+
 
         if value in [
             False,
@@ -517,11 +706,13 @@ def detect_type(text, token_data):
             "false",
             "False",
         ]:
+
             print(
                 "[TÜR] TOKEN -> CHEST"
             )
 
             return False
+
 
     print(
         "[TÜR] belirlenemedi"
@@ -534,56 +725,92 @@ def detect_type(text, token_data):
 # ZAMAN
 # =========================================================
 
-def calculate_target_time(text, token_data=None):
+def calculate_target_time(
+    text,
+    token_data=None
+):
+
     now = int(
         time.time()
     )
 
+
     if token_data:
+
         for key in [
             "time",
             "target_time",
             "end_time",
             "endTime",
         ]:
-            value = token_data.get(key)
+
+            value = token_data.get(
+                key
+            )
+
 
             if value is None:
                 continue
 
+
             try:
+
                 value = int(
                     float(value)
                 )
 
+
                 if value > 10_000_000_000:
-                    return int(value / 1000)
+
+                    return int(
+                        value / 1000
+                    )
+
 
                 if value > 1_000_000_000:
+
                     return value
 
+
                 if 0 < value < 86_400:
+
                     return now + value
+
 
             except Exception:
                 pass
 
+
     if text:
+
         m = re.search(
             r'TIME\s*:\s*(\d+):(\d+)',
             text,
             re.I
         )
 
+
         if m:
+
             duration = (
-                safe_int(m.group(1)) * 60
+
+                safe_int(
+                    m.group(1)
+                ) * 60
+
                 +
-                safe_int(m.group(2))
+
+                safe_int(
+                    m.group(2)
+                )
+
             )
 
+
             if duration > 0:
+
                 return now + duration
+
 
     return now + 180
 
@@ -597,34 +824,53 @@ def get_live_link(
     room,
     token_data=None
 ):
+
     if token_data:
+
         for key in [
             "openitok",
             "live",
             "live_url",
             "url",
         ]:
-            value = token_data.get(key)
+
+            value = token_data.get(
+                key
+            )
+
 
             if value:
-                value = str(value)
+
+                value = str(
+                    value
+                )
+
 
                 if value.startswith(
-                    ("http://", "https://")
+                    (
+                        "http://",
+                        "https://"
+                    )
                 ):
+
                     return value
 
+
     if room:
+
         return (
             "https://www.tiktok.com/"
             f"share/live/{room}"
         )
 
+
     if username:
+
         return (
             "https://www.tiktok.com/"
             f"@{username}/live"
         )
+
 
     return ""
 
@@ -634,10 +880,12 @@ def get_live_link(
 # =========================================================
 
 def parse_source_message(event):
+
     text = (
         event.message.raw_text
         or ""
     )
+
 
     print(
         "\n" + "=" * 70
@@ -653,52 +901,75 @@ def parse_source_message(event):
         "=" * 70
     )
 
+
     token = extract_token_from_event(
         event
     )
 
+
     token_data = decode_token(
         token
     )
+
 
     is_goody = detect_type(
         text,
         token_data
     )
 
+
     if is_goody is None:
+
         print(
             "[ATLANDI] Tür belirlenemedi"
         )
 
         return None
 
+
     username = None
 
+
     if token_data:
+
         for key in [
             "username",
             "user",
             "unique_id",
             "uniqueId",
         ]:
-            value = token_data.get(key)
+
+            value = token_data.get(
+                key
+            )
+
 
             if value:
-                username = str(value)
+
+                username = str(
+                    value
+                )
+
                 break
 
+
     if not username:
+
         username = extract_username_from_text(
             text
         )
 
+
     if not username:
+
         username = "bilinmiyor"
+
 
     room = None
 
+
     if token_data:
+
         for key in [
             "room",
             "room_id",
@@ -706,46 +977,67 @@ def parse_source_message(event):
             "roomId",
             "roomID",
         ]:
-            value = token_data.get(key)
+
+            value = token_data.get(
+                key
+            )
+
 
             if value:
-                room = str(value)
+
+                room = str(
+                    value
+                )
+
                 break
 
+
     if not room:
+
         room = extract_p_room(
             text
         )
 
+
     if not room:
+
         room = (
             "msg:"
             +
-            str(event.message.id)
+            str(
+                event.message.id
+            )
         )
+
 
         print(
             "[ROOM YOK] Mesaj ID kullanılıyor:",
             room
         )
 
+
     coins = extract_coins(
         text,
         token_data
     )
 
+
     people = extract_people_from_message(
         text
     )
 
+
     if not people and token_data:
+
         for key in [
             "people",
             "person",
             "count",
             "capacity",
         ]:
+
             if key in token_data:
+
                 people = safe_int(
                     token_data.get(
                         key,
@@ -753,21 +1045,27 @@ def parse_source_message(event):
                     )
                 )
 
+
                 if people:
                     break
+
 
     joined = extract_joined(
         text
     )
 
+
     if not joined and token_data:
+
         for key in [
             "joined",
             "join",
             "join_count",
             "joined_count",
         ]:
+
             if key in token_data:
+
                 joined = safe_int(
                     token_data.get(
                         key,
@@ -775,26 +1073,33 @@ def parse_source_message(event):
                     )
                 )
 
+
                 if joined:
                     break
+
 
     rate = extract_rate(
         text,
         token_data
     )
 
+
     viewers = extract_viewers(
         text
     )
 
+
     if not viewers and token_data:
+
         for key in [
             "view",
             "views",
             "viewer",
             "viewers",
         ]:
+
             if key in token_data:
+
                 viewers = safe_int(
                     token_data.get(
                         key,
@@ -802,17 +1107,21 @@ def parse_source_message(event):
                     )
                 )
 
+
                 if viewers:
                     break
+
 
     target_time = calculate_target_time(
         text,
         token_data
     )
 
+
     detected_at = int(
         time.time()
     )
+
 
     live_link = get_live_link(
         username,
@@ -820,46 +1129,113 @@ def parse_source_message(event):
         token_data
     )
 
+
     result = {
-        "type": (
-            "GOODY BAG"
-            if is_goody
-            else "CHEST"
-        ),
 
-        "box_name": (
-            "Goody Bag"
-            if is_goody
-            else "Hazine Sandığı"
-        ),
+        "type":
+            (
+                "GOODY BAG"
+                if is_goody
+                else "CHEST"
+            ),
 
-        "username": username,
-        "coins": coins,
-        "people": people,
-        "joined": joined,
-        "rate": rate,
-        "view": viewers,
-        "room": room,
-        "live": live_link,
-        "target_time": target_time,
-        "detected_at": detected_at,
-        "source_message_id": event.message.id,
+        "box_name":
+            (
+                "Goody Bag"
+                if is_goody
+                else "Hazine Sandığı"
+            ),
+
+        "username":
+            username,
+
+        "coins":
+            coins,
+
+        "people":
+            people,
+
+        "joined":
+            joined,
+
+        "rate":
+            rate,
+
+        "view":
+            viewers,
+
+        "room":
+            room,
+
+        "live":
+            live_link,
+
+        "target_time":
+            target_time,
+
+        "detected_at":
+            detected_at,
+
+        "source_message_id":
+            event.message.id,
+
     }
+
 
     print(
         "\n[PARSE SONUCU]"
     )
 
-    print("TÜR:", result["type"])
-    print("KULLANICI:", result["username"])
-    print("COIN:", result["coins"])
-    print("KİŞİ:", result["people"])
-    print("KATILAN:", result["joined"])
-    print("ORAN:", result["rate"])
-    print("İZLENME:", result["view"])
-    print("ODA:", result["room"])
-    print("HEDEF:", result["target_time"])
-    print("ALGILANMA:", result["detected_at"])
+    print(
+        "TÜR:",
+        result["type"]
+    )
+
+    print(
+        "KULLANICI:",
+        result["username"]
+    )
+
+    print(
+        "COIN:",
+        result["coins"]
+    )
+
+    print(
+        "KİŞİ:",
+        result["people"]
+    )
+
+    print(
+        "KATILAN:",
+        result["joined"]
+    )
+
+    print(
+        "ORAN:",
+        result["rate"]
+    )
+
+    print(
+        "İZLENME:",
+        result["view"]
+    )
+
+    print(
+        "ODA:",
+        result["room"]
+    )
+
+    print(
+        "HEDEF:",
+        result["target_time"]
+    )
+
+    print(
+        "ALGILANMA:",
+        result["detected_at"]
+    )
+
 
     return result
 
@@ -869,24 +1245,34 @@ def parse_source_message(event):
 # =========================================================
 
 def add_to_radar(data):
+
     room = data.get(
         "room"
     )
 
+
     if not room:
+
         print(
             "[ATLANDI] Room yok"
         )
 
         return False
 
+
     if data["type"] == "GOODY BAG":
+
         target = LIVE_GOODY_BAGS
+
     else:
+
         target = LIVE_CHESTS
 
+
     if room in target:
+
         old = target[room]
+
 
         old_detected = safe_int(
             old.get(
@@ -895,9 +1281,11 @@ def add_to_radar(data):
             )
         )
 
+
         now = int(
             time.time()
         )
+
 
         if (
             now
@@ -906,6 +1294,7 @@ def add_to_radar(data):
             <
             5
         ):
+
             print(
                 "[TEKRAR] Aynı kayıt:",
                 room
@@ -913,20 +1302,25 @@ def add_to_radar(data):
 
             return False
 
+
         print(
             "[GÜNCELLEME] Aynı oda yeniden geldi:",
             room
         )
 
+
     target[room] = data
+
 
     print(
         "\n" + "=" * 70
     )
 
+
     print(
         f"[RADAR] {data['type']} EKLENDİ"
     )
+
 
     print(
         "KULLANICI:",
@@ -963,9 +1357,11 @@ def add_to_radar(data):
         data["room"]
     )
 
+
     print(
         "=" * 70
     )
+
 
     return True
 
@@ -975,66 +1371,113 @@ def add_to_radar(data):
 # =========================================================
 
 async def send_telegram_message(data):
+
     global http_session
+
 
     if not http_session:
         return False
 
+
     baslik = (
+
         "🟪 GOODY BAG"
+
         if data["type"] == "GOODY BAG"
-        else "🟨 HAZİNE SANDIĞI"
+
+        else
+
+        "🟨 HAZİNE SANDIĞI"
+
     )
+
 
     text = (
+
         f"{baslik}\n\n"
+
         f"👤 Kullanıcı: "
         f"{data['username']}\n"
+
         f"🪙 Coin: "
         f"{data['coins']}\n"
+
         f"👥 Kişi: "
         f"{data['people']}\n"
+
         f"🙋 Katılan: "
         f"{data['joined']}\n"
+
         f"📈 Oran: "
         f"{data['rate']}\n"
+
         f"👀 İzlenme: "
         f"{data['view']}\n"
+
     )
+
 
     if data.get("live"):
+
         text += (
+
             "\n🔴 "
+
             f"<a href=\"{data['live']}\">"
+
             "TIKTOK CANLI YAYIN"
+
             "</a>"
+
         )
 
+
     url = (
+
         "https://api.telegram.org/bot"
+
         f"{BOT_TOKEN}/sendMessage"
+
     )
 
+
     payload = {
-        "chat_id": TARGET_CHAT_ID,
-        "text": text,
-        "parse_mode": "HTML",
-        "disable_web_page_preview": True,
+
+        "chat_id":
+            TARGET_CHAT_ID,
+
+        "text":
+            text,
+
+        "parse_mode":
+            "HTML",
+
+        "disable_web_page_preview":
+            True,
+
     }
+
 
     for attempt in range(
         1,
         9
     ):
+
         try:
+
             async with http_session.post(
                 url,
                 json=payload
             ) as response:
 
-                result_text = await response.text()
+
+                result_text = (
+                    await response.text()
+                )
+
 
                 if response.status == 200:
+
                     print(
                         "[TELEGRAM] Bildirim gönderildi:",
                         data["type"],
@@ -1043,26 +1486,37 @@ async def send_telegram_message(data):
 
                     return True
 
+
                 if response.status == 429:
+
                     try:
+
                         result_json = json.loads(
                             result_text
                         )
 
+
                         retry_after = (
+
                             result_json
+
                             .get(
                                 "parameters",
                                 {}
                             )
+
                             .get(
                                 "retry_after",
                                 30
                             )
+
                         )
 
+
                     except Exception:
+
                         retry_after = 30
+
 
                     await asyncio.sleep(
                         max(
@@ -1074,7 +1528,9 @@ async def send_telegram_message(data):
                         )
                     )
 
+
                     continue
+
 
                 if response.status in [
                     500,
@@ -1082,6 +1538,7 @@ async def send_telegram_message(data):
                     503,
                     504,
                 ]:
+
                     await asyncio.sleep(
                         min(
                             5 * attempt,
@@ -1089,7 +1546,9 @@ async def send_telegram_message(data):
                         )
                     )
 
+
                     continue
+
 
                 print(
                     "[TELEGRAM HATA]",
@@ -1097,13 +1556,17 @@ async def send_telegram_message(data):
                     result_text
                 )
 
+
                 return False
 
+
         except Exception as e:
+
             print(
                 "[TELEGRAM GÖNDERME HATASI]",
                 repr(e)
             )
+
 
             await asyncio.sleep(
                 min(
@@ -1112,25 +1575,34 @@ async def send_telegram_message(data):
                 )
             )
 
+
     return False
 
 
 async def telegram_sender():
+
     while True:
+
         data = await telegram_queue.get()
 
+
         try:
+
             await send_telegram_message(
                 data
             )
 
+
         except Exception as e:
+
             print(
                 "[KUYRUK HATASI]",
                 repr(e)
             )
 
+
         finally:
+
             telegram_queue.task_done()
 
 
@@ -1153,29 +1625,41 @@ RADAR_HTML = r"""
 
 <title>🏆 ÖDÜL AVCISI</title>
 
+
 <style>
 
 *{
     box-sizing:border-box;
 }
 
+
 html,
 body{
+
     margin:0;
+
     min-height:100%;
+
     background:#05060c;
+
     color:white;
+
     font-family:
         Arial,
         Helvetica,
         sans-serif;
+
 }
 
+
 body{
+
     padding:10px;
+
     overflow-x:hidden;
 
     background:
+
         radial-gradient(
             circle at 50% -10%,
             rgba(106,52,255,.22),
@@ -1195,11 +1679,16 @@ body{
         ),
 
         #05060c;
+
 }
 
+
 .wrapper{
+
     max-width:1200px;
+
     margin:auto;
+
 }
 
 
@@ -1208,38 +1697,76 @@ body{
    ===================================================== */
 
 .header{
+
     text-align:center;
-    padding:8px 4px 14px;
+
+    padding:
+        8px 4px 14px;
+
 }
 
+
 .title{
+
     font-size:
         clamp(25px,7vw,48px);
 
-    font-weight:1000;
-    line-height:1;
-    letter-spacing:1px;
-    color:#fff;
+    font-weight:
+        1000;
+
+    line-height:
+        1;
+
+    letter-spacing:
+        1px;
+
+    color:
+        #fff;
 
     text-shadow:
+
         0 0 5px #fff,
+
         0 0 16px #8b55ff,
+
         0 0 35px #5d25ff;
+
 }
+
 
 .subtitle{
-    margin-top:7px;
-    color:#aeb5c8;
-    font-size:11px;
-    font-weight:800;
-    letter-spacing:.8px;
+
+    margin-top:
+        7px;
+
+    color:
+        #aeb5c8;
+
+    font-size:
+        11px;
+
+    font-weight:
+        800;
+
+    letter-spacing:
+        .8px;
+
 }
 
+
 .status{
-    display:inline-flex;
-    margin-top:9px;
-    padding:6px 12px;
-    border-radius:999px;
+
+    display:
+        inline-flex;
+
+    margin-top:
+        9px;
+
+    padding:
+        6px 12px;
+
+    border-radius:
+        999px;
 
     background:
         rgba(20,20,40,.8);
@@ -1248,93 +1775,26 @@ body{
         1px solid
         rgba(157,92,255,.35);
 
-    color:#74ff9a;
-    font-size:10px;
-    font-weight:900;
+    color:
+        #74ff9a;
+
+    font-size:
+        10px;
+
+    font-weight:
+        900;
+
 }
 
+
 .status.error{
-    color:#ff7474;
+
+    color:
+        #ff7474;
 
     border-color:
         rgba(255,80,80,.45);
-}
 
-
-/* =====================================================
-   LİDERLER
-   ===================================================== */
-
-.leaders{
-    display:grid;
-    grid-template-columns:repeat(3,1fr);
-    gap:8px;
-    margin-bottom:12px;
-}
-
-.leader{
-    min-width:0;
-    padding:10px;
-    border-radius:13px;
-
-    background:
-        linear-gradient(
-            145deg,
-            rgba(22,26,42,.96),
-            rgba(9,12,21,.96)
-        );
-
-    border:
-        1px solid
-        #293448;
-
-    box-shadow:
-        0 8px 25px
-        rgba(0,0,0,.3);
-}
-
-.leader.purple{
-    border-color:
-        rgba(157,81,255,.55);
-
-    box-shadow:
-        0 0 20px
-        rgba(157,81,255,.08);
-}
-
-.leader.gold{
-    border-color:
-        rgba(241,200,75,.5);
-
-    box-shadow:
-        0 0 20px
-        rgba(241,200,75,.06);
-}
-
-.leader.blue{
-    border-color:
-        rgba(70,180,255,.5);
-}
-
-.leader-title{
-    font-size:9px;
-    color:#8d98aa;
-    font-weight:900;
-    margin-bottom:5px;
-}
-
-.leader-value{
-    font-size:20px;
-    font-weight:1000;
-}
-
-.leader-user{
-    margin-top:3px;
-    font-size:9px;
-    color:#aeb9cc;
-    overflow:hidden;
-    text-overflow:ellipsis;
-    white-space:nowrap;
 }
 
 
@@ -1343,14 +1803,26 @@ body{
    ===================================================== */
 
 .radar-grid{
-    display:grid;
-    grid-template-columns:1fr 1fr;
-    gap:12px;
-    align-items:start;
+
+    display:
+        grid;
+
+    grid-template-columns:
+        1fr 1fr;
+
+    gap:
+        12px;
+
+    align-items:
+        start;
+
 }
 
+
 .panel{
-    min-width:0;
+
+    min-width:
+        0;
 
     background:
         rgba(9,12,21,.9);
@@ -1359,74 +1831,124 @@ body{
         1px solid
         #273146;
 
-    border-radius:17px;
-    padding:10px;
+    border-radius:
+        17px;
+
+    padding:
+        10px;
 
     box-shadow:
         0 12px 38px
         rgba(0,0,0,.42);
 
-    backdrop-filter:blur(10px);
+    backdrop-filter:
+        blur(10px);
+
 }
 
+
 .panel.goody{
+
     border-color:
         rgba(157,81,255,.65);
 
     box-shadow:
         0 0 25px
         rgba(157,81,255,.1);
+
 }
 
+
 .panel.chest{
+
     border-color:
         rgba(241,200,75,.55);
 
     box-shadow:
         0 0 25px
         rgba(241,200,75,.07);
+
 }
+
 
 .panel-title{
-    display:flex;
-    align-items:center;
-    justify-content:space-between;
-    gap:7px;
-    padding:2px 2px 10px;
+
+    display:
+        flex;
+
+    align-items:
+        center;
+
+    justify-content:
+        space-between;
+
+    gap:
+        7px;
+
+    padding:
+        2px 2px 10px;
+
 }
+
 
 .panel-name{
-    font-size:15px;
-    font-weight:950;
+
+    font-size:
+        15px;
+
+    font-weight:
+        950;
+
 }
 
+
 .goody .panel-name{
-    color:#d5a8ff;
+
+    color:
+        #d5a8ff;
 
     text-shadow:
         0 0 13px
         rgba(157,81,255,.65);
+
 }
 
+
 .chest .panel-name{
-    color:#ffe37b;
+
+    color:
+        #ffe37b;
 
     text-shadow:
         0 0 13px
         rgba(241,200,75,.55);
+
 }
 
+
 .panel-count{
-    min-width:25px;
-    padding:3px 7px;
-    border-radius:999px;
+
+    min-width:
+        25px;
+
+    padding:
+        3px 7px;
+
+    border-radius:
+        999px;
 
     background:
         rgba(255,255,255,.07);
 
-    text-align:center;
-    font-size:9px;
-    font-weight:900;
+    text-align:
+        center;
+
+    font-size:
+        9px;
+
+    font-weight:
+        900;
+
 }
 
 
@@ -1435,8 +1957,12 @@ body{
    ===================================================== */
 
 .card{
-    position:relative;
-    overflow:hidden;
+
+    position:
+        relative;
+
+    overflow:
+        hidden;
 
     background:
         linear-gradient(
@@ -1449,25 +1975,38 @@ body{
         1px solid
         #293448;
 
-    border-radius:12px;
-    padding:10px;
-    margin-bottom:7px;
+    border-radius:
+        12px;
+
+    padding:
+        10px;
+
+    margin-bottom:
+        7px;
+
 }
+
 
 .card:last-child{
     margin-bottom:0;
 }
 
+
 .goody .card{
+
     border-left:
         3px solid
         #9d51ff;
+
 }
 
+
 .chest .card{
+
     border-left:
         3px solid
         #f1c84b;
+
 }
 
 
@@ -1476,13 +2015,20 @@ body{
    ===================================================== */
 
 .newest{
+
     animation:
         newestIn .7s ease-out;
+
 }
 
+
 @keyframes newestIn{
+
     0%{
-        opacity:.35;
+
+        opacity:
+            .35;
+
         transform:
             translateY(-8px)
             scale(.97);
@@ -1490,32 +2036,55 @@ body{
         box-shadow:
             0 0 0
             rgba(157,81,255,0);
+
     }
 
+
     35%{
+
         box-shadow:
             0 0 30px
             rgba(157,81,255,.5);
+
     }
 
+
     100%{
-        opacity:1;
+
+        opacity:
+            1;
 
         transform:
             translateY(0)
             scale(1);
 
-        box-shadow:none;
+        box-shadow:
+            none;
+
     }
+
 }
 
+
 .new-badge{
-    flex-shrink:0;
-    padding:4px 7px;
-    border-radius:6px;
-    font-size:8px;
-    font-weight:1000;
-    color:#fff;
+
+    flex-shrink:
+        0;
+
+    padding:
+        4px 7px;
+
+    border-radius:
+        6px;
+
+    font-size:
+        8px;
+
+    font-weight:
+        1000;
+
+    color:
+        #fff;
 
     background:
         linear-gradient(
@@ -1532,9 +2101,12 @@ body{
         badgeGlow 1.2s
         ease-in-out
         infinite alternate;
+
 }
 
+
 .chest .new-badge{
+
     background:
         linear-gradient(
             135deg,
@@ -1542,21 +2114,29 @@ body{
             #f4d35e
         );
 
-    color:#211700;
+    color:
+        #211700;
 
     box-shadow:
         0 0 13px
         rgba(241,200,75,.45);
+
 }
 
+
 @keyframes badgeGlow{
+
     from{
-        filter:brightness(1);
+        filter:
+            brightness(1);
     }
 
+
     to{
-        filter:brightness(1.45);
+        filter:
+            brightness(1.45);
     }
+
 }
 
 
@@ -1565,24 +2145,53 @@ body{
    ===================================================== */
 
 .user-row{
-    display:flex;
-    align-items:center;
-    justify-content:space-between;
-    gap:5px;
-    margin-bottom:8px;
+
+    display:
+        flex;
+
+    align-items:
+        center;
+
+    justify-content:
+        space-between;
+
+    gap:
+        5px;
+
+    margin-bottom:
+        8px;
+
 }
+
 
 .user{
-    font-size:14px;
-    font-weight:950;
-    word-break:break-word;
+
+    font-size:
+        14px;
+
+    font-weight:
+        950;
+
+    word-break:
+        break-word;
+
 }
 
+
 .rank{
-    flex-shrink:0;
-    font-size:8px;
-    color:#77849a;
-    font-weight:900;
+
+    flex-shrink:
+        0;
+
+    font-size:
+        8px;
+
+    color:
+        #77849a;
+
+    font-weight:
+        900;
+
 }
 
 
@@ -1591,27 +2200,53 @@ body{
    ===================================================== */
 
 .info-grid{
-    display:grid;
-    grid-template-columns:1fr 1fr;
-    gap:4px;
+
+    display:
+        grid;
+
+    grid-template-columns:
+        1fr 1fr;
+
+    gap:
+        4px;
+
 }
 
+
 .info{
+
     background:
         rgba(255,255,255,.035);
 
-    border-radius:7px;
-    padding:5px;
+    border-radius:
+        7px;
 
-    font-size:8px;
-    color:#818da1;
+    padding:
+        5px;
+
+    font-size:
+        8px;
+
+    color:
+        #818da1;
+
 }
 
+
 .info b{
-    display:block;
-    color:#fff;
-    font-size:11px;
-    margin-top:2px;
+
+    display:
+        block;
+
+    color:
+        #fff;
+
+    font-size:
+        11px;
+
+    margin-top:
+        2px;
+
 }
 
 
@@ -1620,10 +2255,18 @@ body{
    ===================================================== */
 
 .live-button{
-    display:block;
-    text-align:center;
-    text-decoration:none;
-    color:white;
+
+    display:
+        block;
+
+    text-align:
+        center;
+
+    text-decoration:
+        none;
+
+    color:
+        white;
 
     background:
         linear-gradient(
@@ -1632,12 +2275,21 @@ body{
             #a90d38
         );
 
-    padding:8px;
-    margin-top:8px;
-    border-radius:8px;
+    padding:
+        8px;
 
-    font-size:9px;
-    font-weight:950;
+    margin-top:
+        8px;
+
+    border-radius:
+        8px;
+
+    font-size:
+        9px;
+
+    font-weight:
+        950;
+
 }
 
 
@@ -1646,15 +2298,25 @@ body{
    ===================================================== */
 
 .empty{
-    text-align:center;
-    padding:22px 5px;
-    border-radius:10px;
+
+    text-align:
+        center;
+
+    padding:
+        22px 5px;
+
+    border-radius:
+        10px;
 
     background:
         rgba(255,255,255,.025);
 
-    color:#626e82;
-    font-size:10px;
+    color:
+        #626e82;
+
+    font-size:
+        10px;
+
 }
 
 
@@ -1663,10 +2325,19 @@ body{
    ===================================================== */
 
 .footer{
-    text-align:center;
-    color:#59647a;
-    font-size:8px;
-    padding:13px 0 4px;
+
+    text-align:
+        center;
+
+    color:
+        #59647a;
+
+    font-size:
+        8px;
+
+    padding:
+        13px 0 4px;
+
 }
 
 
@@ -1680,107 +2351,149 @@ body{
         padding:6px;
     }
 
-    .leaders{
-        gap:5px;
-        margin-bottom:7px;
-    }
-
-    .leader{
-        padding:7px;
-        border-radius:10px;
-    }
-
-    .leader-title{
-        font-size:7px;
-    }
-
-    .leader-value{
-        font-size:15px;
-    }
-
-    .leader-user{
-        font-size:7px;
-    }
 
     .title{
         font-size:27px;
     }
 
+
     .subtitle{
         font-size:8px;
     }
+
 
     .status{
         font-size:8px;
         padding:5px 8px;
     }
 
+
     .radar-grid{
-        grid-template-columns:1fr 1fr;
-        gap:5px;
+
+        grid-template-columns:
+            1fr 1fr;
+
+        gap:
+            5px;
+
     }
 
+
     .panel{
-        padding:6px;
-        border-radius:12px;
+
+        padding:
+            6px;
+
+        border-radius:
+            12px;
+
     }
+
 
     .panel-name{
         font-size:10px;
     }
 
+
     .panel-count{
-        min-width:21px;
-        padding:3px 5px;
-        font-size:8px;
+
+        min-width:
+            21px;
+
+        padding:
+            3px 5px;
+
+        font-size:
+            8px;
+
     }
 
+
     .card{
-        padding:7px;
-        border-radius:8px;
-        margin-bottom:5px;
+
+        padding:
+            7px;
+
+        border-radius:
+            8px;
+
+        margin-bottom:
+            5px;
+
     }
+
 
     .user{
         font-size:10px;
     }
 
+
     .new-badge{
+
         font-size:7px;
-        padding:3px 5px;
+
+        padding:
+            3px 5px;
+
     }
+
 
     .rank{
         font-size:7px;
     }
 
+
     .info{
-        padding:4px;
-        font-size:6px;
+
+        padding:
+            4px;
+
+        font-size:
+            6px;
+
     }
+
 
     .info b{
         font-size:9px;
     }
 
+
     .live-button{
-        padding:6px 2px;
-        font-size:7px;
-        margin-top:5px;
+
+        padding:
+            6px 2px;
+
+        font-size:
+            7px;
+
+        margin-top:
+            5px;
+
     }
 
+
     .empty{
-        padding:18px 3px;
-        font-size:8px;
+
+        padding:
+            18px 3px;
+
+        font-size:
+            8px;
+
     }
+
 }
 
 </style>
+
 </head>
+
 
 <body>
 
 <div class="wrapper">
+
 
 <div class="header">
 
@@ -1788,9 +2501,11 @@ body{
         🏆 ÖDÜL AVCISI
     </div>
 
+
     <div class="subtitle">
         🟪 GOODY BAG • 🟨 HAZİNE SANDIĞI
     </div>
+
 
     <div
         id="status"
@@ -1802,81 +2517,12 @@ body{
 </div>
 
 
-<div class="leaders">
-
-    <div class="leader purple">
-
-        <div class="leader-title">
-            🪙 EN YÜKSEK COIN
-        </div>
-
-        <div
-            id="maxCoin"
-            class="leader-value"
-        >
-            0
-        </div>
-
-        <div
-            id="maxCoinUser"
-            class="leader-user"
-        >
-            -
-        </div>
-
-    </div>
-
-
-    <div class="leader gold">
-
-        <div class="leader-title">
-            👥 EN ÇOK KİŞİ
-        </div>
-
-        <div
-            id="maxPeople"
-            class="leader-value"
-        >
-            0
-        </div>
-
-        <div
-            id="maxPeopleUser"
-            class="leader-user"
-        >
-            -
-        </div>
-
-    </div>
-
-
-    <div class="leader blue">
-
-        <div class="leader-title">
-            📈 EN YÜKSEK RATE
-        </div>
-
-        <div
-            id="maxRate"
-            class="leader-value"
-        >
-            0
-        </div>
-
-        <div
-            id="maxRateUser"
-            class="leader-user"
-        >
-            -
-        </div>
-
-    </div>
-
-</div>
-
-
 <div class="radar-grid">
 
+
+    <!-- =================================================
+         GOODY BAG
+         ================================================= -->
 
     <div class="panel goody">
 
@@ -1885,6 +2531,7 @@ body{
             <div class="panel-name">
                 🟪 GOODY BAG
             </div>
+
 
             <div
                 id="bagCounter"
@@ -1895,10 +2542,15 @@ body{
 
         </div>
 
+
         <div id="bags"></div>
 
     </div>
 
+
+    <!-- =================================================
+         CHEST
+         ================================================= -->
 
     <div class="panel chest">
 
@@ -1907,6 +2559,7 @@ body{
             <div class="panel-name">
                 🟨 HAZİNE SANDIĞI
             </div>
+
 
             <div
                 id="chestCounter"
@@ -1917,52 +2570,126 @@ body{
 
         </div>
 
+
         <div id="chests"></div>
 
     </div>
+
 
 </div>
 
 
 <div class="footer">
+
     ⚡ ÖDÜL AVCISI • CANLI RADAR
+
 </div>
+
 
 </div>
 
 
 <script>
 
+
 let radarData = {
+
     chests: [],
+
     goody_bags: []
+
 };
+
+
+/*
+    İlk açılışta mevcut kayıtlar YENİ değildir.
+*/
 
 let firstLoad = true;
 
-let lastNewestGoody = "";
-let lastNewestChest = "";
+
+/*
+    Daha önce görülmüş kayıtların anahtarları.
+    Goody ve Chest ayrı tutulur.
+*/
+
+const seenGoody = new Set();
+
+const seenChest = new Set();
+
+
+/*
+    Yeni kayıtların anahtarları.
+    Bu liste sayesinde yeni gelen her kayıt
+    ilk görüldüğünde ⚡ YENİ olur.
+*/
+
+const newGoody = new Set();
+
+const newChest = new Set();
 
 
 function escapeHtml(value){
-    return String(value ?? "")
-        .replace(/&/g, "&amp;")
-        .replace(/</g, "&lt;")
-        .replace(/>/g, "&gt;")
-        .replace(/"/g, "&quot;")
-        .replace(/'/g, "&#039;");
+
+    return String(
+        value ?? ""
+    )
+
+    .replace(
+        /&/g,
+        "&amp;"
+    )
+
+    .replace(
+        /</g,
+        "&lt;"
+    )
+
+    .replace(
+        />/g,
+        "&gt;"
+    )
+
+    .replace(
+        /"/g,
+        "&quot;"
+    )
+
+    .replace(
+        /'/g,
+        "&#039;"
+    );
+
 }
 
 
 function timestamp(item){
+
     return Number(
-        item.detected_at ||
-        item.created_at ||
-        item.timestamp ||
+
+        item.detected_at
+
+        ||
+
+        item.created_at
+
+        ||
+
+        item.timestamp
+
+        ||
+
         0
+
     );
+
 }
 
+
+/*
+    En yeni kayıt daima üstte.
+    Her bölümden sadece son 5 kayıt.
+*/
 
 function latestFive(items){
 
@@ -1970,24 +2697,56 @@ function latestFive(items){
         return [];
     }
 
+
     return [...items]
+
         .sort(
+
             (a,b) =>
+
                 timestamp(b)
+
                 -
+
                 timestamp(a)
+
         )
-        .slice(0,5);
+
+        .slice(
+            0,
+            5
+        );
+
 }
 
 
-function newestKey(item){
+/*
+    Benzersiz kayıt anahtarı.
+*/
+
+function itemKey(item){
 
     return String(
-        item.source_message_id ??
-        item.room ??
-        item.detected_at ??
-        ""
+
+        item.source_message_id
+
+        ??
+
+        item.room
+
+        ??
+
+        (
+            String(
+                item.username ?? ""
+            )
+            +
+            "_" +
+            String(
+                item.detected_at ?? ""
+            )
+        )
+
     );
 
 }
@@ -1998,11 +2757,17 @@ function newestKey(item){
    ===================================================== */
 
 function renderItems(
+
     items,
+
     elementId,
+
     counterId,
+
     icon,
+
     type
+
 ){
 
     const container =
@@ -2010,13 +2775,18 @@ function renderItems(
             elementId
         );
 
+
     const counter =
         document.getElementById(
             counterId
         );
 
+
     const latest =
-        latestFive(items);
+        latestFive(
+            items
+        );
+
 
     counter.textContent =
         latest.length;
@@ -2030,49 +2800,122 @@ function renderItems(
             '</div>';
 
         return;
+
     }
 
 
-    const newest =
-        newestKey(
-            latest[0]
+    const seenSet =
+        type === "GOODY BAG"
+            ? seenGoody
+            : seenChest;
+
+
+    const newSet =
+        type === "GOODY BAG"
+            ? newGoody
+            : newChest;
+
+
+    /*
+        İlk yüklemede mevcut kayıtları
+        eski olarak işaretle.
+
+        Sonraki gelişlerde yeni kayıtları yakala.
+    */
+
+    if(!firstLoad){
+
+        latest.forEach(
+            item => {
+
+                const key =
+                    itemKey(
+                        item
+                    );
+
+
+                if(
+                    key &&
+                    !seenSet.has(key)
+                ){
+
+                    newSet.add(
+                        key
+                    );
+
+                    seenSet.add(
+                        key
+                    );
+
+                }
+
+            }
         );
 
+    }else{
 
-    const previousNewest =
-        type === "GOODY BAG"
-            ? lastNewestGoody
-            : lastNewestChest;
+        latest.forEach(
+            item => {
+
+                const key =
+                    itemKey(
+                        item
+                    );
 
 
-    const isNew =
-        !firstLoad &&
-        newest &&
-        newest !== previousNewest;
+                if(key){
+
+                    seenSet.add(
+                        key
+                    );
+
+                }
+
+            }
+        );
+
+    }
 
 
     container.innerHTML =
+
         latest.map(
+
             (item,index) => {
+
+                const key =
+                    itemKey(
+                        item
+                    );
+
 
                 const live =
                     item.live || "";
 
-                const isNewest =
-                    index === 0;
+
+                /*
+                    Bu kayıt yeni geldiyse
+                    ⚡ YENİ göster.
+                */
+
+                const isNew =
+                    newSet.has(
+                        key
+                    );
 
 
                 return `
 
                 <div
                     class="card ${
-                        isNew && isNewest
+                        isNew
                             ? "newest"
                             : ""
                     }"
                 >
 
                     <div class="user-row">
+
 
                         <div class="user">
 
@@ -2084,20 +2927,26 @@ function renderItems(
 
                         </div>
 
+
                         ${
-                            isNewest
+                            isNew
+
                             ?
+
                             `
                             <div class="new-badge">
                                 ⚡ YENİ
                             </div>
                             `
+
                             :
+
                             `
                             <div class="rank">
                                 #${index + 1}
                             </div>
                             `
+
                         }
 
                     </div>
@@ -2111,9 +2960,11 @@ function renderItems(
                             🪙 COIN
 
                             <b>
+
                                 ${escapeHtml(
                                     item.coins
                                 )}
+
                             </b>
 
                         </div>
@@ -2124,9 +2975,11 @@ function renderItems(
                             👥 KİŞİ
 
                             <b>
+
                                 ${escapeHtml(
                                     item.people
                                 )}
+
                             </b>
 
                         </div>
@@ -2137,9 +2990,11 @@ function renderItems(
                             🙋 KATILAN
 
                             <b>
+
                                 ${escapeHtml(
                                     item.joined
                                 )}
+
                             </b>
 
                         </div>
@@ -2150,9 +3005,11 @@ function renderItems(
                             📈 ORAN
 
                             <b>
+
                                 ${escapeHtml(
                                     item.rate
                                 )}
+
                             </b>
 
                         </div>
@@ -2163,9 +3020,11 @@ function renderItems(
                             👀 İZLENME
 
                             <b>
+
                                 ${escapeHtml(
                                     item.view
                                 )}
+
                             </b>
 
                         </div>
@@ -2176,9 +3035,11 @@ function renderItems(
                             🏠 ODA
 
                             <b>
+
                                 ${escapeHtml(
                                     item.room
                                 )}
+
                             </b>
 
                         </div>
@@ -2189,190 +3050,46 @@ function renderItems(
 
                     ${
                         live
+
                         ?
+
                         `
+
                         <a
+
                             class="live-button"
+
                             href="${escapeHtml(
                                 live
                             )}"
+
                             target="_blank"
+
                             rel="noopener"
+
                         >
+
                             🔴 CANLI YAYINA GİT
+
                         </a>
+
                         `
+
                         :
+
                         ""
+
                     }
+
 
                 </div>
 
                 `;
 
             }
+
         ).join("");
 
-
-    if(
-        type === "GOODY BAG"
-    ){
-        lastNewestGoody =
-            newest;
-    }else{
-        lastNewestChest =
-            newest;
-    }
-
-}
-
-
-/* =====================================================
-   LİDERLER
-   ===================================================== */
-
-function allItems(){
-
-    return [
-        ...(
-            Array.isArray(
-                radarData.goody_bags
-            )
-            ?
-            radarData.goody_bags
-            :
-            []
-        ),
-
-        ...(
-            Array.isArray(
-                radarData.chests
-            )
-            ?
-            radarData.chests
-            :
-            []
-        )
-    ];
-
-}
-
-
-function updateLeaders(){
-
-    const all =
-        allItems();
-
-
-    if(!all.length){
-
-        document.getElementById(
-            "maxCoin"
-        ).textContent = "0";
-
-        document.getElementById(
-            "maxPeople"
-        ).textContent = "0";
-
-        document.getElementById(
-            "maxRate"
-        ).textContent = "0";
-
-        document.getElementById(
-            "maxCoinUser"
-        ).textContent = "-";
-
-        document.getElementById(
-            "maxPeopleUser"
-        ).textContent = "-";
-
-        document.getElementById(
-            "maxRateUser"
-        ).textContent = "-";
-
-        return;
-    }
-
-
-    const coin =
-        [...all].sort(
-            (a,b) =>
-                Number(b.coins || 0)
-                -
-                Number(a.coins || 0)
-        )[0];
-
-
-    const people =
-        [...all].sort(
-            (a,b) =>
-                Number(b.people || 0)
-                -
-                Number(a.people || 0)
-        )[0];
-
-
-    const rate =
-        [...all].sort(
-            (a,b) =>
-                Number(b.rate || 0)
-                -
-                Number(a.rate || 0)
-        )[0];
-
-
-    document.getElementById(
-        "maxCoin"
-    ).textContent =
-        Number(
-            coin.coins || 0
-        );
-
-
-    document.getElementById(
-        "maxCoinUser"
-    ).textContent =
-        `${
-            coin.type === "GOODY BAG"
-                ? "🟪"
-                : "🟨"
-        } ${coin.username || "-"}`;
-
-
-    document.getElementById(
-        "maxPeople"
-    ).textContent =
-        Number(
-            people.people || 0
-        );
-
-
-    document.getElementById(
-        "maxPeopleUser"
-    ).textContent =
-        `${
-            people.type === "GOODY BAG"
-                ? "🟪"
-                : "🟨"
-        } ${people.username || "-"}`;
-
-
-    document.getElementById(
-        "maxRate"
-    ).textContent =
-        Number(
-            rate.rate || 0
-        );
-
-
-    document.getElementById(
-        "maxRateUser"
-    ).textContent =
-        `${
-            rate.type === "GOODY BAG"
-                ? "🟪"
-                : "🟨"
-        } ${rate.username || "-"}`;
 
 }
 
@@ -2384,24 +3101,33 @@ function updateLeaders(){
 function renderRadar(){
 
     renderItems(
+
         radarData.goody_bags,
+
         "bags",
+
         "bagCounter",
+
         "🟪",
+
         "GOODY BAG"
+
     );
 
 
     renderItems(
+
         radarData.chests,
+
         "chests",
+
         "chestCounter",
+
         "🟨",
+
         "CHEST"
+
     );
-
-
-    updateLeaders();
 
 }
 
@@ -2415,20 +3141,30 @@ async function loadRadar(){
     try{
 
         const response =
+
             await fetch(
-                "/api/all?t=" +
+
+                "/api/all?t="
+
+                +
+
                 Date.now(),
+
                 {
+
                     cache:
                         "no-store"
+
                 }
+
             );
 
 
         if(!response.ok){
 
             throw new Error(
-                "HTTP " +
+                "HTTP "
+                +
                 response.status
             );
 
@@ -2442,21 +3178,32 @@ async function loadRadar(){
         radarData = {
 
             chests:
+
                 Array.isArray(
                     data.chests
                 )
+
                 ?
+
                 data.chests
+
                 :
+
                 [],
 
+
             goody_bags:
+
                 Array.isArray(
                     data.goody_bags
                 )
+
                 ?
+
                 data.goody_bags
+
                 :
+
                 []
 
         };
@@ -2479,8 +3226,26 @@ async function loadRadar(){
         renderRadar();
 
 
-        firstLoad =
-            false;
+        /*
+            İlk yükleme tamamlandıktan sonra
+            gelecek kayıtlar yeni sayılır.
+        */
+
+        firstLoad = false;
+
+
+        /*
+            Gösterilmiş YENİ kayıtları
+            artık eski kayıt haline getir.
+            
+            Böylece aynı kayıt sonraki
+            2 saniyelik yenilemelerde
+            tekrar YENİ olmaz.
+        */
+
+        newGoody.clear();
+
+        newChest.clear();
 
     }
 
@@ -2512,7 +3277,6 @@ async function loadRadar(){
 
 /*
     2 saniyede bir kontrol.
-    Kayıtlar kaybolmaz.
 */
 
 setInterval(
@@ -2523,9 +3287,11 @@ setInterval(
 
 loadRadar();
 
+
 </script>
 
 </body>
+
 </html>
 """
 
@@ -2535,10 +3301,15 @@ loadRadar();
 # =========================================================
 
 async def radar_page(request):
+
     return web.Response(
+
         text=RADAR_HTML,
+
         content_type="text/html",
+
         charset="utf-8"
+
     )
 
 
@@ -2551,26 +3322,42 @@ async def cors_middleware(
     if request.method == "OPTIONS":
 
         return web.Response(
+
             status=204,
+
             headers={
-                "Access-Control-Allow-Origin": "*",
-                "Access-Control-Allow-Methods": "GET, OPTIONS",
-                "Access-Control-Allow-Headers": "*",
-                "Access-Control-Max-Age": "86400",
+
+                "Access-Control-Allow-Origin":
+                    "*",
+
+                "Access-Control-Allow-Methods":
+                    "GET, OPTIONS",
+
+                "Access-Control-Allow-Headers":
+                    "*",
+
+                "Access-Control-Max-Age":
+                    "86400",
+
             }
+
         )
 
 
-    response = await handler(request)
+    response = await handler(
+        request
+    )
 
 
     response.headers[
         "Access-Control-Allow-Origin"
     ] = "*"
 
+
     response.headers[
         "Access-Control-Allow-Methods"
     ] = "GET, OPTIONS"
+
 
     response.headers[
         "Access-Control-Allow-Headers"
@@ -2583,25 +3370,31 @@ async def cors_middleware(
 async def api_boxes(request):
 
     return web.json_response(
+
         list(
             LIVE_CHESTS.values()
         )
+
     )
 
 
 async def api_goody_bags(request):
 
     return web.json_response(
+
         list(
             LIVE_GOODY_BAGS.values()
         )
+
     )
 
 
 async def api_status(request):
 
     return web.json_response({
-        "status": "online",
+
+        "status":
+            "online",
 
         "chests":
             len(
@@ -2617,13 +3410,16 @@ async def api_status(request):
             int(
                 time.time()
             ),
+
     })
 
 
 async def api_all(request):
 
     return web.json_response({
-        "status": "online",
+
+        "status":
+            "online",
 
         "server_time":
             int(
@@ -2639,15 +3435,18 @@ async def api_all(request):
             list(
                 LIVE_GOODY_BAGS.values()
             ),
+
     })
 
 
 async def start_http_server():
 
     app = web.Application(
+
         middlewares=[
             cors_middleware
         ]
+
     )
 
 
@@ -2723,7 +3522,9 @@ async def start_http_server():
     )
 
 
-    runner = web.AppRunner(app)
+    runner = web.AppRunner(
+        app
+    )
 
 
     await runner.setup()
@@ -2743,13 +3544,16 @@ async def start_http_server():
         f"[HTTP] Sunucu başladı: {PORT}"
     )
 
+
     print(
         "[HTTP] Ana sayfa: /"
     )
 
+
     print(
         "[HTTP] Radar: /radar"
     )
+
 
     print(
         "[HTTP] API: /api/all"
@@ -2765,12 +3569,16 @@ async def message_listener(event):
     try:
 
         key = (
+
             event.chat_id,
+
             event.message.id
+
         )
 
 
         if key in processed_messages:
+
             return
 
 
@@ -2786,14 +3594,19 @@ async def message_listener(event):
             processed_messages.clear()
 
 
-        data = parse_source_message(event)
+        data = parse_source_message(
+            event
+        )
 
 
         if not data:
+
             return
 
 
-        added = add_to_radar(data)
+        added = add_to_radar(
+            data
+        )
 
 
         if added:
@@ -2824,9 +3637,11 @@ async def main():
         "=" * 70
     )
 
+
     print(
         "🏆 ÖDÜL AVCISI BAŞLIYOR"
     )
+
 
     print(
         "=" * 70
@@ -2840,11 +3655,15 @@ async def main():
 
 
     client = TelegramClient(
+
         StringSession(
             STRING_SESSION
         ),
+
         API_ID,
+
         API_HASH
+
     )
 
 
@@ -2870,10 +3689,13 @@ async def main():
 
 
     client.add_event_handler(
+
         message_listener,
+
         events.NewMessage(
             chats=SOURCE_CHATS
         )
+
     )
 
 
@@ -2886,32 +3708,39 @@ async def main():
         "[HAZIR] Radar çalışıyor."
     )
 
+
     print(
         "[HAZIR] Goody Bag algılama aktif."
     )
+
 
     print(
         "[HAZIR] Hazine Sandığı algılama aktif."
     )
 
+
     print(
         "[HAZIR] Süreye göre kayıt silme KAPALI."
     )
+
 
     print(
         "[HAZIR] Her bölümde son 5 kayıt gösteriliyor."
     )
 
-    print(
-        "[HAZIR] Yeni kayıt daima en üstte."
-    )
 
     print(
-        "[HAZIR] JİMİN kaldırıldı."
+        "[HAZIR] Yeni gelen HER kayıt ⚡ YENİ."
     )
 
+
     print(
-        "[HAZIR] Liderler bölümü aktif."
+        "[HAZIR] Goody ve Chest ayrı."
+    )
+
+
+    print(
+        "[HAZIR] Liderler bölümü kaldırıldı."
     )
 
 
@@ -2940,11 +3769,13 @@ if __name__ == "__main__":
             main()
         )
 
+
     except KeyboardInterrupt:
 
         print(
             "Kapatıldı."
         )
+
 
     except Exception as e:
 
