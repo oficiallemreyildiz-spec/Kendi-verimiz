@@ -10,33 +10,17 @@ import aiohttp
 from telethon import TelegramClient, events
 from telethon.sessions import StringSession
 
-# ---------------------------------------------------------------------------
-# Yapılandırma ve Ortam Değişkenleri
-# ---------------------------------------------------------------------------
 API_ID = int(os.getenv("API_ID", "36135300"))
 API_HASH = os.getenv("API_HASH", "737566711ac17fecd1ebeab1e2123773")
 STRING_SESSION = os.getenv("STRING_SESSION")
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 
 TARGET_CHAT_ID = -1004421946217
+SOURCE_CHATS = [-1004427105311, -1003965749742, -1002223772922, -1002485768492, -1002583301445]
 
-SOURCE_CHATS = [
-    -1004427105311,
-    -1003965749742,
-    -1002223772922,
-    -1002485768492,
-    -1002583301445,
-]
-
-# ---------------------------------------------------------------------------
-# Bellekte Tutulan Havuzlar
-# ---------------------------------------------------------------------------
 LIVE_CHESTS = []
 LIVE_GOODY_BAGS = []
 
-# ---------------------------------------------------------------------------
-# API Sunucusu (Google Sites için Çift Katman)
-# ---------------------------------------------------------------------------
 class RadarAPIHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         now = int(time.time())
@@ -51,7 +35,6 @@ class RadarAPIHandler(BaseHTTPRequestHandler):
             self.send_json_response(LIVE_GOODY_BAGS)
         else:
             self.send_response(200)
-            self.send_header("Access-Control-Allow-Origin", "*")
             self.end_headers()
             self.wfile.write(b"VIP Radar API Aktif")
 
@@ -66,27 +49,19 @@ class RadarAPIHandler(BaseHTTPRequestHandler):
         self.send_response(200)
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Access-Control-Allow-Origin", "*")
-        self.send_header("Access-Control-Allow-Methods", "GET, OPTIONS")
-        self.send_header("Access-Control-Allow-Headers", "*")
         self.end_headers()
         self.wfile.write(json.dumps(data, ensure_ascii=False).encode("utf-8"))
 
     def log_message(self, *args):
         pass
 
-
 def start_server():
     port = int(os.getenv("PORT", 10000))
     server = HTTPServer(("0.0.0.0", port), RadarAPIHandler)
     server.serve_forever()
 
-
-# ---------------------------------------------------------------------------
-# Telegram Gönderim Kuyruğu
-# ---------------------------------------------------------------------------
 send_queue: "asyncio.Queue[str]" = asyncio.Queue()
 MIN_INTERVAL = 1.0
-
 
 async def sender_worker(session: aiohttp.ClientSession):
     if not BOT_TOKEN: return
@@ -108,66 +83,64 @@ async def sender_worker(session: aiohttp.ClientSession):
                         if data.get("ok") or res.status == 429: break
                 except:
                     await asyncio.sleep(1.5 * (attempt + 1))
+
             last_sent = asyncio.get_event_loop().time()
         except:
             pass
         finally:
             send_queue.task_done()
 
-
-# ---------------------------------------------------------------------------
-# GÖRSELE GÖRE DÜZELTİLMİŞ AYRIŞTIRMA FONKSİYONLARI
-# ---------------------------------------------------------------------------
 def extract_username(text: str):
-    # 1. Yeni Formata Özel: '## T74498> bay_ramx_alii'
+    # Kural 1: ## ile başlayanlar (T123> formatı olsun ya da olmasın)
     for line in text.splitlines():
-        if "##" in line and ">" in line:
-            parts = line.split(">", 1)
-            if len(parts) > 1:
-                u = parts[1].strip()
-                # Geçerli karakterleri al (nokta, alt tire dahil)
-                m = re.search(r'([a-zA-Z0-9_.]+)', u)
-                if m:
-                    return m.group(1)
+        if "##" in line:
+            parts = line.split("##", 1)[1].strip()
+            if ">" in parts:
+                parts = parts.split(">", 1)[1].strip()
+            if parts:
+                return parts.split()[0].strip(",;:!")
 
-    # 2. Eski/Alternatif formatlar için yedekler
+    # Kural 2: Link içi
     m_url = re.search(r'tiktok\.com/@([a-zA-Z0-9_.]+)', text)
-    if m_url: return m_url.group(1)
+    if m_url: return m_url.group(1).strip(",;:!")
 
+    # Kural 3: Klasik @
     m_user = re.search(r'@([a-zA-Z0-9_.]+)', text)
-    if m_user: return m_user.group(1)
+    if m_user: return m_user.group(1).strip(",;:!")
+
+    # Kural 4: Bot terimleri
+    m_bot = re.search(r'(?:user|host|yayıncı|kullanıcı|id|kênh|channel)[\s:]+([a-zA-Z0-9_.]+)', text, re.IGNORECASE)
+    if m_bot: return m_bot.group(1).strip(",;:!")
+
+    # Son Çare Yedek
+    m_fallback = re.search(r'\b([a-zA-Z0-9]+[_.][a-zA-Z0-9_.]+)\b', text)
+    if m_fallback:
+        return m_fallback.group(1).strip(",;:!")
 
     return None
 
 def extract_coins(text: str) -> int:
-    # 'TÚI: 20/20' formatından ilk sayıyı yakala (20 coin)
     m_tui = re.search(r'TÚI:\s*(\d+)', text, re.IGNORECASE)
-    if m_tui:
-        return int(m_tui.group(1))
-        
+    if m_tui: return int(m_tui.group(1))
     m = re.search(r'(\d+)\s*(?:coin|coins|xu|কয়েন|💎|🪙)', text, re.IGNORECASE)
     return int(m.group(1)) if m else 10
 
 def extract_duration(text: str) -> int:
-    # 'TIME: 01:30' (1 dk 30 sn)
-    m_min_sec = re.search(r'(\d+)\s*[:m]\s*(\d+)\s*s?', text, re.IGNORECASE)
-    if m_min_sec: return int(m_min_sec.group(1)) * 60 + int(m_min_sec.group(2))
+    m_time = re.search(r'TIME:\s*(\d+)[:m](\d+)', text, re.IGNORECASE)
+    if m_time:
+        return int(m_time.group(1)) * 60 + int(m_time.group(2))
     
-    # '120s'
     m_sec = re.search(r'(\d+)\s*(?:s|sn|giây|সেকেন্ড)', text, re.IGNORECASE)
     return int(m_sec.group(1)) if m_sec else 180
 
 def process_message(text: str, chat_title: str) -> str:
     raw_lower = text.lower()
-    
-    # 'TÚI' kelimesi geçiyorsa Goody Bag'dir
     is_goody = any(k in raw_lower for k in ["goody", "túi", "bag", "çanta", "গুডিব্যাগ", "ব্যাগ"])
 
     username = extract_username(text)
+    display_user = username if username else "Bilinmeyen_Yayinci"
     coins = extract_coins(text)
     duration = extract_duration(text)
-
-    display_user = username if username else "Bilinmeyen_Yayinci"
 
     now = int(time.time())
     target_time = now + duration
@@ -194,10 +167,6 @@ def process_message(text: str, chat_title: str) -> str:
     msg = f"{header}\nKaynak: {chat_title}\n💎 Değer: {coins} Coin\n⏱️ Süre: ~{duration}sn\n\n🟢 CANLIYA GİT:\n{live_link}"
     return msg
 
-
-# ---------------------------------------------------------------------------
-# Telethon Dinleyici
-# ---------------------------------------------------------------------------
 client = TelegramClient(StringSession(STRING_SESSION), API_ID, API_HASH, connection_retries=None, retry_delay=1, auto_reconnect=True, request_retries=5)
 http_session: aiohttp.ClientSession | None = None
 
