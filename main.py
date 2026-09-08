@@ -29,20 +29,20 @@ SOURCE_CHATS = [
 ]
 
 # ---------------------------------------------------------------------------
-# Bellekte Canlı Tutulan Sandık ve Goody Bag Havuzları
+# Bellekte Tutulan Sandık ve Goody Bag Havuzları
 # ---------------------------------------------------------------------------
 LIVE_CHESTS = []
 LIVE_GOODY_BAGS = []
 
 # ---------------------------------------------------------------------------
-# API & Port Sunucusu (Google Sites için Ayrılmış Çift Katman)
+# API & Port Sunucusu (Google Sites için Çift Katman Uçları)
 # ---------------------------------------------------------------------------
 class RadarAPIHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         now = int(time.time())
         global LIVE_CHESTS, LIVE_GOODY_BAGS
 
-        # Süresi dolan sandık ve çantaları bellekten temizle
+        # Süresi dolan kayıtları bellekten temizle
         LIVE_CHESTS = [b for b in LIVE_CHESTS if b.get("target_time", 0) > now]
         LIVE_GOODY_BAGS = [b for b in LIVE_GOODY_BAGS if b.get("target_time", 0) > now]
 
@@ -79,16 +79,19 @@ class RadarAPIHandler(BaseHTTPRequestHandler):
     def log_message(self, *args):
         pass
 
+
 def start_server():
     port = int(os.getenv("PORT", 10000))
     server = HTTPServer(("0.0.0.0", port), RadarAPIHandler)
     server.serve_forever()
+
 
 # ---------------------------------------------------------------------------
 # Telegram Gönderim Kuyruğu (Rate-limit korumalı)
 # ---------------------------------------------------------------------------
 send_queue: "asyncio.Queue[str]" = asyncio.Queue()
 MIN_INTERVAL = 1.0
+
 
 async def sender_worker(session: aiohttp.ClientSession):
     if not BOT_TOKEN:
@@ -132,11 +135,12 @@ async def sender_worker(session: aiohttp.ClientSession):
         finally:
             send_queue.task_done()
 
+
 # ---------------------------------------------------------------------------
-# Çok Dilli Regex ve Akıllı Ayrıştırma (İngilizce, Vietnamca, Bengalce, Türkçe)
+# Çok Dilli Regex ve Ayrıştırma Fonksiyonları
 # ---------------------------------------------------------------------------
 def extract_username(text: str):
-    # 1. '##' formatı
+    # '##' kalıbı
     for line in text.splitlines():
         if "##" in line:
             cleaned = re.sub(r'##\s*\S+', '', line).strip()
@@ -144,36 +148,42 @@ def extract_username(text: str):
             if cleaned:
                 return cleaned.replace(".", "")
 
-    # 2. Doğrudan @etiketi tespiti
+    # @kullanici kalıbı
     m_user = re.search(r'@([a-zA-Z0-9_.]+)', text)
     if m_user:
         return m_user.group(1).replace(".", "")
+
+    # TikTok URL kalıbı
+    m_url = re.search(r'tiktok\.com/@([a-zA-Z0-9_.]+)', text)
+    if m_url:
+        return m_url.group(1).replace(".", "")
+
     return None
 
+
 def extract_coins(text: str) -> int:
-    # İngilizce (coin), Vietnamca (xu), Bengalce (কয়েন), Türkçe ve ikonlar
     m = re.search(r'(\d+)\s*(?:coin|coins|xu|কয়েন|💎|🪙)', text, re.IGNORECASE)
     if m:
         return int(m.group(1))
     return 10
 
+
 def extract_duration(text: str) -> int:
-    # '02:30' veya '2m30s'
     m_min_sec = re.search(r'(\d+)\s*[:m]\s*(\d+)\s*s?', text, re.IGNORECASE)
     if m_min_sec:
         return int(m_min_sec.group(1)) * 60 + int(m_min_sec.group(2))
-    
-    # '120s' veya Bengalce saniye (সেকেন্ড)
+
     m_sec = re.search(r'(\d+)\s*(?:s|sn|giây|সেকেন্ড)', text, re.IGNORECASE)
     if m_sec:
         return int(m_sec.group(1))
-    
-    return 180  # Varsayılan 3 dakika
+
+    return 180
+
 
 def process_message(text: str, chat_title: str) -> str:
     raw_lower = text.lower()
 
-    # Goody Bag tespiti: İngilizce, Vietnamca, Türkçe ve Bengalce (ব্যাগ / গুডিব্যাগ)
+    # Goody Bag ayrımı: İngilizce, Vietnamca, Türkçe ve Bengalce
     is_goody = any(k in raw_lower for k in [
         "goody", "túi", "bag", "çanta", "গুডিব্যাগ", "ব্যাগ"
     ])
@@ -182,29 +192,31 @@ def process_message(text: str, chat_title: str) -> str:
     coins = extract_coins(text)
     duration = extract_duration(text)
 
+    # Kullanıcı adı regex'e takılmasa bile akışı kesmemesi için yedek etiket
+    display_user = username if username else "Canli_Yayin"
+
     now = int(time.time())
     target_time = now + duration
 
     box_data = {
-        "username": username or "Bilinmiyor",
+        "username": display_user,
         "coins": coins,
         "can_open": 5,
         "viewers": 25,
-        "box_name": "🎒 ŞANS ÇANTASI (GOODY BAG)" if is_goody else "📦 HAZİNE SANDIĞI",
+        "box_name": "🎒 ŞANS ÇANTASI" if is_goody else "📦 HAZİNE SANDIĞI",
         "is_gold": (coins >= 100),
         "target_time": target_time,
         "total_duration": duration
     }
 
-    # Ayrıştırılan öğeyi ilgili katman havuzuna ekle
-    if username:
-        if is_goody:
-            LIVE_GOODY_BAGS.append(box_data)
-        else:
-            LIVE_CHESTS.append(box_data)
+    # API havuzuna ekleme şartı genişletildi
+    if is_goody:
+        LIVE_GOODY_BAGS.append(box_data)
+    else:
+        LIVE_CHESTS.append(box_data)
 
     header = "🎒 YENİ GOODY BAG!" if is_goody else "🚨 YENİ SANDIK!"
-    live_link = f"https://www.tiktok.com/@{quote(username or '', safe='_-')}/live" if username else ""
+    live_link = f"https://www.tiktok.com/@{quote(display_user, safe='_-')}/live" if username else ""
 
     msg = f"{header}\nKaynak: {chat_title}\n💎 Değer: {coins} Coin\n⏱️ Süre: ~{duration}sn\n\n"
     if live_link:
@@ -214,8 +226,9 @@ def process_message(text: str, chat_title: str) -> str:
 
     return msg
 
+
 # ---------------------------------------------------------------------------
-# Telethon İstemcisi
+# Telethon Dinleyici İstemcisi
 # ---------------------------------------------------------------------------
 client = TelegramClient(
     StringSession(STRING_SESSION),
@@ -228,6 +241,7 @@ client = TelegramClient(
 )
 
 http_session: aiohttp.ClientSession | None = None
+
 
 @client.on(events.NewMessage(chats=SOURCE_CHATS))
 async def message_listener(event):
@@ -244,6 +258,7 @@ async def message_listener(event):
     formatted_msg = process_message(text, chat_title)
     await send_queue.put(formatted_msg)
 
+
 async def main():
     global http_session
     print("=== VIP Telegram Radar Başlatılıyor... ===")
@@ -257,6 +272,7 @@ async def main():
         await client.get_dialogs()
         print(f"✅ Dinleme aktif! Hedef: {TARGET_CHAT_ID}")
         await client.run_until_disconnected()
+
 
 if __name__ == "__main__":
     threading.Thread(target=start_server, daemon=True).start()
