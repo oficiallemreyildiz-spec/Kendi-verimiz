@@ -1,3 +1,14 @@
+# main.py
+# Bu sürüm:
+# - JİMİN kaldırıldı
+# - Üstte En Yüksek Coin / En Çok Kişi / En Yüksek Rate
+# - Yeni kayıt her zaman en üstte
+# - Eski kayıtlar aşağı kayar
+# - Goody ve Chest ayrı sıralanır
+# - Her bölüm son 5 kaydı gösterir
+# - Kayıtlar süre dolunca silinmez
+# - En yeni kayıt "⚡ YENİ" olarak işaretlenir
+
 import os
 import re
 import json
@@ -8,14 +19,9 @@ from urllib.parse import unquote
 
 import aiohttp
 from aiohttp import web
-
 from telethon import TelegramClient, events
 from telethon.sessions import StringSession
 
-
-# =========================================================
-# AYARLAR
-# =========================================================
 
 API_ID = int(os.environ["API_ID"])
 API_HASH = os.environ["API_HASH"]
@@ -35,34 +41,21 @@ SOURCE_CHATS = [
 PORT = int(os.environ.get("PORT", "10000"))
 
 
-# =========================================================
-# RADAR HAFIZASI
-# =========================================================
-
 LIVE_GOODY_BAGS = {}
 LIVE_CHESTS = {}
 
 processed_messages = set()
-
 telegram_queue = asyncio.Queue()
-
 http_session = None
 
-
-# =========================================================
-# YARDIMCI
-# =========================================================
 
 def safe_int(value, default=0):
     try:
         if value is None:
             return default
-
         if isinstance(value, bool):
             return int(value)
-
         return int(float(value))
-
     except Exception:
         return default
 
@@ -71,15 +64,13 @@ def safe_float(value, default=0):
     try:
         if value is None:
             return default
-
         return float(value)
-
     except Exception:
         return default
 
 
 # =========================================================
-# TOKEN BUL
+# TOKEN
 # =========================================================
 
 def extract_token_from_event(event):
@@ -87,7 +78,6 @@ def extract_token_from_event(event):
     try:
         message = event.message
         text = message.raw_text or ""
-
     except Exception:
         return None
 
@@ -98,22 +88,11 @@ def extract_token_from_event(event):
 
     for pattern in patterns:
 
-        m = re.search(
-            pattern,
-            text,
-            re.I
-        )
+        m = re.search(pattern, text, re.I)
 
         if m:
-
-            token = unquote(
-                m.group(1)
-            )
-
-            print(
-                "[TOKEN] raw text üzerinden bulundu"
-            )
-
+            token = unquote(m.group(1))
+            print("[TOKEN] raw text üzerinden bulundu")
             return token
 
     try:
@@ -122,11 +101,7 @@ def extract_token_from_event(event):
 
         for entity in entities:
 
-            url = getattr(
-                entity,
-                "url",
-                None
-            )
+            url = getattr(entity, "url", None)
 
             if not url:
                 continue
@@ -139,9 +114,7 @@ def extract_token_from_event(event):
 
             if m:
 
-                token = unquote(
-                    m.group(1)
-                )
+                token = unquote(m.group(1))
 
                 print(
                     "[TOKEN] Telegram entity üzerinden bulundu"
@@ -194,16 +167,10 @@ def extract_token_from_event(event):
             repr(e)
         )
 
-    print(
-        "[TOKEN] bulunamadı"
-    )
+    print("[TOKEN] bulunamadı")
 
     return None
 
-
-# =========================================================
-# TOKEN ÇÖZ
-# =========================================================
 
 def decode_token(token):
 
@@ -233,9 +200,7 @@ def decode_token(token):
 
         if isinstance(data, dict):
 
-            print(
-                "[TOKEN] çözüldü"
-            )
+            print("[TOKEN] çözüldü")
 
             return data
 
@@ -250,7 +215,7 @@ def decode_token(token):
 
 
 # =========================================================
-# P= BASE64 ODA ID
+# ODA
 # =========================================================
 
 def extract_p_room(text):
@@ -521,7 +486,7 @@ def extract_rate(text, token_data=None):
 
 
 # =========================================================
-# TÜR TESPİTİ
+# TÜR
 # =========================================================
 
 def detect_type(text, token_data):
@@ -613,7 +578,7 @@ def detect_type(text, token_data):
 
 
 # =========================================================
-# HEDEF ZAMAN
+# ZAMAN
 # =========================================================
 
 def calculate_target_time(text, token_data=None):
@@ -664,17 +629,10 @@ def calculate_target_time(text, token_data=None):
 
         if m:
 
-            minutes = safe_int(
-                m.group(1)
-            )
-
-            seconds = safe_int(
-                m.group(2)
-            )
-
             duration = (
-                minutes * 60
-                + seconds
+                safe_int(m.group(1)) * 60
+                +
+                safe_int(m.group(2))
             )
 
             if duration > 0:
@@ -684,7 +642,7 @@ def calculate_target_time(text, token_data=None):
 
 
 # =========================================================
-# TIKTOK LINK
+# LIVE LINK
 # =========================================================
 
 def get_live_link(
@@ -708,10 +666,8 @@ def get_live_link(
 
                 value = str(value)
 
-                if (
-                    value.startswith("http://")
-                    or
-                    value.startswith("https://")
+                if value.startswith(
+                    ("http://", "https://")
                 ):
 
                     return value
@@ -734,7 +690,7 @@ def get_live_link(
 
 
 # =========================================================
-# MESAJ PARSE
+# PARSE
 # =========================================================
 
 def parse_source_message(event):
@@ -745,8 +701,7 @@ def parse_source_message(event):
     )
 
     print(
-        "\n"
-        + "=" * 70
+        "\n" + "=" * 70
     )
 
     print(
@@ -1002,63 +957,22 @@ def parse_source_message(event):
         "\n[PARSE SONUCU]"
     )
 
-    print(
-        "TÜR:",
-        result["type"]
-    )
-
-    print(
-        "KULLANICI:",
-        result["username"]
-    )
-
-    print(
-        "COIN:",
-        result["coins"]
-    )
-
-    print(
-        "KİŞİ:",
-        result["people"]
-    )
-
-    print(
-        "KATILAN:",
-        result["joined"]
-    )
-
-    print(
-        "ORAN:",
-        result["rate"]
-    )
-
-    print(
-        "İZLENME:",
-        result["view"]
-    )
-
-    print(
-        "ODA:",
-        result["room"]
-    )
-
-    print(
-        "HEDEF:",
-        result["target_time"]
-    )
-
-    print(
-        "ALGILANMA:",
-        result["detected_at"]
-    )
+    print("TÜR:", result["type"])
+    print("KULLANICI:", result["username"])
+    print("COIN:", result["coins"])
+    print("KİŞİ:", result["people"])
+    print("KATILAN:", result["joined"])
+    print("ORAN:", result["rate"])
+    print("İZLENME:", result["view"])
+    print("ODA:", result["room"])
+    print("HEDEF:", result["target_time"])
+    print("ALGILANMA:", result["detected_at"])
 
     return result
 
 
 # =========================================================
-# RADARA EKLE
-#
-# SÜREYE GÖRE SİLME YOK
+# RADAR
 # =========================================================
 
 def add_to_radar(data):
@@ -1121,8 +1035,7 @@ def add_to_radar(data):
     target[room] = data
 
     print(
-        "\n"
-        + "=" * 70
+        "\n" + "=" * 70
     )
 
     print(
@@ -1182,13 +1095,11 @@ async def send_telegram_message(data):
     if not http_session:
         return False
 
-    if data["type"] == "GOODY BAG":
-
-        baslik = "🟪 GOODY BAG"
-
-    else:
-
-        baslik = "🟨 HAZİNE SANDIĞI"
+    baslik = (
+        "🟪 GOODY BAG"
+        if data["type"] == "GOODY BAG"
+        else "🟨 HAZİNE SANDIĞI"
+    )
 
     text = (
 
@@ -1229,11 +1140,8 @@ async def send_telegram_message(data):
         )
 
     url = (
-
         "https://api.telegram.org/bot"
-
         f"{BOT_TOKEN}/sendMessage"
-
     )
 
     payload = {
@@ -1252,11 +1160,9 @@ async def send_telegram_message(data):
 
     }
 
-    max_attempts = 8
-
     for attempt in range(
         1,
-        max_attempts + 1
+        9
     ):
 
         try:
@@ -1302,22 +1208,14 @@ async def send_telegram_message(data):
 
                         retry_after = 30
 
-                    retry_after = max(
-                        1,
-                        safe_int(
-                            retry_after,
-                            30
-                        )
-                    )
-
-                    print(
-                        "[TELEGRAM]",
-                        retry_after,
-                        "saniye bekleniyor..."
-                    )
-
                     await asyncio.sleep(
-                        retry_after
+                        max(
+                            1,
+                            safe_int(
+                                retry_after,
+                                30
+                            )
+                        )
                     )
 
                     continue
@@ -1329,19 +1227,11 @@ async def send_telegram_message(data):
                     504,
                 ]:
 
-                    wait = min(
-                        5 * attempt,
-                        30
-                    )
-
-                    print(
-                        "[TELEGRAM] Sunucu hatası:",
-                        wait,
-                        "s"
-                    )
-
                     await asyncio.sleep(
-                        wait
+                        min(
+                            5 * attempt,
+                            30
+                        )
                     )
 
                     continue
@@ -1371,10 +1261,6 @@ async def send_telegram_message(data):
     return False
 
 
-# =========================================================
-# TELEGRAM KUYRUK
-# =========================================================
-
 async def telegram_sender():
 
     while True:
@@ -1400,12 +1286,11 @@ async def telegram_sender():
 
 
 # =========================================================
-# NEON JİMİN RADAR HTML
+# RADAR HTML
 # =========================================================
 
 RADAR_HTML = r"""
 <!DOCTYPE html>
-
 <html lang="tr">
 
 <head>
@@ -1417,27 +1302,22 @@ RADAR_HTML = r"""
     content="width=device-width, initial-scale=1.0"
 >
 
-<title>⚡ JİMİN • ÖDÜL AVCISI</title>
+<title>🏆 ÖDÜL AVCISI</title>
 
 <style>
 
-* {
-    box-sizing: border-box;
+*{
+    box-sizing:border-box;
 }
 
 html,
-body {
+body{
 
-    margin: 0;
+    margin:0;
+    min-height:100%;
 
-    padding: 0;
-
-    min-height: 100%;
-
-    background:
-        #05060c;
-
-    color: white;
+    background:#05060c;
+    color:white;
 
     font-family:
         Arial,
@@ -1445,303 +1325,109 @@ body {
         sans-serif;
 }
 
-body {
+body{
 
-    padding: 12px;
+    padding:10px;
 
-    overflow-x: hidden;
+    overflow-x:hidden;
 
     background:
+
         radial-gradient(
             circle at 50% -10%,
-            rgba(106, 52, 255, .32),
+            rgba(106,52,255,.22),
             transparent 34%
         ),
+
         radial-gradient(
             circle at 0% 50%,
-            rgba(0, 174, 255, .08),
+            rgba(0,174,255,.06),
             transparent 30%
         ),
+
         radial-gradient(
             circle at 100% 50%,
-            rgba(180, 0, 255, .10),
+            rgba(180,0,255,.08),
             transparent 30%
         ),
+
         #05060c;
 }
 
-.wrapper {
+.wrapper{
 
-    max-width: 1200px;
+    max-width:1200px;
+    margin:auto;
 
-    margin: 0 auto;
 }
 
 
 /* =====================================================
-   HEADER
+   BAŞLIK
    ===================================================== */
 
-.header {
+.header{
 
-    text-align: center;
-
-    padding:
-        12px 5px 18px;
-
-    position: relative;
-}
-
-
-/* =====================================================
-   NEON JİMİN
-   ===================================================== */
-
-.jimin-wrap {
-
-    position: relative;
-
-    display: inline-block;
+    text-align:center;
 
     padding:
-        10px 25px 8px;
-
-    margin-bottom: 4px;
+        8px 4px 14px;
 }
 
-.jimin {
-
-    position: relative;
+.title{
 
     font-size:
-        clamp(42px, 11vw, 82px);
+        clamp(25px,7vw,48px);
 
-    font-weight: 1000;
+    font-weight:
+        1000;
+
+    line-height:
+        1;
 
     letter-spacing:
-        clamp(2px, 1vw, 9px);
+        1px;
 
-    line-height: 1;
-
-    color: #fff;
-
-    text-transform: uppercase;
+    color:
+        #fff;
 
     text-shadow:
 
-        0 0 3px #fff,
+        0 0 5px #fff,
 
-        0 0 8px #d9c5ff,
+        0 0 16px #8b55ff,
 
-        0 0 18px #9d5cff,
-
-        0 0 32px #713cff,
-
-        0 0 55px #5c2bff,
-
-        0 0 85px #3e16ff;
-
-    animation:
-        neonPulse 2.2s ease-in-out infinite;
+        0 0 35px #5d25ff;
 }
 
-@keyframes neonPulse {
+.subtitle{
 
-    0%,
-    100% {
-
-        filter:
-            brightness(1);
-
-        text-shadow:
-
-            0 0 3px #fff,
-
-            0 0 8px #d9c5ff,
-
-            0 0 18px #9d5cff,
-
-            0 0 32px #713cff,
-
-            0 0 55px #5c2bff;
-
-    }
-
-    50% {
-
-        filter:
-            brightness(1.28);
-
-        text-shadow:
-
-            0 0 4px #fff,
-
-            0 0 12px #fff,
-
-            0 0 24px #c084ff,
-
-            0 0 45px #8b45ff,
-
-            0 0 75px #662cff,
-
-            0 0 105px #3d12ff;
-
-    }
-}
-
-
-/* =====================================================
-   YILDIRIMLAR
-   ===================================================== */
-
-.bolt {
-
-    position: absolute;
-
-    color: #fff;
-
-    font-size:
-        clamp(25px, 6vw, 48px);
-
-    filter:
-
-        drop-shadow(
-            0 0 5px #fff
-        )
-
-        drop-shadow(
-            0 0 15px #6f4cff
-        )
-
-        drop-shadow(
-            0 0 30px #7c35ff
-        );
-
-    animation:
-        boltFlash 1.8s infinite;
-}
-
-.bolt.left {
-
-    left:
-        -8px;
-
-    top:
-        0;
-
-    transform:
-        rotate(-12deg);
-}
-
-.bolt.right {
-
-    right:
-        -8px;
-
-    bottom:
-        0;
-
-    transform:
-        rotate(12deg);
-
-    animation-delay:
-        .7s;
-}
-
-@keyframes boltFlash {
-
-    0%,
-    100% {
-
-        opacity:
-            .65;
-
-        transform:
-            scale(1);
-    }
-
-    8% {
-
-        opacity:
-            1;
-
-        filter:
-
-            drop-shadow(
-                0 0 7px #fff
-            )
-
-            drop-shadow(
-                0 0 25px #a66cff
-            )
-
-            drop-shadow(
-                0 0 45px #703cff
-            );
-    }
-
-    14% {
-
-        opacity:
-            .4;
-    }
-
-    20% {
-
-        opacity:
-            1;
-    }
-
-    40% {
-
-        opacity:
-            .7;
-    }
-}
-
-
-/* =====================================================
-   ALT BAŞLIK
-   ===================================================== */
-
-.subtitle {
+    margin-top:
+        7px;
 
     color:
-        #b8b1cf;
+        #aeb5c8;
 
     font-size:
-        12px;
+        11px;
 
     font-weight:
         800;
 
     letter-spacing:
-        1.2px;
-
-    margin-top:
-        8px;
-
-    text-shadow:
-        0 0 10px
-        rgba(150,100,255,.5);
+        .8px;
 }
 
-.status {
+.status{
 
     display:
         inline-flex;
 
-    align-items:
-        center;
-
-    justify-content:
-        center;
-
     margin-top:
-        11px;
+        9px;
 
     padding:
-        7px 14px;
+        6px 12px;
 
     border-radius:
         999px;
@@ -1751,23 +1437,19 @@ body {
 
     border:
         1px solid
-        rgba(157,92,255,.4);
+        rgba(157,92,255,.35);
 
     color:
         #74ff9a;
 
     font-size:
-        11px;
+        10px;
 
     font-weight:
         900;
-
-    box-shadow:
-        0 0 18px
-        rgba(111,76,255,.18);
 }
 
-.status.error {
+.status.error{
 
     color:
         #ff7474;
@@ -1778,10 +1460,128 @@ body {
 
 
 /* =====================================================
-   RADAR GRID
+   LİDERLER
    ===================================================== */
 
-.radar-grid {
+.leaders{
+
+    display:
+        grid;
+
+    grid-template-columns:
+        repeat(3,1fr);
+
+    gap:
+        8px;
+
+    margin-bottom:
+        12px;
+}
+
+.leader{
+
+    min-width:
+        0;
+
+    padding:
+        10px;
+
+    border-radius:
+        13px;
+
+    background:
+        linear-gradient(
+            145deg,
+            rgba(22,26,42,.96),
+            rgba(9,12,21,.96)
+        );
+
+    border:
+        1px solid
+        #293448;
+
+    box-shadow:
+        0 8px 25px
+        rgba(0,0,0,.3);
+}
+
+.leader.purple{
+
+    border-color:
+        rgba(157,81,255,.55);
+
+    box-shadow:
+        0 0 20px
+        rgba(157,81,255,.08);
+}
+
+.leader.gold{
+
+    border-color:
+        rgba(241,200,75,.5);
+
+    box-shadow:
+        0 0 20px
+        rgba(241,200,75,.06);
+}
+
+.leader.blue{
+
+    border-color:
+        rgba(70,180,255,.5);
+}
+
+.leader-title{
+
+    font-size:
+        9px;
+
+    color:
+        #8d98aa;
+
+    font-weight:
+        900;
+
+    margin-bottom:
+        5px;
+}
+
+.leader-value{
+
+    font-size:
+        20px;
+
+    font-weight:
+        1000;
+}
+
+.leader-user{
+
+    margin-top:
+        3px;
+
+    font-size:
+        9px;
+
+    color:
+        #aeb9cc;
+
+    overflow:
+        hidden;
+
+    text-overflow:
+        ellipsis;
+
+    white-space:
+        nowrap;
+}
+
+
+/* =====================================================
+   RADAR
+   ===================================================== */
+
+.radar-grid{
 
     display:
         grid;
@@ -1790,34 +1590,29 @@ body {
         1fr 1fr;
 
     gap:
-        14px;
+        12px;
 
     align-items:
         start;
 }
 
-
-/* =====================================================
-   PANELS
-   ===================================================== */
-
-.panel {
+.panel{
 
     min-width:
         0;
 
     background:
-        rgba(9,12,21,.88);
+        rgba(9,12,21,.9);
 
     border:
         1px solid
         #273146;
 
     border-radius:
-        18px;
+        17px;
 
     padding:
-        12px;
+        10px;
 
     box-shadow:
         0 12px 38px
@@ -1827,17 +1622,17 @@ body {
         blur(10px);
 }
 
-.panel.goody {
+.panel.goody{
 
     border-color:
         rgba(157,81,255,.65);
 
     box-shadow:
         0 0 25px
-        rgba(157,81,255,.10);
+        rgba(157,81,255,.1);
 }
 
-.panel.chest {
+.panel.chest{
 
     border-color:
         rgba(241,200,75,.55);
@@ -1847,7 +1642,7 @@ body {
         rgba(241,200,75,.07);
 }
 
-.panel-title {
+.panel-title{
 
     display:
         flex;
@@ -1859,31 +1654,22 @@ body {
         space-between;
 
     gap:
-        8px;
+        7px;
 
     padding:
-        3px 2px 12px;
+        2px 2px 10px;
 }
 
-.panel-name {
+.panel-name{
 
     font-size:
-        17px;
+        15px;
 
     font-weight:
         950;
-
-    white-space:
-        nowrap;
-
-    overflow:
-        hidden;
-
-    text-overflow:
-        ellipsis;
 }
 
-.goody .panel-name {
+.goody .panel-name{
 
     color:
         #d5a8ff;
@@ -1893,7 +1679,7 @@ body {
         rgba(157,81,255,.65);
 }
 
-.chest .panel-name {
+.chest .panel-name{
 
     color:
         #ffe37b;
@@ -1903,16 +1689,13 @@ body {
         rgba(241,200,75,.55);
 }
 
-.panel-count {
-
-    flex-shrink:
-        0;
+.panel-count{
 
     min-width:
-        28px;
+        25px;
 
     padding:
-        4px 8px;
+        3px 7px;
 
     border-radius:
         999px;
@@ -1920,14 +1703,11 @@ body {
     background:
         rgba(255,255,255,.07);
 
-    color:
-        #fff;
-
     text-align:
         center;
 
     font-size:
-        10px;
+        9px;
 
     font-weight:
         900;
@@ -1935,10 +1715,10 @@ body {
 
 
 /* =====================================================
-   CARD
+   KART
    ===================================================== */
 
-.card {
+.card{
 
     position:
         relative;
@@ -1958,37 +1738,27 @@ body {
         #293448;
 
     border-radius:
-        13px;
+        12px;
 
     padding:
-        11px;
+        10px;
 
     margin-bottom:
-        9px;
-
-    transition:
-        transform .2s,
-        box-shadow .2s,
-        border-color .2s;
+        7px;
 }
 
-.card:hover {
-
-    transform:
-        translateY(-2px);
-
-    border-color:
-        #53627c;
+.card:last-child{
+    margin-bottom:0;
 }
 
-.goody .card {
+.goody .card{
 
     border-left:
         3px solid
         #9d51ff;
 }
 
-.chest .card {
+.chest .card{
 
     border-left:
         3px solid
@@ -1997,28 +1767,39 @@ body {
 
 
 /* =====================================================
-   YENİ KART
+   GERÇEK YENİ KAYIT
    ===================================================== */
 
-.new-card {
+.newest{
 
     animation:
-        cardIn .65s ease-out;
+        newestIn .7s ease-out;
 }
 
-@keyframes cardIn {
+@keyframes newestIn{
 
-    0% {
+    0%{
 
         opacity:
-            0;
+            .35;
 
         transform:
             translateY(-8px)
             scale(.97);
+
+        box-shadow:
+            0 0 0
+            rgba(157,81,255,0);
     }
 
-    100% {
+    35%{
+
+        box-shadow:
+            0 0 30px
+            rgba(157,81,255,.5);
+    }
+
+    100%{
 
         opacity:
             1;
@@ -2026,60 +1807,85 @@ body {
         transform:
             translateY(0)
             scale(1);
+
+        box-shadow:
+            none;
     }
 }
 
-.new-card::after {
+.new-badge{
 
-    content:
-        "";
-
-    position:
-        absolute;
-
-    top:
+    flex-shrink:
         0;
 
-    left:
-        -100%;
+    padding:
+        4px 7px;
 
-    width:
-        60%;
+    border-radius:
+        6px;
 
-    height:
-        100%;
+    font-size:
+        8px;
+
+    font-weight:
+        1000;
+
+    color:
+        #fff;
 
     background:
         linear-gradient(
-            90deg,
-            transparent,
-            rgba(255,255,255,.08),
-            transparent
+            135deg,
+            #8d35ff,
+            #c05cff
         );
 
+    box-shadow:
+        0 0 13px
+        rgba(157,81,255,.55);
+
     animation:
-        shine 1.5s ease-out;
+        badgeGlow 1.2s
+        ease-in-out
+        infinite alternate;
 }
 
-@keyframes shine {
+.chest .new-badge{
 
-    from {
-        left:
-            -100%;
+    background:
+        linear-gradient(
+            135deg,
+            #d89b14,
+            #f4d35e
+        );
+
+    color:
+        #211700;
+
+    box-shadow:
+        0 0 13px
+        rgba(241,200,75,.45);
+}
+
+@keyframes badgeGlow{
+
+    from{
+        filter:
+            brightness(1);
     }
 
-    to {
-        left:
-            150%;
+    to{
+        filter:
+            brightness(1.45);
     }
 }
 
 
 /* =====================================================
-   KULLANICI
+   USER
    ===================================================== */
 
-.user-row {
+.user-row{
 
     display:
         flex;
@@ -2091,16 +1897,16 @@ body {
         space-between;
 
     gap:
-        6px;
+        5px;
 
     margin-bottom:
-        9px;
+        8px;
 }
 
-.user {
+.user{
 
     font-size:
-        15px;
+        14px;
 
     font-weight:
         950;
@@ -2109,7 +1915,7 @@ body {
         break-word;
 }
 
-.badge {
+.rank{
 
     flex-shrink:
         0;
@@ -2117,46 +1923,19 @@ body {
     font-size:
         8px;
 
+    color:
+        #77849a;
+
     font-weight:
-        950;
-
-    padding:
-        4px 6px;
-
-    border-radius:
-        6px;
-
-    background:
-        rgba(255,255,255,.07);
-
-    color:
-        #aeb9cc;
-}
-
-.goody .badge {
-
-    color:
-        #d2a7ff;
-
-    background:
-        rgba(157,81,255,.13);
-}
-
-.chest .badge {
-
-    color:
-        #ffe17a;
-
-    background:
-        rgba(241,200,75,.10);
+        900;
 }
 
 
 /* =====================================================
-   BİLGİLER
+   BİLGİ
    ===================================================== */
 
-.info-grid {
+.info-grid{
 
     display:
         grid;
@@ -2165,10 +1944,10 @@ body {
         1fr 1fr;
 
     gap:
-        5px;
+        4px;
 }
 
-.info {
+.info{
 
     background:
         rgba(255,255,255,.035);
@@ -2177,16 +1956,16 @@ body {
         7px;
 
     padding:
-        6px;
+        5px;
 
     font-size:
-        9px;
+        8px;
 
     color:
         #818da1;
 }
 
-.info b {
+.info b{
 
     display:
         block;
@@ -2195,7 +1974,7 @@ body {
         #fff;
 
     font-size:
-        12px;
+        11px;
 
     margin-top:
         2px;
@@ -2203,10 +1982,10 @@ body {
 
 
 /* =====================================================
-   CANLI BUTON
+   CANLI
    ===================================================== */
 
-.live-button {
+.live-button{
 
     display:
         block;
@@ -2228,36 +2007,19 @@ body {
         );
 
     padding:
-        9px;
+        8px;
 
     margin-top:
-        9px;
+        8px;
 
     border-radius:
         8px;
 
     font-size:
-        10px;
+        9px;
 
     font-weight:
         950;
-
-    box-shadow:
-        0 5px 18px
-        rgba(225,25,75,.2);
-
-    transition:
-        transform .15s,
-        filter .15s;
-}
-
-.live-button:hover {
-
-    filter:
-        brightness(1.15);
-
-    transform:
-        translateY(-1px);
 }
 
 
@@ -2265,16 +2027,16 @@ body {
    BOŞ
    ===================================================== */
 
-.empty {
+.empty{
 
     text-align:
         center;
 
     padding:
-        25px 8px;
+        22px 5px;
 
     border-radius:
-        11px;
+        10px;
 
     background:
         rgba(255,255,255,.025);
@@ -2283,7 +2045,7 @@ body {
         #626e82;
 
     font-size:
-        11px;
+        10px;
 }
 
 
@@ -2291,7 +2053,7 @@ body {
    FOOTER
    ===================================================== */
 
-.footer {
+.footer{
 
     text-align:
         center;
@@ -2300,13 +2062,10 @@ body {
         #59647a;
 
     font-size:
-        9px;
+        8px;
 
     padding:
-        16px 0 5px;
-
-    letter-spacing:
-        .4px;
+        13px 0 4px;
 }
 
 
@@ -2314,267 +2073,311 @@ body {
    MOBİL
    ===================================================== */
 
-@media (max-width: 700px) {
+@media(max-width:700px){
 
-    body {
-        padding: 7px;
+    body{
+        padding:6px;
     }
 
-    .header {
-        padding-top: 7px;
+    .leaders{
+
+        gap:
+            5px;
+
+        margin-bottom:
+            7px;
     }
 
-    .jimin-wrap {
-        padding-left: 21px;
-        padding-right: 21px;
+    .leader{
+
+        padding:
+            7px;
+
+        border-radius:
+            10px;
     }
 
-    .subtitle {
-        font-size: 9px;
-        letter-spacing: .7px;
+    .leader-title{
+        font-size:7px;
     }
 
-    .status {
-        font-size: 9px;
-        padding: 6px 10px;
+    .leader-value{
+        font-size:15px;
     }
 
-    .radar-grid {
+    .leader-user{
+        font-size:7px;
+    }
+
+    .title{
+        font-size:27px;
+    }
+
+    .subtitle{
+        font-size:8px;
+    }
+
+    .status{
+        font-size:8px;
+        padding:5px 8px;
+    }
+
+    .radar-grid{
 
         grid-template-columns:
             1fr 1fr;
 
         gap:
-            6px;
+            5px;
     }
 
-    .panel {
+    .panel{
 
         padding:
-            7px;
+            6px;
 
         border-radius:
-            13px;
+            12px;
     }
 
-    .panel-title {
-
-        padding-bottom:
-            8px;
+    .panel-name{
+        font-size:10px;
     }
 
-    .panel-name {
-
-        font-size:
-            11px;
-    }
-
-    .panel-count {
+    .panel-count{
 
         min-width:
-            23px;
+            21px;
 
         padding:
             3px 5px;
 
         font-size:
-            9px;
+            8px;
     }
 
-    .card {
+    .card{
 
         padding:
-            8px;
+            7px;
 
         border-radius:
-            9px;
+            8px;
 
         margin-bottom:
-            6px;
+            5px;
     }
 
-    .user {
-
-        font-size:
-            11px;
+    .user{
+        font-size:10px;
     }
 
-    .badge {
-
-        display:
-            none;
+    .new-badge{
+        font-size:7px;
+        padding:3px 5px;
     }
 
-    .info-grid {
-
-        gap:
-            3px;
+    .rank{
+        font-size:7px;
     }
 
-    .info {
+    .info{
 
         padding:
             4px;
 
         font-size:
-            7px;
-    }
-
-    .info b {
-
-        font-size:
-            10px;
-    }
-
-    .live-button {
-
-        padding:
-            7px 3px;
-
-        font-size:
-            8px;
-
-        margin-top:
             6px;
     }
 
-    .empty {
-
-        padding:
-            20px 4px;
-
-        font-size:
-            9px;
+    .info b{
+        font-size:9px;
     }
 
+    .live-button{
+
+        padding:
+            6px 2px;
+
+        font-size:
+            7px;
+
+        margin-top:
+            5px;
+    }
+
+    .empty{
+
+        padding:
+            18px 3px;
+
+        font-size:
+            8px;
+    }
 }
 
 </style>
-
 </head>
-
 
 <body>
 
 <div class="wrapper">
 
+<div class="header">
 
-    <!-- =================================================
-         HEADER
-         ================================================= -->
+    <div class="title">
+        🏆 ÖDÜL AVCISI
+    </div>
 
-    <div class="header">
+    <div class="subtitle">
+        🟪 GOODY BAG • 🟨 HAZİNE SANDIĞI
+    </div>
 
-        <div class="jimin-wrap">
+    <div
+        id="status"
+        class="status"
+    >
+        🟡 RADAR BAĞLANIYOR...
+    </div>
 
-            <div class="bolt left">
-                ⚡
-            </div>
+</div>
 
-            <div class="jimin">
-                JİMİN
-            </div>
 
-            <div class="bolt right">
-                ⚡
-            </div>
+<!-- =====================================================
+     LİDERLER
+     ===================================================== -->
 
+<div class="leaders">
+
+    <div class="leader purple">
+
+        <div class="leader-title">
+            🪙 EN YÜKSEK COIN
         </div>
-
-
-        <div class="subtitle">
-
-            🏆 ÖDÜL AVCISI
-            •
-            🟪 GOODY BAG
-            •
-            🟨 HAZİNE SANDIĞI
-
-        </div>
-
 
         <div
-            id="status"
-            class="status"
+            id="maxCoin"
+            class="leader-value"
         >
+            0
+        </div>
 
-            🟡 RADAR BAĞLANIYOR...
-
+        <div
+            id="maxCoinUser"
+            class="leader-user"
+        >
+            -
         </div>
 
     </div>
 
 
-    <!-- =================================================
-         RADAR
-         ================================================= -->
+    <div class="leader gold">
 
-    <div class="radar-grid">
+        <div class="leader-title">
+            👥 EN ÇOK KİŞİ
+        </div>
+
+        <div
+            id="maxPeople"
+            class="leader-value"
+        >
+            0
+        </div>
+
+        <div
+            id="maxPeopleUser"
+            class="leader-user"
+        >
+            -
+        </div>
+
+    </div>
 
 
-        <!-- GOODY -->
+    <div class="leader blue">
 
-        <div class="panel goody">
+        <div class="leader-title">
+            📈 EN YÜKSEK RATE
+        </div>
 
-            <div class="panel-title">
+        <div
+            id="maxRate"
+            class="leader-value"
+        >
+            0
+        </div>
 
-                <div class="panel-name">
+        <div
+            id="maxRateUser"
+            class="leader-user"
+        >
+            -
+        </div>
 
-                    🟪 GOODY BAG
+    </div>
 
-                </div>
+</div>
 
-                <div
-                    id="bagCounter"
-                    class="panel-count"
-                >
-                    0
-                </div>
 
+<!-- =====================================================
+     RADAR
+     ===================================================== -->
+
+<div class="radar-grid">
+
+
+    <div class="panel goody">
+
+        <div class="panel-title">
+
+            <div class="panel-name">
+                🟪 GOODY BAG
             </div>
 
-
-            <div id="bags"></div>
-
-        </div>
-
-
-        <!-- CHEST -->
-
-        <div class="panel chest">
-
-            <div class="panel-title">
-
-                <div class="panel-name">
-
-                    🟨 HAZİNE SANDIĞI
-
-                </div>
-
-                <div
-                    id="chestCounter"
-                    class="panel-count"
-                >
-                    0
-                </div>
-
+            <div
+                id="bagCounter"
+                class="panel-count"
+            >
+                0
             </div>
 
+        </div>
 
-            <div id="chests"></div>
+        <div id="bags"></div>
+
+    </div>
+
+
+    <div class="panel chest">
+
+        <div class="panel-title">
+
+            <div class="panel-name">
+                🟨 HAZİNE SANDIĞI
+            </div>
+
+            <div
+                id="chestCounter"
+                class="panel-count"
+            >
+                0
+            </div>
 
         </div>
 
+        <div id="chests"></div>
 
     </div>
 
+</div>
 
-    <div class="footer">
 
-        ⚡ JİMİN • ÖDÜL AVCISI • CANLI RADAR ⚡
+<div class="footer">
 
-    </div>
+    ⚡ ÖDÜL AVCISI • CANLI RADAR
 
+</div>
 
 </div>
 
@@ -2590,7 +2393,22 @@ let radarData = {
 };
 
 
-function escapeHtml(value) {
+/*
+    İlk açılışta mevcut kayıtların hepsi
+    "YENİ" sayılmaz.
+
+    Daha sonra gerçekten yeni kayıt geldiğinde
+    sadece yeni kayıt animasyon alır.
+*/
+
+let firstLoad = true;
+
+let lastNewestGoody = "";
+
+let lastNewestChest = "";
+
+
+function escapeHtml(value){
 
     return String(
         value ?? ""
@@ -2624,7 +2442,7 @@ function escapeHtml(value) {
 }
 
 
-function timestamp(item) {
+function timestamp(item){
 
     return Number(
 
@@ -2647,21 +2465,21 @@ function timestamp(item) {
 }
 
 
-function latestFive(items) {
+/*
+    EN YENİ DAİMA EN ÜSTTE.
+*/
 
-    if (!Array.isArray(items)) {
+function latestFive(items){
 
+    if(!Array.isArray(items)){
         return [];
-
     }
-
 
     return [...items]
 
         .sort(
 
-            (a, b) =>
-
+            (a,b) =>
                 timestamp(b)
                 -
                 timestamp(a)
@@ -2672,30 +2490,51 @@ function latestFive(items) {
             0,
             5
         );
+}
+
+
+/*
+    Kaydın benzersiz anahtarı.
+*/
+
+function newestKey(item){
+
+    return String(
+
+        item.source_message_id
+        ??
+        item.room
+        ??
+        item.detected_at
+        ??
+        ""
+
+    );
 
 }
 
 
-function renderItems(
+/* =====================================================
+   KARTLAR
+   ===================================================== */
 
+function renderItems(
     items,
     elementId,
     counterId,
-    icon
-
-) {
+    icon,
+    type
+){
 
     const container =
         document.getElementById(
             elementId
         );
 
-
     const counter =
         document.getElementById(
             counterId
         );
-
 
     const latest =
         latestFive(items);
@@ -2705,52 +2544,73 @@ function renderItems(
         latest.length;
 
 
-    if (!latest.length) {
+    if(!latest.length){
 
         container.innerHTML =
-
             '<div class="empty">' +
-
             '⚡ Henüz veri yok.' +
-
             '</div>';
 
         return;
-
     }
+
+
+    /*
+        Sadece listenin en üstündeki kayıt
+        gerçek yeni kayıt olduysa animasyon alır.
+    */
+
+    const newest =
+        newestKey(
+            latest[0]
+        );
+
+
+    const previousNewest =
+
+        type === "GOODY BAG"
+
+        ?
+
+        lastNewestGoody
+
+        :
+
+        lastNewestChest;
+
+
+    const isNew =
+
+        !firstLoad
+
+        &&
+
+        newest
+
+        &&
+
+        newest !== previousNewest;
 
 
     container.innerHTML =
 
         latest.map(
 
-            (item, index) => {
+            (item,index) => {
 
                 const live =
                     item.live || "";
 
-
-                const badge =
-
-                    index === 0
-
-                    ?
-
-                    "⚡ YENİ"
-
-                    :
-
-                    "#" + (
-                        index + 1
-                    );
+                const isNewest =
+                    index === 0;
 
 
                 return `
 
                 <div
                     class="card ${
-                        index === 0
-                            ? "new-card"
+                        isNew && isNewest
+                            ? "newest"
                             : ""
                     }"
                 >
@@ -2768,11 +2628,25 @@ function renderItems(
                         </div>
 
 
-                        <div class="badge">
+                        ${
+                            isNewest
 
-                            ${badge}
+                            ?
 
-                        </div>
+                            `
+                            <div class="new-badge">
+                                ⚡ YENİ
+                            </div>
+                            `
+
+                            :
+
+                            `
+                            <div class="rank">
+                                #${index + 1}
+                            </div>
+                            `
+                        }
 
                     </div>
 
@@ -2891,7 +2765,6 @@ function renderItems(
                         :
 
                         ""
-
                     }
 
                 </div>
@@ -2902,57 +2775,229 @@ function renderItems(
 
         ).join("");
 
+
+    /*
+        Son görülen kaydı hatırla.
+    */
+
+    if(
+        type === "GOODY BAG"
+    ){
+
+        lastNewestGoody =
+            newest;
+
+    }else{
+
+        lastNewestChest =
+            newest;
+
+    }
+
 }
 
 
-function renderRadar() {
+/* =====================================================
+   LİDERLER
+   ===================================================== */
 
-    const bags =
-        latestFive(
+function allItems(){
+
+    return [
+
+        ...(Array.isArray(
             radarData.goody_bags
-        );
+        )
+        ?
+        radarData.goody_bags
+        :
+        []),
 
-
-    const chests =
-        latestFive(
+        ...(Array.isArray(
             radarData.chests
+        )
+        ?
+        radarData.chests
+        :
+        [])
+
+    ];
+
+}
+
+
+function updateLeaders(){
+
+    const all =
+        allItems();
+
+
+    if(!all.length){
+
+        document.getElementById(
+            "maxCoin"
+        ).textContent = "0";
+
+        document.getElementById(
+            "maxPeople"
+        ).textContent = "0";
+
+        document.getElementById(
+            "maxRate"
+        ).textContent = "0";
+
+        document.getElementById(
+            "maxCoinUser"
+        ).textContent = "-";
+
+        document.getElementById(
+            "maxPeopleUser"
+        ).textContent = "-";
+
+        document.getElementById(
+            "maxRateUser"
+        ).textContent = "-";
+
+        return;
+    }
+
+
+    const coin =
+        [...all].sort(
+            (a,b) =>
+                Number(b.coins || 0)
+                -
+                Number(a.coins || 0)
+        )[0];
+
+
+    const people =
+        [...all].sort(
+            (a,b) =>
+                Number(b.people || 0)
+                -
+                Number(a.people || 0)
+        )[0];
+
+
+    const rate =
+        [...all].sort(
+            (a,b) =>
+                Number(b.rate || 0)
+                -
+                Number(a.rate || 0)
+        )[0];
+
+
+    document.getElementById(
+        "maxCoin"
+    ).textContent =
+        Number(
+            coin.coins || 0
         );
 
+
+    document.getElementById(
+        "maxCoinUser"
+    ).textContent =
+
+        `${
+            coin.type === "GOODY BAG"
+                ? "🟪"
+                : "🟨"
+        } ${coin.username || "-"}`;
+
+
+    document.getElementById(
+        "maxPeople"
+    ).textContent =
+        Number(
+            people.people || 0
+        );
+
+
+    document.getElementById(
+        "maxPeopleUser"
+    ).textContent =
+
+        `${
+            people.type === "GOODY BAG"
+                ? "🟪"
+                : "🟨"
+        } ${people.username || "-"}`;
+
+
+    document.getElementById(
+        "maxRate"
+    ).textContent =
+        Number(
+            rate.rate || 0
+        );
+
+
+    document.getElementById(
+        "maxRateUser"
+    ).textContent =
+
+        `${
+            rate.type === "GOODY BAG"
+                ? "🟪"
+                : "🟨"
+        } ${rate.username || "-"}`;
+
+}
+
+
+/* =====================================================
+   RADAR
+   ===================================================== */
+
+function renderRadar(){
 
     renderItems(
 
-        bags,
+        radarData.goody_bags,
 
         "bags",
 
         "bagCounter",
 
-        "🟪"
+        "🟪",
+
+        "GOODY BAG"
 
     );
 
 
     renderItems(
 
-        chests,
+        radarData.chests,
 
         "chests",
 
         "chestCounter",
 
-        "🟨"
+        "🟨",
+
+        "CHEST"
 
     );
+
+
+    updateLeaders();
 
 }
 
 
-async function loadRadar() {
+/* =====================================================
+   VERİ ÇEK
+   ===================================================== */
 
-    try {
+async function loadRadar(){
+
+    try{
 
         const response =
-
             await fetch(
 
                 "/api/all?t="
@@ -2967,14 +3012,12 @@ async function loadRadar() {
             );
 
 
-        if (!response.ok) {
+        if(!response.ok){
 
             throw new Error(
-
                 "HTTP "
                 +
                 response.status
-
             );
 
         }
@@ -3019,7 +3062,6 @@ async function loadRadar() {
 
 
         const status =
-
             document.getElementById(
                 "status"
             );
@@ -3036,9 +3078,13 @@ async function loadRadar() {
         renderRadar();
 
 
+        firstLoad =
+            false;
+
+
     }
 
-    catch (error) {
+    catch(error){
 
         console.error(
             "Radar hatası:",
@@ -3047,7 +3093,6 @@ async function loadRadar() {
 
 
         const status =
-
             document.getElementById(
                 "status"
             );
@@ -3065,12 +3110,15 @@ async function loadRadar() {
 }
 
 
+/*
+    2 saniyede bir kontrol.
+    Kayıtlar kaybolmaz.
+    Sadece yeni gelen kayıt üste geçer.
+*/
+
 setInterval(
-
     loadRadar,
-
     2000
-
 );
 
 
@@ -3078,15 +3126,13 @@ loadRadar();
 
 </script>
 
-
 </body>
-
 </html>
 """
 
 
 # =========================================================
-# RADAR SAYFASI
+# HTTP
 # =========================================================
 
 async def radar_page(request):
@@ -3101,10 +3147,6 @@ async def radar_page(request):
 
     )
 
-
-# =========================================================
-# CORS
-# =========================================================
 
 @web.middleware
 async def cors_middleware(
@@ -3137,9 +3179,10 @@ async def cors_middleware(
         )
 
 
-    response = await handler(
-        request
-    )
+    response =
+        await handler(
+            request
+        )
 
 
     response.headers[
@@ -3160,10 +3203,6 @@ async def cors_middleware(
     return response
 
 
-# =========================================================
-# API BOXES
-# =========================================================
-
 async def api_boxes(request):
 
     return web.json_response(
@@ -3175,10 +3214,6 @@ async def api_boxes(request):
     )
 
 
-# =========================================================
-# API GOODY
-# =========================================================
-
 async def api_goody_bags(request):
 
     return web.json_response(
@@ -3189,10 +3224,6 @@ async def api_goody_bags(request):
 
     )
 
-
-# =========================================================
-# STATUS
-# =========================================================
 
 async def api_status(request):
 
@@ -3219,10 +3250,6 @@ async def api_status(request):
     })
 
 
-# =========================================================
-# ALL
-# =========================================================
-
 async def api_all(request):
 
     return web.json_response({
@@ -3247,10 +3274,6 @@ async def api_all(request):
 
     })
 
-
-# =========================================================
-# HTTP SUNUCU
-# =========================================================
 
 async def start_http_server():
 
@@ -3296,28 +3319,36 @@ async def start_http_server():
     app.router.add_options(
         "/api/boxes",
         lambda request:
-            web.Response(status=204)
+            web.Response(
+                status=204
+            )
     )
 
 
     app.router.add_options(
         "/api/goody_bags",
         lambda request:
-            web.Response(status=204)
+            web.Response(
+                status=204
+            )
     )
 
 
     app.router.add_options(
         "/api/status",
         lambda request:
-            web.Response(status=204)
+            web.Response(
+                status=204
+            )
     )
 
 
     app.router.add_options(
         "/api/all",
         lambda request:
-            web.Response(status=204)
+            web.Response(
+                status=204
+            )
     )
 
 
@@ -3327,19 +3358,21 @@ async def start_http_server():
     )
 
 
-    runner = web.AppRunner(
-        app
-    )
+    runner =
+        web.AppRunner(
+            app
+        )
 
 
     await runner.setup()
 
 
-    site = web.TCPSite(
-        runner,
-        "0.0.0.0",
-        PORT
-    )
+    site =
+        web.TCPSite(
+            runner,
+            "0.0.0.0",
+            PORT
+        )
 
 
     await site.start()
@@ -3363,7 +3396,7 @@ async def start_http_server():
 
 
 # =========================================================
-# TELEGRAM MESAJ DİNLEYİCİ
+# TELEGRAM DİNLEYİCİ
 # =========================================================
 
 async def message_listener(event):
@@ -3392,18 +3425,20 @@ async def message_listener(event):
             processed_messages.clear()
 
 
-        data = parse_source_message(
-            event
-        )
+        data =
+            parse_source_message(
+                event
+            )
 
 
         if not data:
             return
 
 
-        added = add_to_radar(
-            data
-        )
+        added =
+            add_to_radar(
+                data
+            )
 
 
         if added:
@@ -3435,7 +3470,7 @@ async def main():
     )
 
     print(
-        "⚡ JİMİN • ÖDÜL AVCISI BAŞLIYOR"
+        "🏆 ÖDÜL AVCISI BAŞLIYOR"
     )
 
     print(
@@ -3443,25 +3478,25 @@ async def main():
     )
 
 
-    http_session = (
+    http_session =
         aiohttp.ClientSession()
-    )
 
 
     await start_http_server()
 
 
-    client = TelegramClient(
+    client =
+        TelegramClient(
 
-        StringSession(
-            STRING_SESSION
-        ),
+            StringSession(
+                STRING_SESSION
+            ),
 
-        API_ID,
+            API_ID,
 
-        API_HASH
+            API_HASH
 
-    )
+        )
 
 
     await client.start()
@@ -3522,7 +3557,15 @@ async def main():
     )
 
     print(
-        "[HAZIR] ⚡ JİMİN NEON AKTİF."
+        "[HAZIR] Yeni kayıt daima en üstte."
+    )
+
+    print(
+        "[HAZIR] JİMİN kaldırıldı."
+    )
+
+    print(
+        "[HAZIR] Liderler bölümü aktif."
     )
 
 
@@ -3543,10 +3586,6 @@ async def main():
         )
 
 
-# =========================================================
-# BAŞLAT
-# =========================================================
-
 if __name__ == "__main__":
 
     try:
@@ -3555,13 +3594,11 @@ if __name__ == "__main__":
             main()
         )
 
-
     except KeyboardInterrupt:
 
         print(
             "Kapatıldı."
         )
-
 
     except Exception as e:
 
