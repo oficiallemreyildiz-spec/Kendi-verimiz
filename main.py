@@ -91,31 +91,32 @@ async def sender_worker(session: aiohttp.ClientSession):
             send_queue.task_done()
 
 def extract_username(text: str):
-    # Kural 1: ## ile başlayanlar (T123> formatı olsun ya da olmasın)
+    # Kural 1: Özel oklar (›) ve normal oklar (>) için kesin ayrıştırma
     for line in text.splitlines():
         if "##" in line:
-            parts = line.split("##", 1)[1].strip()
-            if ">" in parts:
-                parts = parts.split(">", 1)[1].strip()
-            if parts:
-                return parts.split()[0].strip(",;:!")
+            # Gözle görülmeyen tüm ok/ayraç tiplerinden böl
+            parts = re.split(r'[>›|:]', line, maxsplit=1)
+            if len(parts) > 1:
+                raw_user = parts[1].strip()
+            else:
+                raw_user = line.split("##", 1)[1].strip()
+            
+            m = re.search(r'([a-zA-Z0-9_.]+)', raw_user)
+            if m:
+                u = m.group(1).strip(". ")
+                if u.lower() != "canli_yayin": return u
 
     # Kural 2: Link içi
     m_url = re.search(r'tiktok\.com/@([a-zA-Z0-9_.]+)', text)
-    if m_url: return m_url.group(1).strip(",;:!")
+    if m_url: return m_url.group(1).strip(". ")
 
     # Kural 3: Klasik @
     m_user = re.search(r'@([a-zA-Z0-9_.]+)', text)
-    if m_user: return m_user.group(1).strip(",;:!")
+    if m_user: return m_user.group(1).strip(". ")
 
     # Kural 4: Bot terimleri
     m_bot = re.search(r'(?:user|host|yayıncı|kullanıcı|id|kênh|channel)[\s:]+([a-zA-Z0-9_.]+)', text, re.IGNORECASE)
-    if m_bot: return m_bot.group(1).strip(",;:!")
-
-    # Son Çare Yedek
-    m_fallback = re.search(r'\b([a-zA-Z0-9]+[_.][a-zA-Z0-9_.]+)\b', text)
-    if m_fallback:
-        return m_fallback.group(1).strip(",;:!")
+    if m_bot: return m_bot.group(1).strip(". ")
 
     return None
 
@@ -127,8 +128,7 @@ def extract_coins(text: str) -> int:
 
 def extract_duration(text: str) -> int:
     m_time = re.search(r'TIME:\s*(\d+)[:m](\d+)', text, re.IGNORECASE)
-    if m_time:
-        return int(m_time.group(1)) * 60 + int(m_time.group(2))
+    if m_time: return int(m_time.group(1)) * 60 + int(m_time.group(2))
     
     m_sec = re.search(r'(\d+)\s*(?:s|sn|giây|সেকেন্ড)', text, re.IGNORECASE)
     return int(m_sec.group(1)) if m_sec else 180
@@ -161,7 +161,7 @@ def process_message(text: str, chat_title: str) -> str:
     else:
         LIVE_CHESTS.append(box_data)
 
-    live_link = f"https://www.tiktok.com/@{quote(display_user, safe='_-')}/live" if username else "https://www.tiktok.com/live"
+    live_link = f"https://www.tiktok.com/@{quote(display_user, safe='_-')}/live"
     header = "🎒 YENİ GOODY BAG!" if is_goody else "🚨 YENİ SANDIK!"
     
     msg = f"{header}\nKaynak: {chat_title}\n💎 Değer: {coins} Coin\n⏱️ Süre: ~{duration}sn\n\n🟢 CANLIYA GİT:\n{live_link}"
