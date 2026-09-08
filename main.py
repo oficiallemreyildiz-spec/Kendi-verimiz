@@ -91,32 +91,28 @@ async def sender_worker(session: aiohttp.ClientSession):
             send_queue.task_done()
 
 def extract_username(text: str):
-    # Kural 1: Özel oklar (›) ve normal oklar (>) için kesin ayrıştırma
+    # a-z, 0-9, alt tire (_), nokta (.) ve normal tire (-) tanımlı
     for line in text.splitlines():
         if "##" in line:
-            # Gözle görülmeyen tüm ok/ayraç tiplerinden böl
             parts = re.split(r'[>›|:]', line, maxsplit=1)
             if len(parts) > 1:
                 raw_user = parts[1].strip()
             else:
                 raw_user = line.split("##", 1)[1].strip()
             
-            m = re.search(r'([a-zA-Z0-9_.]+)', raw_user)
+            m = re.search(r'([a-zA-Z0-9_.-]+)', raw_user)
             if m:
-                u = m.group(1).strip(". ")
+                u = m.group(1).strip(". -")
                 if u.lower() != "canli_yayin": return u
 
-    # Kural 2: Link içi
-    m_url = re.search(r'tiktok\.com/@([a-zA-Z0-9_.]+)', text)
-    if m_url: return m_url.group(1).strip(". ")
+    m_url = re.search(r'tiktok\.com/@([a-zA-Z0-9_.-]+)', text)
+    if m_url: return m_url.group(1).strip(". -")
 
-    # Kural 3: Klasik @
-    m_user = re.search(r'@([a-zA-Z0-9_.]+)', text)
-    if m_user: return m_user.group(1).strip(". ")
+    m_user = re.search(r'@([a-zA-Z0-9_.-]+)', text)
+    if m_user: return m_user.group(1).strip(". -")
 
-    # Kural 4: Bot terimleri
-    m_bot = re.search(r'(?:user|host|yayıncı|kullanıcı|id|kênh|channel)[\s:]+([a-zA-Z0-9_.]+)', text, re.IGNORECASE)
-    if m_bot: return m_bot.group(1).strip(". ")
+    m_bot = re.search(r'(?:user|host|yayıncı|kullanıcı|id|kênh|channel)[\s:]+([a-zA-Z0-9_.-]+)', text, re.IGNORECASE)
+    if m_bot: return m_bot.group(1).strip(". -")
 
     return None
 
