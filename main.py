@@ -10,7 +10,6 @@ import hashlib
 import hmac
 
 from urllib.parse import unquote, parse_qsl
-from html import escape as html_escape
 
 import aiohttp
 from aiohttp import web
@@ -22,13 +21,13 @@ from telegram import (
     InlineKeyboardButton,
     InlineKeyboardMarkup,
     WebAppInfo,
-    Update
+    Update,
 )
 
 from telegram.ext import (
     ApplicationBuilder,
     CommandHandler,
-    ContextTypes
+    ContextTypes,
 )
 
 
@@ -43,61 +42,75 @@ BOT_TOKEN = os.environ["BOT_TOKEN"]
 
 TARGET_CHAT_ID = -1004421946217
 
-# ---------------------------------------------------------
-# SENİN TELEGRAM ID'N
-# Render Environment Variables'a ekle:
-#
-# ADMIN_USER_ID = senin Telegram ID'n
-# ADMIN_CHAT_ID = senin özel sohbet ID'n
-#
-# İkisi aynı olabilir.
-# ---------------------------------------------------------
+SOURCE_CHATS = [
+    -1004427105311,
+    -1003965749742,
+    -1002223772922,
+    -1002485768492,
+    -1002583301445,
+]
+
+PORT = int(
+    os.environ.get(
+        "PORT",
+        "10000",
+    )
+)
+
+DATABASE_PATH = os.environ.get(
+    "DATABASE_PATH",
+    "radar.db",
+)
+
+DB_PATH = DATABASE_PATH
+
+
+# =========================================================
+# ADMIN
+# =========================================================
 
 ADMIN_USER_ID = int(
     os.environ.get(
         "ADMIN_USER_ID",
-        "0"
+        "0",
     )
 )
 
 ADMIN_CHAT_ID = int(
     os.environ.get(
         "ADMIN_CHAT_ID",
-        "0"
+        "0",
     )
 )
 
 
 # =========================================================
-# KAYNAK TELEGRAM GRUPLARI
+# VIP
 # =========================================================
 
-SOURCE_CHATS = [
-    -1004427105311,
-    -1003965749742,
-    -1002223772922,
-    -1002485768492,
-    -1002583301445
-]
+BOT_USERNAME = "YeniBirAirdropBot"
 
+MINI_APP_URL = (
+    "https://kendi-verimiz.onrender.com/miniapp"
+)
 
-# =========================================================
-# SERVER
-# =========================================================
+VERIFY_URL = (
+    "https://kendi-verimiz.onrender.com/verify"
+)
 
-PORT = int(
+VIP_DAYS = int(
     os.environ.get(
-        "PORT",
-        "10000"
+        "VIP_DAYS",
+        "30",
     )
 )
 
-DB_PATH = os.environ.get(
-    "DATABASE_PATH",
-    "radar.db"
+INVITE_EXPIRE_MINUTES = int(
+    os.environ.get(
+        "INVITE_EXPIRE_MINUTES",
+        "60",
+    )
 )
-
-MAX_HISTORY = 500
 
 
 # =========================================================
@@ -106,31 +119,6 @@ MAX_HISTORY = 500
 
 COIN_ALARM_LIMIT = 100
 PEOPLE_ALARM_LIMIT = 5
-
-
-# =========================================================
-# VIP
-# =========================================================
-
-MINI_APP_URL = (
-    "https://kendi-verimiz.onrender.com/miniapp"
-)
-
-BOT_USERNAME = "YeniBirAirdropBot"
-
-VIP_DAYS = int(
-    os.environ.get(
-        "VIP_DAYS",
-        "30"
-    )
-)
-
-INVITE_EXPIRE_MINUTES = int(
-    os.environ.get(
-        "INVITE_EXPIRE_MINUTES",
-        "60"
-    )
-)
 
 
 # =========================================================
@@ -156,372 +144,157 @@ bot_application = None
 
 db = sqlite3.connect(
     DB_PATH,
-    check_same_thread=False
+    check_same_thread=False,
 )
 
 db.row_factory = sqlite3.Row
 
 
-db.execute("""
-CREATE TABLE IF NOT EXISTS radar_history (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    event_key TEXT UNIQUE,
-    event_type TEXT NOT NULL,
-    username TEXT,
-    coins INTEGER DEFAULT 0,
-    people INTEGER DEFAULT 0,
-    joined INTEGER DEFAULT 0,
-    rate REAL DEFAULT 0,
-    viewers INTEGER DEFAULT 0,
-    room TEXT,
-    live TEXT,
-    target_time INTEGER DEFAULT 0,
-    detected_at INTEGER DEFAULT 0,
-    source_message_id INTEGER DEFAULT 0,
-    source_chat_id INTEGER DEFAULT 0
+db.execute(
+    """
+    CREATE TABLE IF NOT EXISTS radar_history (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        event_key TEXT UNIQUE,
+        event_type TEXT NOT NULL,
+        username TEXT,
+        coins INTEGER DEFAULT 0,
+        people INTEGER DEFAULT 0,
+        joined INTEGER DEFAULT 0,
+        rate REAL DEFAULT 0,
+        viewers INTEGER DEFAULT 0,
+        room TEXT,
+        live TEXT,
+        target_time INTEGER DEFAULT 0,
+        detected_at INTEGER DEFAULT 0,
+        source_message_id INTEGER DEFAULT 0,
+        source_chat_id INTEGER DEFAULT 0
+    )
+    """
 )
-""")
 
 
-db.execute("""
-CREATE INDEX IF NOT EXISTS idx_radar_detected
-ON radar_history(detected_at)
-""")
-
-
-db.execute("""
-CREATE TABLE IF NOT EXISTS alarm_history (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    alarm_key TEXT UNIQUE,
-    event_key TEXT,
-    alarm_type TEXT,
-    created_at INTEGER
+db.execute(
+    """
+    CREATE INDEX IF NOT EXISTS idx_radar_detected
+    ON radar_history(detected_at)
+    """
 )
-""")
+
+
+db.execute(
+    """
+    CREATE TABLE IF NOT EXISTS alarm_history (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        alarm_key TEXT UNIQUE,
+        event_key TEXT,
+        alarm_type TEXT,
+        created_at INTEGER
+    )
+    """
+)
 
 
 # =========================================================
 # VIP USERS
 # =========================================================
 
-db.execute("""
-CREATE TABLE IF NOT EXISTS vip_users (
-    telegram_id INTEGER PRIMARY KEY,
-    username TEXT DEFAULT '',
-    first_name TEXT DEFAULT '',
-    verified_at INTEGER DEFAULT 0,
-    expires_at INTEGER DEFAULT 0,
-    invite_token TEXT DEFAULT ''
+db.execute(
+    """
+    CREATE TABLE IF NOT EXISTS vip_users (
+        telegram_id INTEGER PRIMARY KEY,
+        username TEXT DEFAULT '',
+        first_name TEXT DEFAULT '',
+        verified_at INTEGER DEFAULT 0,
+        expires_at INTEGER DEFAULT 0,
+        invite_token TEXT DEFAULT ''
+    )
+    """
 )
-""")
 
 
 # =========================================================
-# DAVET TOKENLARI
+# INVITE TOKENS
 # =========================================================
 
-db.execute("""
-CREATE TABLE IF NOT EXISTS invite_tokens (
-    token TEXT PRIMARY KEY,
-    created_at INTEGER NOT NULL,
-    expires_at INTEGER NOT NULL,
-    used INTEGER DEFAULT 0,
-    used_by INTEGER DEFAULT 0,
-    used_at INTEGER DEFAULT 0
+db.execute(
+    """
+    CREATE TABLE IF NOT EXISTS invite_tokens (
+        token TEXT PRIMARY KEY,
+        created_at INTEGER NOT NULL,
+        expires_at INTEGER NOT NULL,
+        used INTEGER DEFAULT 0,
+        used_by INTEGER DEFAULT 0,
+        used_at INTEGER DEFAULT 0
+    )
+    """
 )
-""")
 
 
 db.commit()
 
 
 # =========================================================
-# YARDIMCI
+# HELPERS
 # =========================================================
 
-def safe_int(
-    value,
-    default=0
-):
+def safe_int(value, default=0):
 
     try:
-
-        return int(
-            float(value)
-        )
-
-    except:
-
+        return int(float(value))
+    except Exception:
         return default
 
 
-def safe_float(
-    value,
-    default=0
-):
+def safe_float(value, default=0):
 
     try:
-
         return float(value)
-
-    except:
-
+    except Exception:
         return default
 
 
 # =========================================================
-# VIP DAVET OLUŞTUR
+# VIP DAVET TOKEN
 # =========================================================
 
 def create_invite_token():
 
-    token = secrets.token_urlsafe(
-        32
-    )
+    token = secrets.token_urlsafe(32)
 
-    now = int(
-        time.time()
-    )
+    now = int(time.time())
 
-    expires = (
+    expires_at = (
         now
         +
-        INVITE_EXPIRE_MINUTES
-        * 60
+        INVITE_EXPIRE_MINUTES * 60
     )
 
-
-    db.execute("""
-    INSERT INTO invite_tokens
-    (
-        token,
-        created_at,
-        expires_at,
-        used,
-        used_by,
-        used_at
+    db.execute(
+        """
+        INSERT INTO invite_tokens
+        (
+            token,
+            created_at,
+            expires_at,
+            used,
+            used_by,
+            used_at
+        )
+        VALUES (?, ?, ?, 0, 0, 0)
+        """,
+        (
+            token,
+            now,
+            expires_at,
+        ),
     )
-    VALUES (?, ?, ?, 0, 0, 0)
-    """, (
-        token,
-        now,
-        expires
-    ))
-
 
     db.commit()
 
     return token
 
 
-# =========================================================
-# DAVET KULLAN
-# =========================================================
-
-def use_invite_token(
-    token,
-    telegram_id,
-    username="",
-    first_name=""
-):
-
-    if not token:
-
-        return False, "Token yok."
-
-
-    now = int(
-        time.time()
-    )
-
-
-    row = db.execute("""
-    SELECT *
-    FROM invite_tokens
-    WHERE token=?
-    LIMIT 1
-    """, (
-        token,
-    )).fetchone()
-
-
-    if not row:
-
-        return False, "Davet bağlantısı geçersiz."
-
-
-    if safe_int(
-        row["used"]
-    ) == 1:
-
-        return False, "Bu davet bağlantısı daha önce kullanılmış."
-
-
-    if safe_int(
-        row["expires_at"]
-    ) < now:
-
-        return False, "Bu davet bağlantısının süresi dolmuş."
-
-
-    # -----------------------------------------------------
-    # TOKEN'I TEK KULLANIMLIK YAP
-    # -----------------------------------------------------
-
-    db.execute("""
-    UPDATE invite_tokens
-    SET
-        used=1,
-        used_by=?,
-        used_at=?
-    WHERE token=?
-    """, (
-        safe_int(
-            telegram_id
-        ),
-        now,
-        token
-    ))
-
-
-    # -----------------------------------------------------
-    # VIP SÜRESİ
-    # -----------------------------------------------------
-
-    expires_at = (
-
-        now
-
-        +
-
-        VIP_DAYS
-        *
-        24
-        *
-        60
-        *
-        60
-
-    )
-
-
-    db.execute("""
-    INSERT INTO vip_users
-    (
-        telegram_id,
-        username,
-        first_name,
-        verified_at,
-        expires_at,
-        invite_token
-    )
-    VALUES (?, ?, ?, ?, ?, ?)
-
-    ON CONFLICT(telegram_id)
-    DO UPDATE SET
-
-        username=excluded.username,
-
-        first_name=excluded.first_name,
-
-        verified_at=excluded.verified_at,
-
-        expires_at=excluded.expires_at,
-
-        invite_token=excluded.invite_token
-    """, (
-        safe_int(
-            telegram_id
-        ),
-        str(
-            username or ""
-        ),
-        str(
-            first_name or ""
-        ),
-        now,
-        expires_at,
-        token
-    ))
-
-
-    db.commit()
-
-
-    return True, "VIP aktif."
-
-
-# =========================================================
-# VIP KONTROL
-# =========================================================
-
-def is_vip(
-    telegram_id
-):
-
-    if not telegram_id:
-
-        return False
-
-
-    row = db.execute("""
-    SELECT expires_at
-    FROM vip_users
-    WHERE telegram_id=?
-    LIMIT 1
-    """, (
-        safe_int(
-            telegram_id
-        ),
-    )).fetchone()
-
-
-    if not row:
-
-        return False
-
-
-    expires_at = safe_int(
-        row["expires_at"]
-    )
-
-
-    return (
-        expires_at
-        >
-        int(
-            time.time()
-        )
-    )
-
-
-# =========================================================
-# VIP BİLGİ
-# =========================================================
-
-def get_vip_user(
-    telegram_id
-):
-
-    return db.execute("""
-    SELECT *
-    FROM vip_users
-    WHERE telegram_id=?
-    LIMIT 1
-    """, (
-        safe_int(
-            telegram_id
-        ),
-    )).fetchone()
-
-
-# =========================================================
-# DAVET LİNKİ
-# =========================================================
-
-def make_invite_link(
-    token
-):
+def make_invite_link(token):
 
     return (
         "https://t.me/"
@@ -535,130 +308,246 @@ def make_invite_link(
 
 
 # =========================================================
+# VIP TOKEN KULLAN
+# =========================================================
+
+def use_invite_token(
+    token,
+    telegram_id,
+    username="",
+    first_name="",
+):
+
+    if not token:
+        return False, "Davet tokeni bulunamadı."
+
+    now = int(time.time())
+
+    row = db.execute(
+        """
+        SELECT *
+        FROM invite_tokens
+        WHERE token=?
+        LIMIT 1
+        """,
+        (token,),
+    ).fetchone()
+
+    if not row:
+        return False, "Davet bağlantısı geçersiz."
+
+    if safe_int(row["used"]) == 1:
+        return False, "Bu davet bağlantısı daha önce kullanılmış."
+
+    if safe_int(row["expires_at"]) < now:
+        return False, "Bu davet bağlantısının süresi dolmuş."
+
+    # -----------------------------------------------------
+    # TEK KULLANIM
+    # -----------------------------------------------------
+
+    db.execute(
+        """
+        UPDATE invite_tokens
+        SET
+            used=1,
+            used_by=?,
+            used_at=?
+        WHERE token=?
+        """,
+        (
+            safe_int(telegram_id),
+            now,
+            token,
+        ),
+    )
+
+    # -----------------------------------------------------
+    # VIP SÜRESİ
+    # -----------------------------------------------------
+
+    expires_at = (
+        now
+        +
+        VIP_DAYS * 24 * 60 * 60
+    )
+
+    db.execute(
+        """
+        INSERT INTO vip_users
+        (
+            telegram_id,
+            username,
+            first_name,
+            verified_at,
+            expires_at,
+            invite_token
+        )
+        VALUES (?, ?, ?, ?, ?, ?)
+
+        ON CONFLICT(telegram_id)
+        DO UPDATE SET
+            username=excluded.username,
+            first_name=excluded.first_name,
+            verified_at=excluded.verified_at,
+            expires_at=excluded.expires_at,
+            invite_token=excluded.invite_token
+        """,
+        (
+            safe_int(telegram_id),
+            str(username or ""),
+            str(first_name or ""),
+            now,
+            expires_at,
+            token,
+        ),
+    )
+
+    db.commit()
+
+    return True, "VIP aktif."
+
+
+# =========================================================
+# VIP KONTROL
+# =========================================================
+
+def is_vip(telegram_id):
+
+    if not telegram_id:
+        return False
+
+    row = db.execute(
+        """
+        SELECT expires_at
+        FROM vip_users
+        WHERE telegram_id=?
+        LIMIT 1
+        """,
+        (
+            safe_int(telegram_id),
+        ),
+    ).fetchone()
+
+    if not row:
+        return False
+
+    expires_at = safe_int(
+        row["expires_at"]
+    )
+
+    return (
+        expires_at
+        >
+        int(time.time())
+    )
+
+
+def get_vip_user(telegram_id):
+
+    return db.execute(
+        """
+        SELECT *
+        FROM vip_users
+        WHERE telegram_id=?
+        LIMIT 1
+        """,
+        (
+            safe_int(telegram_id),
+        ),
+    ).fetchone()
+
+
+# =========================================================
 # RADAR DATABASE
 # =========================================================
 
-def db_save(
-    d,
-    event_key
-):
+def db_exists(event_key):
 
     try:
 
-        db.execute("""
-        INSERT OR IGNORE INTO radar_history
-        (
-            event_key,
-            event_type,
-            username,
-            coins,
-            people,
-            joined,
-            rate,
-            viewers,
-            room,
-            live,
-            target_time,
-            detected_at,
-            source_message_id,
-            source_chat_id
-        )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """, (
-
-            event_key,
-
-            d["type"],
-
-            d["username"],
-
-            safe_int(
-                d["coins"]
+        row = db.execute(
+            """
+            SELECT 1
+            FROM radar_history
+            WHERE event_key=?
+            LIMIT 1
+            """,
+            (
+                event_key,
             ),
+        ).fetchone()
 
-            safe_int(
-                d["people"]
-            ),
+        return row is not None
 
-            safe_int(
-                d["joined"]
-            ),
+    except Exception:
 
-            safe_float(
-                d["rate"]
-            ),
+        return False
 
-            safe_int(
-                d["view"]
-            ),
 
-            str(
-                d["room"]
-            ),
+def db_save(d, event_key):
 
-            d.get(
-                "live",
-                ""
-            ),
+    try:
 
-            safe_int(
-                d["target_time"]
-            ),
-
-            safe_int(
-                d["detected_at"]
-            ),
-
-            safe_int(
-                d.get(
-                    "source_message_id"
-                )
-            ),
-
-            safe_int(
-                d.get(
-                    "source_chat_id"
-                )
+        db.execute(
+            """
+            INSERT OR IGNORE INTO radar_history
+            (
+                event_key,
+                event_type,
+                username,
+                coins,
+                people,
+                joined,
+                rate,
+                viewers,
+                room,
+                live,
+                target_time,
+                detected_at,
+                source_message_id,
+                source_chat_id
             )
-
-        ))
-
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                event_key,
+                d["type"],
+                d["username"],
+                safe_int(d["coins"]),
+                safe_int(d["people"]),
+                safe_int(d["joined"]),
+                safe_float(d["rate"]),
+                safe_int(d["view"]),
+                str(d["room"]),
+                d.get("live", ""),
+                safe_int(d["target_time"]),
+                safe_int(d["detected_at"]),
+                safe_int(
+                    d.get(
+                        "source_message_id",
+                        0,
+                    )
+                ),
+                safe_int(
+                    d.get(
+                        "source_chat_id",
+                        0,
+                    )
+                ),
+            ),
+        )
 
         db.commit()
 
         return True
 
-
     except Exception as e:
 
         print(
             "[SQLITE KAYIT HATASI]",
-            repr(e)
+            repr(e),
         )
-
-        return False
-
-
-def db_exists(
-    event_key
-):
-
-    try:
-
-        row = db.execute("""
-        SELECT 1
-        FROM radar_history
-        WHERE event_key=?
-        LIMIT 1
-        """, (
-            event_key,
-        )).fetchone()
-
-
-        return row is not None
-
-
-    except:
 
         return False
 
@@ -674,14 +563,12 @@ def db_stats():
             """
         ).fetchone()[0]
 
-
         total_coins = db.execute(
             """
             SELECT COALESCE(SUM(coins),0)
             FROM radar_history
             """
         ).fetchone()[0]
-
 
         goody = db.execute(
             """
@@ -691,7 +578,6 @@ def db_stats():
             """
         ).fetchone()[0]
 
-
         chest = db.execute(
             """
             SELECT COUNT(*)
@@ -700,36 +586,20 @@ def db_stats():
             """
         ).fetchone()[0]
 
-
         return {
-
-            "total":
-                total,
-
-            "total_coins":
-                total_coins,
-
-            "goody":
-                goody,
-
-            "chest":
-                chest
-
+            "total": total,
+            "total_coins": total_coins,
+            "goody": goody,
+            "chest": chest,
         }
 
-
-    except:
+    except Exception:
 
         return {
-
             "total": 0,
-
             "total_coins": 0,
-
             "goody": 0,
-
-            "chest": 0
-
+            "chest": 0,
         }
 
 
@@ -737,184 +607,116 @@ def db_load_recent():
 
     try:
 
-        rows = db.execute("""
-        SELECT *
-        FROM radar_history
-        ORDER BY detected_at DESC
-        LIMIT ?
-        """, (
-            MAX_HISTORY,
-        )).fetchall()
-
+        rows = db.execute(
+            """
+            SELECT *
+            FROM radar_history
+            ORDER BY detected_at DESC
+            LIMIT 500
+            """
+        ).fetchall()
 
         for row in reversed(rows):
 
             d = {
-
-                "type":
-                    row["event_type"],
-
-                "box_name":
-                    (
-                        "Goody Bag"
-                        if row["event_type"]
-                        == "GOODY BAG"
-                        else
-                        "Hazine Sandığı"
-                    ),
-
-                "username":
-                    row["username"],
-
-                "coins":
-                    row["coins"],
-
-                "people":
-                    row["people"],
-
-                "joined":
-                    row["joined"],
-
-                "rate":
-                    row["rate"],
-
-                "view":
-                    row["viewers"],
-
-                "room":
-                    row["room"],
-
-                "live":
-                    row["live"],
-
-                "target_time":
-                    row["target_time"],
-
-                "detected_at":
-                    row["detected_at"],
-
+                "type": row["event_type"],
+                "box_name": (
+                    "Goody Bag"
+                    if row["event_type"]
+                    == "GOODY BAG"
+                    else
+                    "Hazine Sandığı"
+                ),
+                "username": row["username"],
+                "coins": row["coins"],
+                "people": row["people"],
+                "joined": row["joined"],
+                "rate": row["rate"],
+                "view": row["viewers"],
+                "room": row["room"],
+                "live": row["live"],
+                "target_time": row["target_time"],
+                "detected_at": row["detected_at"],
                 "source_message_id":
                     row["source_message_id"],
-
                 "source_chat_id":
-                    row["source_chat_id"]
-
+                    row["source_chat_id"],
             }
 
-
             target = (
-
                 LIVE_GOODY_BAGS
-
-                if d["type"]
-                == "GOODY BAG"
-
+                if d["type"] == "GOODY BAG"
                 else
-
                 LIVE_CHESTS
-
             )
 
-
             if d["room"]:
-
-                target[
-                    d["room"]
-                ] = d
-
+                target[d["room"]] = d
 
         print(
             "[SQLITE] Geçmiş yüklendi:",
-            len(rows)
+            len(rows),
         )
-
 
     except Exception as e:
 
         print(
             "[SQLITE YÜKLEME]",
-            repr(e)
+            repr(e),
         )
 
 
 # =========================================================
-# TELEGRAM MINI APP AUTH
+# TELEGRAM MINI APP INIT DATA DOĞRULAMA
 # =========================================================
 
-def validate_telegram_init_data(
-    init_data
-):
+def validate_telegram_init_data(init_data):
 
     if not init_data:
-
         return None
-
 
     try:
 
         pairs = dict(
             parse_qsl(
                 init_data,
-                keep_blank_values=True
+                keep_blank_values=True,
             )
         )
 
-
         received_hash = pairs.pop(
             "hash",
-            None
+            None,
         )
 
-
         if not received_hash:
-
             return None
 
-
         data_check_string = "\n".join(
-
             f"{key}={value}"
-
             for key, value
             in sorted(
                 pairs.items()
             )
-
         )
 
-
         secret_key = hmac.new(
-
             b"WebAppData",
-
             BOT_TOKEN.encode(),
-
-            hashlib.sha256
-
+            hashlib.sha256,
         ).digest()
 
-
         calculated_hash = hmac.new(
-
             secret_key,
-
             data_check_string.encode(),
-
-            hashlib.sha256
-
+            hashlib.sha256,
         ).hexdigest()
 
-
         if not hmac.compare_digest(
-
             calculated_hash,
-
-            received_hash
-
+            received_hash,
         ):
-
             return None
-
 
         auth_date = safe_int(
             pairs.get(
@@ -922,174 +724,144 @@ def validate_telegram_init_data(
             )
         )
 
-
         if not auth_date:
-
             return None
 
-
+        # 24 saatten eski initData kabul edilmez.
         if (
-
-            int(
-                time.time()
-            )
-
+            int(time.time())
             -
-
             auth_date
-
             >
-
             86400
-
         ):
-
             return None
-
 
         user_json = pairs.get(
             "user"
         )
 
-
         if not user_json:
-
             return None
-
 
         return json.loads(
             user_json
         )
 
-
     except Exception as e:
 
         print(
             "[MINI APP AUTH]",
-            repr(e)
+            repr(e),
         )
 
         return None
 
 
 # =========================================================
-# TOKEN
+# TOKEN ÇIKAR
 # =========================================================
 
-def token_from_event(e):
+def token_from_event(event):
 
     try:
 
-        m = e.message
+        message = event.message
 
-        t = (
-            m.raw_text
+        text = (
+            message.raw_text
             or ""
         )
 
-    except:
+    except Exception:
 
         return None
-
 
     patterns = [
 
         r'https?://[^ \n\]\)]+/t\.php\?token=([^&\s\]\)]+)',
 
-        r'https?://[^ \n\]\)]+t\.php\?token=([^&\s\]\)]+)'
+        r'https?://[^ \n\]\)]+t\.php\?token=([^&\s\]\)]+)',
 
     ]
 
+    for pattern in patterns:
 
-    for p in patterns:
-
-        m1 = re.search(
-            p,
-            t,
-            re.I
+        match = re.search(
+            pattern,
+            text,
+            re.I,
         )
 
-
-        if m1:
+        if match:
 
             return unquote(
-                m1.group(1)
+                match.group(1)
             )
-
 
     try:
 
-        for ent in (
-            m.entities
+        for entity in (
+            message.entities
             or []
         ):
 
-            u = getattr(
-                ent,
+            url = getattr(
+                entity,
                 "url",
-                None
+                None,
             )
 
+            if url:
 
-            if u:
-
-                m1 = re.search(
+                match = re.search(
                     r't\.php\?token=([^&\s]+)',
-                    u,
-                    re.I
+                    url,
+                    re.I,
                 )
 
-
-                if m1:
+                if match:
 
                     return unquote(
-                        m1.group(1)
+                        match.group(1)
                     )
 
-
-    except:
+    except Exception:
 
         pass
-
 
     return None
 
 
-def decode_token(tok):
+def decode_token(token):
 
-    if not tok:
-
+    if not token:
         return None
-
 
     try:
 
         s = unquote(
-            str(tok)
+            str(token)
         ).strip()
 
-
-        return json.loads(
-
-            base64.urlsafe_b64decode(
-
-                s
-                +
-                "="
-                *
-                (
-                    -len(s) % 4
-                )
-
-            ).decode(
-                "utf-8",
-                errors="ignore"
+        raw = base64.urlsafe_b64decode(
+            s
+            +
+            "="
+            *
+            (
+                -len(s) % 4
             )
-
         )
 
+        return json.loads(
+            raw.decode(
+                "utf-8",
+                errors="ignore",
+            )
+        )
 
-    except:
+    except Exception:
 
         return None
 
@@ -1098,58 +870,49 @@ def decode_token(tok):
 # ROOM
 # =========================================================
 
-def room_from_text(t):
+def room_from_text(text):
 
     patterns = [
 
         r'https?://live\.dichvu321\.com/t/\?p=([A-Za-z0-9_\-+/=]+)',
 
-        r'https?://[^ \n]+/t/\?p=([A-Za-z0-9_\-+/=]+)'
+        r'https?://[^ \n]+/t/\?p=([A-Za-z0-9_\-+/=]+)',
 
     ]
 
+    for pattern in patterns:
 
-    for p in patterns:
-
-        m = re.search(
-            p,
-            t or "",
-            re.I
+        match = re.search(
+            pattern,
+            text or "",
+            re.I,
         )
 
-
-        if m:
+        if match:
 
             try:
 
-                s = m.group(1)
-
+                encoded = match.group(1)
 
                 room = base64.urlsafe_b64decode(
-
-                    s
+                    encoded
                     +
                     "="
                     *
                     (
-                        -len(s) % 4
+                        -len(encoded) % 4
                     )
-
                 ).decode(
                     "utf-8",
-                    errors="ignore"
+                    errors="ignore",
                 ).strip()
 
-
                 if room.isdigit():
-
                     return room
 
-
-            except:
+            except Exception:
 
                 pass
-
 
     return None
 
@@ -1158,30 +921,29 @@ def room_from_text(t):
 # USERNAME
 # =========================================================
 
-def username_from_text(t):
+def username_from_text(text):
 
     patterns = [
 
         r'^\s*##\s*T\d+\s*[›>:]\s*([^\s\n]+)',
 
-        r'^\s*T\d+\s*[›>:]\s*([^\s\n]+)'
+        r'^\s*T\d+\s*[›>:]\s*([^\s\n]+)',
 
     ]
 
+    for pattern in patterns:
 
-    for p in patterns:
-
-        m = re.search(
-            p,
-            t or "",
-            re.M
+        match = re.search(
+            pattern,
+            text or "",
+            re.M,
         )
 
+        if match:
 
-        if m:
-
-            return m.group(1).strip()
-
+            return match.group(
+                1
+            ).strip()
 
     return None
 
@@ -1190,10 +952,7 @@ def username_from_text(t):
 # COIN
 # =========================================================
 
-def coins(
-    t,
-    d=None
-):
+def extract_coins(text, data=None):
 
     patterns = [
 
@@ -1201,56 +960,42 @@ def coins(
 
         r'BOX\s*:\s*(\d+)\s*/',
 
-        r'(\d+)\s*/\s*(\d+)'
-
     ]
 
+    for pattern in patterns:
 
-    for p in patterns:
-
-        m = re.search(
-            p,
-            t or "",
-            re.I
+        match = re.search(
+            pattern,
+            text or "",
+            re.I,
         )
 
-
-        if m:
-
-            if (
-                "TÚI" in p
-                or "TUI" in p
-                or "BOX" in p
-            ):
-
-                return safe_int(
-                    m.group(1)
-                )
-
+        if match:
 
             return safe_int(
-                m.group(1)
+                match.group(1)
             )
 
+    if data:
 
-    if d:
-
-        for k in [
+        for key in [
 
             "coins",
             "coin",
-            "gem",
+            "amount",
             "diamond",
-            "amount"
+            "diamonds",
 
         ]:
 
-            if k in d:
+            if key in data:
 
-                return safe_int(
-                    d[k]
+                value = safe_int(
+                    data[key]
                 )
 
+                if value:
+                    return value
 
     return 0
 
@@ -1259,7 +1004,7 @@ def coins(
 # PEOPLE
 # =========================================================
 
-def people(t):
+def extract_people(text):
 
     patterns = [
 
@@ -1267,37 +1012,21 @@ def people(t):
 
         r'BOX\s*:\s*\d+\s*/\s*(\d+)',
 
-        r'(\d+)\s*/\s*(\d+)'
-
     ]
 
+    for pattern in patterns:
 
-    for p in patterns:
-
-        m = re.search(
-            p,
-            t or "",
-            re.I
+        match = re.search(
+            pattern,
+            text or "",
+            re.I,
         )
 
-
-        if m:
-
-            if (
-                "TÚI" in p
-                or "TUI" in p
-                or "BOX" in p
-            ):
-
-                return safe_int(
-                    m.group(1)
-                )
-
+        if match:
 
             return safe_int(
-                m.group(2)
+                match.group(1)
             )
-
 
     return 0
 
@@ -1306,7 +1035,7 @@ def people(t):
 # JOINED
 # =========================================================
 
-def joined(t):
+def extract_joined(text):
 
     patterns = [
 
@@ -1314,26 +1043,23 @@ def joined(t):
 
         r'joined\s*:\s*(\d+)',
 
-        r'join\s*:\s*(\d+)'
+        r'join\s*:\s*(\d+)',
 
     ]
 
+    for pattern in patterns:
 
-    for p in patterns:
-
-        m = re.search(
-            p,
-            t or "",
-            re.I
+        match = re.search(
+            pattern,
+            text or "",
+            re.I,
         )
 
-
-        if m:
+        if match:
 
             return safe_int(
-                m.group(1)
+                match.group(1)
             )
-
 
     return 0
 
@@ -1342,20 +1068,18 @@ def joined(t):
 # VIEWERS
 # =========================================================
 
-def viewers(t):
+def extract_viewers(text):
 
-    m = re.search(
+    match = re.search(
         r'👀\s*(\d+)',
-        t or ""
+        text or "",
     )
 
-
-    if m:
+    if match:
 
         return safe_int(
-            m.group(1)
+            match.group(1)
         )
-
 
     return 0
 
@@ -1364,42 +1088,32 @@ def viewers(t):
 # RATE
 # =========================================================
 
-def rate(
-    t,
-    d=None
-):
+def extract_rate(text, data=None):
 
-    m = re.search(
-
+    match = re.search(
         r'Rate\s*:\s*([0-9]+(?:\.[0-9]+)?)',
-
-        t or "",
-
-        re.I
-
+        text or "",
+        re.I,
     )
 
-
-    if m:
+    if match:
 
         return safe_float(
-            m.group(1)
+            match.group(1)
         )
 
+    if data:
 
-    if d:
-
-        for k in [
+        for key in [
+            "rate",
             "ratio",
-            "rate"
         ]:
 
-            if k in d:
+            if key in data:
 
                 return safe_float(
-                    d[k]
+                    data[key]
                 )
-
 
     return 0
 
@@ -1408,65 +1122,50 @@ def rate(
 # GOODY / CHEST
 # =========================================================
 
-def is_goody(
-    t,
-    d
-):
+def detect_type(text, data):
 
-    u = (
-        t or ""
+    upper = (
+        text or ""
     ).upper()
 
-
     if re.search(
-
         r'TÚI|TUI|GOODY\s*BAG|REWARD\s*BAG',
-
-        u
-
+        upper,
     ):
 
-        return True
-
+        return "GOODY BAG"
 
     if re.search(
-
-        r'\bBOX\b|RƯƠNG|TREO|HAZİNE',
-
-        u
-
+        r'\bBOX\b|RƯƠNG|TREO|HAZİNE|HAZINE',
+        upper,
     ):
 
-        return False
+        return "CHEST"
 
+    if data:
 
-    if d:
+        value = str(
+            data.get(
+                "type",
+                ""
+            )
+        ).lower()
 
-        if d.get(
-            "is_goody_bag"
-        ) in [
-            True,
-            1,
-            "1",
-            "true",
-            "True"
-        ]:
+        if (
+            "goody" in value
+            or
+            "bag" in value
+        ):
 
-            return True
+            return "GOODY BAG"
 
+        if (
+            "chest" in value
+            or
+            "box" in value
+        ):
 
-        if d.get(
-            "is_goody_bag"
-        ) in [
-            False,
-            0,
-            "0",
-            "false",
-            "False"
-        ]:
-
-            return False
-
+            return "CHEST"
 
     return None
 
@@ -1475,93 +1174,80 @@ def is_goody(
 # TARGET TIME
 # =========================================================
 
-def target_time(
-    t,
-    d=None
+def extract_target_time(
+    text,
+    data=None,
 ):
 
     now = int(
         time.time()
     )
 
+    if data:
 
-    if d:
+        for key in [
 
-        for k in [
-
-            "time",
             "target_time",
+            "targetTime",
             "end_time",
-            "endTime"
+            "endTime",
+            "time",
 
         ]:
 
-            if k in d:
+            if key in data:
 
                 try:
 
-                    v = int(
+                    value = int(
                         float(
-                            d[k]
+                            data[key]
                         )
                     )
 
+                    if value > 10_000_000_000:
+                        return value // 1000
 
-                    if v > 10_000_000_000:
-
-                        return v // 1000
-
-
-                    if v > 1_000_000_000:
-
-                        return v
-
+                    if value > 1_000_000_000:
+                        return value
 
                     if (
-                        0 < v < 86400
+                        0
+                        <
+                        value
+                        <
+                        86400
                     ):
 
-                        return now + v
+                        return now + value
 
-
-                except:
+                except Exception:
 
                     pass
 
-
-    m = re.search(
-
+    match = re.search(
         r'TIME\s*:\s*(\d+):(\d+)',
-
-        t or "",
-
-        re.I
-
+        text or "",
+        re.I,
     )
 
+    if match:
 
-    if m:
-
-        return (
-
-            now
-
-            +
-
-            safe_int(
-                m.group(1)
-            )
-            *
-            60
-
-            +
-
-            safe_int(
-                m.group(2)
-            )
-
+        minutes = safe_int(
+            match.group(1)
         )
 
+        seconds = safe_int(
+            match.group(2)
+        )
+
+        return (
+            now
+            +
+            minutes * 60
+            +
+            seconds
+        )
 
     return now + 180
 
@@ -1570,265 +1256,217 @@ def target_time(
 # PARSE
 # =========================================================
 
-def parse(event):
+def parse_event(event):
 
-    t = (
+    text = (
         event.message.raw_text
         or ""
     )
 
-
-    d = decode_token(
-        token_from_event(
-            event
-        )
+    token = token_from_event(
+        event
     )
 
-
-    g = is_goody(
-        t,
-        d
+    data = decode_token(
+        token
     )
 
+    event_type = detect_type(
+        text,
+        data
+    )
 
-    if g is None:
+    if not event_type:
 
         return None
 
-
     username = None
 
+    if data:
 
-    for k in [
+        for key in [
 
-        "username",
-        "user",
-        "unique_id",
-        "uniqueId"
+            "username",
+            "user",
+            "unique_id",
+            "uniqueId",
 
-    ]:
+        ]:
 
-        if d and d.get(k):
+            if data.get(key):
 
-            username = str(
-                d[k]
-            )
+                username = str(
+                    data[key]
+                )
 
-            break
-
+                break
 
     username = (
-
         username
-
         or
-
         username_from_text(
-            t
+            text
         )
-
         or
-
         "bilinmiyor"
-
     )
-
 
     room = None
 
+    if data:
 
-    for k in [
+        for key in [
 
-        "room",
-        "room_id",
-        "roomid",
-        "roomId",
-        "roomID"
+            "room",
+            "room_id",
+            "roomid",
+            "roomId",
 
-    ]:
+        ]:
 
-        if d and d.get(k):
+            if data.get(key):
 
-            room = str(
-                d[k]
-            )
+                room = str(
+                    data[key]
+                )
 
-            break
-
+                break
 
     room = (
-
         room
-
         or
-
         room_from_text(
-            t
+            text
         )
-
         or
-
         "msg:"
         +
         str(
             event.message.id
         )
-
     )
 
-
-    p = people(
-        t
+    people = extract_people(
+        text
     )
 
-
-    if not p and d:
-
-        for k in [
-
-            "people",
-            "person",
-            "count",
-            "capacity"
-
-        ]:
-
-            if k in d:
-
-                p = safe_int(
-                    d[k]
-                )
-
-                if p:
-
-                    break
-
-
-    j = joined(
-        t
+    joined = extract_joined(
+        text
     )
 
-
-    if not j and d:
-
-        for k in [
-
-            "joined",
-            "join",
-            "join_count",
-            "joined_count"
-
-        ]:
-
-            if k in d:
-
-                j = safe_int(
-                    d[k]
-                )
-
-                if j:
-
-                    break
-
-
-    v = viewers(
-        t
+    viewers = extract_viewers(
+        text
     )
 
+    if data:
 
-    if not v and d:
+        if not people:
 
-        for k in [
+            for key in [
+                "people",
+                "personCount",
+                "peopleCount",
+                "participantCount",
+                "count",
+            ]:
 
-            "view",
-            "views",
-            "viewer",
-            "viewers"
+                if key in data:
 
-        ]:
+                    people = safe_int(
+                        data[key]
+                    )
 
-            if k in d:
+                    if people:
+                        break
 
-                v = safe_int(
-                    d[k]
-                )
+        if not joined:
 
-                if v:
+            for key in [
+                "joined",
+                "join",
+                "joinCount",
+                "joinedCount",
+            ]:
 
-                    break
+                if key in data:
 
+                    joined = safe_int(
+                        data[key]
+                    )
+
+                    if joined:
+                        break
+
+        if not viewers:
+
+            for key in [
+                "viewers",
+                "viewerCount",
+                "views",
+                "view",
+            ]:
+
+                if key in data:
+
+                    viewers = safe_int(
+                        data[key]
+                    )
+
+                    if viewers:
+                        break
 
     live = ""
 
+    if data:
 
-    if d:
-
-        for k in [
-
-            "openitok",
+        for key in [
             "live",
             "live_url",
-            "url"
-
+            "liveUrl",
+            "url",
         ]:
 
+            value = data.get(
+                key
+            )
+
             if (
-
-                d.get(k)
-
+                value
                 and
-
-                str(
-                    d[k]
-                ).startswith(
+                str(value).startswith(
                     (
                         "http://",
-                        "https://"
+                        "https://",
                     )
                 )
-
             ):
 
                 live = str(
-                    d[k]
+                    value
                 )
 
                 break
 
+    if not live:
 
-    live = (
-
-        live
-
-        or
-
-        (
-            f"https://www.tiktok.com/share/live/{room}"
-
-            if room
-
-            else
-
-            f"https://www.tiktok.com/@{username}/live"
+        live = (
+            "https://www.tiktok.com/@"
+            +
+            username
+            +
+            "/live"
         )
-
-    )
-
 
     return {
 
         "type":
-            (
-                "GOODY BAG"
-                if g
-                else
-                "CHEST"
-            ),
+            event_type,
 
         "box_name":
             (
                 "Goody Bag"
-                if g
+                if event_type
+                == "GOODY BAG"
                 else
                 "Hazine Sandığı"
             ),
@@ -1837,25 +1475,25 @@ def parse(event):
             username,
 
         "coins":
-            coins(
-                t,
-                d
+            extract_coins(
+                text,
+                data,
             ),
 
         "people":
-            p,
+            people,
 
         "joined":
-            j,
+            joined,
 
         "rate":
-            rate(
-                t,
-                d
+            extract_rate(
+                text,
+                data,
             ),
 
         "view":
-            v,
+            viewers,
 
         "room":
             room,
@@ -1864,9 +1502,9 @@ def parse(event):
             live,
 
         "target_time":
-            target_time(
-                t,
-                d
+            extract_target_time(
+                text,
+                data,
             ),
 
         "detected_at":
@@ -1880,8 +1518,7 @@ def parse(event):
         "source_chat_id":
             safe_int(
                 event.chat_id
-            )
-
+            ),
     }
 
 
@@ -1891,78 +1528,73 @@ def parse(event):
 
 def make_event_key(d):
 
-    return "|".join([
+    return "|".join(
+        [
 
-        d["type"],
+            d["type"],
 
-        str(
-            d.get(
-                "room",
-                ""
-            )
-        ),
+            str(
+                d.get(
+                    "room",
+                    "",
+                )
+            ),
 
-        str(
-            d.get(
-                "username",
-                ""
-            )
-        ).lower(),
+            str(
+                d.get(
+                    "username",
+                    "",
+                )
+            ).lower(),
 
-        str(
-            d.get(
-                "coins",
-                0
-            )
-        ),
+            str(
+                d.get(
+                    "coins",
+                    0,
+                )
+            ),
 
-        str(
-            d.get(
-                "people",
-                0
-            )
-        ),
+            str(
+                d.get(
+                    "people",
+                    0,
+                )
+            ),
 
-        str(
-            d.get(
-                "source_message_id",
-                0
-            )
-        )
+            str(
+                d.get(
+                    "source_message_id",
+                    0,
+                )
+            ),
 
-    ])
+        ]
+    )
 
 
 # =========================================================
 # RADAR'A EKLE
 # =========================================================
 
-def add(d):
+def add_to_radar(d):
 
     if not d:
-
         return False
-
 
     room = d.get(
         "room"
     )
 
-
     if not room:
-
         return False
-
 
     event_key = make_event_key(
         d
     )
 
-
     if event_key in processed_signatures:
 
         return False
-
 
     if db_exists(
         event_key
@@ -1974,57 +1606,42 @@ def add(d):
 
         return False
 
-
     target = (
 
         LIVE_GOODY_BAGS
 
         if d["type"]
-        == "GOODY BAG"
+        ==
+        "GOODY BAG"
 
         else
 
         LIVE_CHESTS
-
     )
-
 
     target[
         room
     ] = d
-
 
     db_save(
         d,
         event_key
     )
 
-
     processed_signatures.add(
         event_key
     )
 
-
     print(
-
         "[RADAR]",
-
         d["type"],
-
         "|",
-
         d["username"],
-
         "| COIN:",
-
         d["coins"],
-
         "| KİŞİ:",
-
-        d["people"]
-
+        d["people"],
     )
-
 
     return True
 
@@ -2039,20 +1656,21 @@ def alarm_exists(
 
     try:
 
-        row = db.execute("""
-        SELECT 1
-        FROM alarm_history
-        WHERE alarm_key=?
-        LIMIT 1
-        """, (
-            alarm_key,
-        )).fetchone()
-
+        row = db.execute(
+            """
+            SELECT 1
+            FROM alarm_history
+            WHERE alarm_key=?
+            LIMIT 1
+            """,
+            (
+                alarm_key,
+            ),
+        ).fetchone()
 
         return row is not None
 
-
-    except:
+    except Exception:
 
         return False
 
@@ -2060,36 +1678,35 @@ def alarm_exists(
 def save_alarm(
     alarm_key,
     event_key,
-    alarm_type
+    alarm_type,
 ):
 
     try:
 
-        db.execute("""
-        INSERT OR IGNORE INTO alarm_history
-        (
-            alarm_key,
-            event_key,
-            alarm_type,
-            created_at
-        )
-        VALUES (?, ?, ?, ?)
-        """, (
-            alarm_key,
-            event_key,
-            alarm_type,
-            int(
-                time.time()
+        db.execute(
+            """
+            INSERT OR IGNORE INTO alarm_history
+            (
+                alarm_key,
+                event_key,
+                alarm_type,
+                created_at
             )
-        ))
-
+            VALUES (?, ?, ?, ?)
+            """,
+            (
+                alarm_key,
+                event_key,
+                alarm_type,
+                int(time.time()),
+            ),
+        )
 
         db.commit()
 
         return True
 
-
-    except:
+    except Exception:
 
         return False
 
@@ -2098,11 +1715,9 @@ def get_alarms(d):
 
     alarms = []
 
-
     event_key = make_event_key(
         d
     )
-
 
     coin = safe_int(
         d.get(
@@ -2110,117 +1725,92 @@ def get_alarms(d):
         )
     )
 
-
-    person = safe_int(
+    people = safe_int(
         d.get(
             "people"
         )
     )
 
-
     if (
-
         COIN_ALARM_LIMIT > 0
-
         and
-
-        coin >=
-        COIN_ALARM_LIMIT
-
+        coin >= COIN_ALARM_LIMIT
     ):
 
-        alarms.append({
+        alarms.append(
+            {
+                "type":
+                    "COIN",
 
-            "type":
-                "COIN",
+                "title":
+                    "🚨 COIN ALARMI",
 
-            "title":
-                "🚨 COIN ALARMI",
-
-            "key":
-                (
-                    event_key
-                    +
-                    "|COIN|"
-                    +
-                    str(
-                        COIN_ALARM_LIMIT
-                    )
-                )
-
-        })
-
+                "key":
+                    (
+                        event_key
+                        +
+                        "|COIN|"
+                        +
+                        str(
+                            COIN_ALARM_LIMIT
+                        )
+                    ),
+            }
+        )
 
     if (
-
         PEOPLE_ALARM_LIMIT > 0
-
         and
-
-        person > 0
-
+        people > 0
         and
-
-        person <=
-        PEOPLE_ALARM_LIMIT
-
+        people <= PEOPLE_ALARM_LIMIT
     ):
 
-        alarms.append({
+        alarms.append(
+            {
+                "type":
+                    "PEOPLE",
 
-            "type":
-                "PEOPLE",
+                "title":
+                    "⚠️ DÜŞÜK KİŞİ ALARMI",
 
-            "title":
-                "⚠️ DÜŞÜK KİŞİ ALARMI",
-
-            "key":
-                (
-                    event_key
-                    +
-                    "|PEOPLE|"
-                    +
-                    str(
-                        PEOPLE_ALARM_LIMIT
-                    )
-                )
-
-        })
-
+                "key":
+                    (
+                        event_key
+                        +
+                        "|PEOPLE|"
+                        +
+                        str(
+                            PEOPLE_ALARM_LIMIT
+                        )
+                    ),
+            }
+        )
 
     return alarms
 
 
 # =========================================================
-# TELEGRAM MESAJ
+# TELEGRAM NORMAL MESAJ
 # =========================================================
 
 async def send_tg(d):
 
     global http_session
 
-
     if not http_session:
-
         return
 
-
     title = (
-
         "🟪 GOODY BAG"
-
         if d["type"]
-        == "GOODY BAG"
-
+        ==
+        "GOODY BAG"
         else
-
         "🟨 HAZİNE SANDIĞI"
-
     )
 
-
     text = (
-
         f"{title}\n\n"
 
         f"👤 Kullanıcı: "
@@ -2243,32 +1833,26 @@ async def send_tg(d):
 
         f"🏠 Oda: "
         f"{d['room']}\n"
-
     )
-
 
     if d.get("live"):
 
         text += (
-            f"\n🔴 "
-            f"{d['live']}"
+            "\n🔴 "
+            +
+            d["live"]
         )
-
 
     url = (
         "https://api.telegram.org/"
         f"bot{BOT_TOKEN}/sendMessage"
     )
 
-
     try:
 
         async with http_session.post(
-
             url,
-
             json={
-
                 "chat_id":
                     TARGET_CHAT_ID,
 
@@ -2276,10 +1860,8 @@ async def send_tg(d):
                     text,
 
                 "disable_web_page_preview":
-                    True
-
-            }
-
+                    True,
+            },
         ) as response:
 
             if response.status != 200:
@@ -2287,34 +1869,30 @@ async def send_tg(d):
                 print(
                     "[TELEGRAM HATA]",
                     response.status,
-                    await response.text()
+                    await response.text(),
                 )
-
 
     except Exception as e:
 
         print(
             "[TELEGRAM]",
-            repr(e)
+            repr(e),
         )
 
 
 # =========================================================
-# ALARM MESAJI
+# ALARM MESAJ
 # =========================================================
 
 async def send_alarm(
     d,
-    alarm
+    alarm,
 ):
 
     global http_session
 
-
     if not http_session:
-
         return
-
 
     if alarm["type"] == "COIN":
 
@@ -2334,23 +1912,16 @@ async def send_alarm(
             f"🎯 LİMİT: {PEOPLE_ALARM_LIMIT}"
         )
 
-
     box = (
-
         "🟪 GOODY BAG"
-
         if d["type"]
-        == "GOODY BAG"
-
+        ==
+        "GOODY BAG"
         else
-
         "🟨 HAZİNE SANDIĞI"
-
     )
 
-
     text = (
-
         f"{title}\n\n"
 
         f"{box}\n"
@@ -2371,32 +1942,26 @@ async def send_alarm(
 
         f"🏠 Oda: "
         f"{d['room']}\n"
-
     )
-
 
     if d.get("live"):
 
         text += (
-            f"\n🔴 "
-            f"{d['live']}"
+            "\n🔴 "
+            +
+            d["live"]
         )
-
 
     url = (
         "https://api.telegram.org/"
         f"bot{BOT_TOKEN}/sendMessage"
     )
 
-
     try:
 
         async with http_session.post(
-
             url,
-
             json={
-
                 "chat_id":
                     TARGET_CHAT_ID,
 
@@ -2404,44 +1969,38 @@ async def send_alarm(
                     text,
 
                 "disable_web_page_preview":
-                    True
-
-            }
-
+                    True,
+            },
         ) as response:
 
             if response.status != 200:
 
                 print(
                     "[ALARM]",
-                    response.status
+                    response.status,
                 )
-
 
     except Exception as e:
 
         print(
             "[ALARM]",
-            repr(e)
+            repr(e),
         )
 
 
 # =========================================================
-# SENİN ÖZEL SOHBETİNE YENİ ÜYE BİLDİRİMİ
+# YENİ VIP ÜYE BİLDİRİMİ
 # =========================================================
 
 async def notify_new_vip(
     user,
-    expires_at
+    expires_at,
 ):
 
     global http_session
 
-
     if not http_session:
-
         return
-
 
     if not ADMIN_CHAT_ID:
 
@@ -2451,25 +2010,23 @@ async def notify_new_vip(
 
         return
 
-
     username = (
-        f"@{user.username}"
+        "@"
+        +
+        user.username
         if user.username
         else
         "Kullanıcı adı yok"
     )
 
-
     date_text = time.strftime(
         "%d.%m.%Y %H:%M",
         time.localtime(
             expires_at
-        )
+        ),
     )
 
-
     text = (
-
         "🆕 YENİ VIP ÜYE\n\n"
 
         f"👤 İsim: "
@@ -2487,24 +2044,18 @@ async def notify_new_vip(
         f"{date_text}\n\n"
 
         "🌐 Mini App erişimi aktif."
-
     )
-
 
     url = (
         "https://api.telegram.org/"
         f"bot{BOT_TOKEN}/sendMessage"
     )
 
-
     try:
 
         async with http_session.post(
-
             url,
-
             json={
-
                 "chat_id":
                     ADMIN_CHAT_ID,
 
@@ -2512,10 +2063,8 @@ async def notify_new_vip(
                     text,
 
                 "disable_web_page_preview":
-                    True
-
-            }
-
+                    True,
+            },
         ) as response:
 
             if response.status != 200:
@@ -2523,7 +2072,7 @@ async def notify_new_vip(
                 print(
                     "[ADMIN BİLDİRİM]",
                     response.status,
-                    await response.text()
+                    await response.text(),
                 )
 
             else:
@@ -2532,17 +2081,16 @@ async def notify_new_vip(
                     "[VIP] Admin bildirimi gönderildi."
                 )
 
-
     except Exception as e:
 
         print(
             "[ADMIN BİLDİRİM]",
-            repr(e)
+            repr(e),
         )
 
 
 # =========================================================
-# QUEUE
+# TELEGRAM QUEUE
 # =========================================================
 
 async def sender():
@@ -2550,7 +2098,6 @@ async def sender():
     while True:
 
         job = await telegram_queue.get()
-
 
         try:
 
@@ -2560,22 +2107,19 @@ async def sender():
                     job["data"]
                 )
 
-
             elif job["kind"] == "alarm":
 
                 await send_alarm(
                     job["data"],
-                    job["alarm"]
+                    job["alarm"],
                 )
-
 
         except Exception as e:
 
             print(
                 "[SENDER]",
-                repr(e)
+                repr(e),
             )
-
 
         finally:
 
@@ -2587,31 +2131,30 @@ async def sender():
 # =========================================================
 
 async def bot_id(
-    update,
-    context
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
 ):
 
     user = update.effective_user
 
-
     if not user:
-
         return
 
-
-    await update.message.reply_text(
-
-        "🆔 Telegram bilgileriniz:\n\n"
-
-        f"ID: `{user.id}`\n"
-
-        f"Username: "
-        f"@{user.username}"
+    username = (
+        "@"
+        +
+        user.username
         if user.username
         else
-        f"ID: `{user.id}`",
+        "Yok"
+    )
 
-        parse_mode="Markdown"
+    await update.message.reply_text(
+        (
+            "🆔 TELEGRAM BİLGİLERİN\n\n"
+            f"ID: {user.id}\n"
+            f"Username: {username}"
+        )
     )
 
 
@@ -2620,69 +2163,55 @@ async def bot_id(
 # =========================================================
 
 async def bot_davet(
-    update,
-    context
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
 ):
 
     user = update.effective_user
 
-
     if not user:
-
         return
-
 
     if not ADMIN_USER_ID:
 
         await update.message.reply_text(
-
             "⚠️ ADMIN_USER_ID ayarlanmamış."
-
         )
 
         return
-
 
     if user.id != ADMIN_USER_ID:
 
         await update.message.reply_text(
-
-            "⛔ Bu komut sadece yöneticinin kullanımına açıktır."
-
+            "⛔ Bu komut sadece yöneticiye açıktır."
         )
 
         return
 
-
     token = create_invite_token()
-
 
     link = make_invite_link(
         token
     )
 
-
     await update.message.reply_text(
+        (
+            "🎟️ YENİ VIP DAVET LİNKİ\n\n"
 
-        "🎟️ YENİ VIP DAVET LİNKİ\n\n"
+            f"⏰ Geçerlilik: "
+            f"{INVITE_EXPIRE_MINUTES} dakika\n"
 
-        f"⏰ Geçerlilik: "
-        f"{INVITE_EXPIRE_MINUTES} dakika\n"
+            "👤 Kullanım: 1 kişi\n\n"
 
-        "👤 Kullanım: "
-        "1 kişi\n\n"
+            "👇 Müşteriye bu linki gönder:\n\n"
 
-        "👇 Bu linki müşteriye gönder:\n\n"
-
-        f"{link}",
-
-        disable_web_page_preview=True
-
+            f"{link}"
+        ),
+        disable_web_page_preview=True,
     )
 
-
     print(
-        "[DAVET] Yeni davet üretildi."
+        "[DAVET] Yeni VIP davet oluşturuldu."
     )
 
 
@@ -2691,17 +2220,14 @@ async def bot_davet(
 # =========================================================
 
 async def bot_uyeler(
-    update,
-    context
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
 ):
 
     user = update.effective_user
 
-
     if not user:
-
         return
-
 
     if user.id != ADMIN_USER_ID:
 
@@ -2711,86 +2237,65 @@ async def bot_uyeler(
 
         return
 
-
-    rows = db.execute("""
-    SELECT *
-    FROM vip_users
-    ORDER BY verified_at DESC
-    LIMIT 50
-    """).fetchall()
-
+    rows = db.execute(
+        """
+        SELECT *
+        FROM vip_users
+        ORDER BY verified_at DESC
+        LIMIT 50
+        """
+    ).fetchall()
 
     if not rows:
 
         await update.message.reply_text(
-
             "📭 Henüz VIP üye yok."
-
         )
 
         return
 
-
-    text = (
-        "👑 VIP ÜYELER\n\n"
-    )
-
+    text = "👑 VIP ÜYELER\n\n"
 
     now = int(
         time.time()
     )
 
-
-    for i, row in enumerate(
+    for index, row in enumerate(
         rows,
-        1
+        1,
     ):
 
         remaining = (
-
             safe_int(
                 row["expires_at"]
             )
             -
             now
-
         )
-
 
         days = max(
             0,
-            remaining
-            //
-            86400
+            remaining // 86400
         )
 
-
         username = (
-
             "@"
             +
             row["username"]
-
             if row["username"]
-
             else
-
             "-"
         )
 
-
         text += (
-
-            f"{i}. "
+            f"{index}. "
             f"{row['first_name'] or '-'} "
             f"{username}\n"
 
             f"🆔 {row['telegram_id']}\n"
 
             f"⏳ {days} gün\n\n"
-
         )
-
 
     await update.message.reply_text(
         text
@@ -2802,17 +2307,14 @@ async def bot_uyeler(
 # =========================================================
 
 async def bot_silvip(
-    update,
-    context
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
 ):
 
     user = update.effective_user
 
-
     if not user:
-
         return
-
 
     if user.id != ADMIN_USER_ID:
 
@@ -2822,23 +2324,17 @@ async def bot_silvip(
 
         return
 
-
     if not context.args:
 
         await update.message.reply_text(
-
-            "Kullanım:\n"
-            "/silvip TELEGRAM_ID"
-
+            "Kullanım:\n/silvip TELEGRAM_ID"
         )
 
         return
 
-
     telegram_id = safe_int(
         context.args[0]
     )
-
 
     if not telegram_id:
 
@@ -2848,24 +2344,23 @@ async def bot_silvip(
 
         return
 
-
-    db.execute("""
-    DELETE FROM vip_users
-    WHERE telegram_id=?
-    """, (
-        telegram_id,
-    ))
-
+    db.execute(
+        """
+        DELETE FROM vip_users
+        WHERE telegram_id=?
+        """,
+        (
+            telegram_id,
+        ),
+    )
 
     db.commit()
 
-
     await update.message.reply_text(
-
-        "✅ VIP üyelik kaldırıldı.\n\n"
-
-        f"🆔 {telegram_id}"
-
+        (
+            "✅ VIP üyelik kaldırıldı.\n\n"
+            f"🆔 {telegram_id}"
+        )
     )
 
 
@@ -2874,165 +2369,120 @@ async def bot_silvip(
 # =========================================================
 
 async def bot_start(
-    update,
-    context
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
 ):
 
     user = update.effective_user
 
-
     if not user:
-
         return
-
 
     args = context.args
 
-
     # =====================================================
-    # DAVET LİNKİ
+    # ÖZEL VIP DAVETİ
     # =====================================================
 
     if (
-
         args
-
         and
-
         args[0].startswith(
             "invite_"
         )
-
     ):
 
         token = args[0][7:]
 
-
         ok, message = use_invite_token(
-
             token,
-
             user.id,
-
             user.username or "",
-
-            user.first_name or ""
-
+            user.first_name or "",
         )
-
 
         if not ok:
 
             await update.message.reply_text(
-
-                "❌ ERİŞİM VERİLEMEDİ\n\n"
-
-                f"{message}\n\n"
-
-                "Yeni bir davet bağlantısı "
-                "almanız gerekiyor."
-
+                (
+                    "❌ ERİŞİM VERİLEMEDİ\n\n"
+                    f"{message}\n\n"
+                    "Yeni bir VIP davet bağlantısı "
+                    "almanız gerekiyor."
+                )
             )
 
             return
-
 
         vip = get_vip_user(
             user.id
         )
 
-
         expires_at = safe_int(
             vip["expires_at"]
         )
 
-
-        # -------------------------------------------------
-        # KULLANICIYA BAŞARI
-        # -------------------------------------------------
-
-        keyboard = [[
-
-            InlineKeyboardButton(
-
-                "🌐 VIP RADARI AÇ",
-
-                web_app=WebAppInfo(
-                    url=MINI_APP_URL
+        keyboard = [
+            [
+                InlineKeyboardButton(
+                    "🌐 VIP RADARI AÇ",
+                    web_app=WebAppInfo(
+                        url=MINI_APP_URL
+                    ),
                 )
-
-            )
-
-        ]]
-
+            ]
+        ]
 
         await update.message.reply_text(
+            (
+                f"✅ Doğrulama Başarılı, "
+                f"{user.first_name or 'VIP Üye'}!\n\n"
 
-            f"✅ Doğrulama Başarılı, "
-            f"{user.first_name or 'VIP Üye'}!\n\n"
+                "👑 VIP erişiminiz aktif.\n\n"
 
-            "👑 VIP erişiminiz aktif.\n"
-
-            "👇 Radarı açmak için butona basın:",
-
-            reply_markup=
-                InlineKeyboardMarkup(
-                    keyboard
-                )
-
+                "👇 Radarı açmak için:"
+            ),
+            reply_markup=InlineKeyboardMarkup(
+                keyboard
+            ),
         )
-
-
-        # -------------------------------------------------
-        # SANA BİLDİR
-        # -------------------------------------------------
 
         await notify_new_vip(
-
             user,
-
-            expires_at
-
+            expires_at,
         )
-
 
         print(
             "[VIP] YENİ ÜYE:",
             user.id,
-            user.username
+            user.username,
         )
-
 
         return
 
-
     # =====================================================
-    # ESKİ vip_onayli LİNKLERİ KAPALI
+    # ESKİ vip_onayli SİSTEMİNİ KAPAT
     # =====================================================
 
     if (
-
         args
-
         and
-
         args[0]
         ==
         "vip_onayli"
-
     ):
 
         await update.message.reply_text(
+            (
+                "⛔ Bu doğrulama yöntemi artık "
+                "geçerli değil.\n\n"
 
-            "⛔ Bu doğrulama bağlantısı artık geçerli değil.\n\n"
-
-            "VIP erişimi yalnızca özel davet "
-            "bağlantısıyla verilmektedir."
-
+                "VIP erişimi yalnızca özel "
+                "davet bağlantısıyla verilmektedir."
+            )
         )
 
         return
-
 
     # =====================================================
     # ZATEN VIP
@@ -3042,63 +2492,55 @@ async def bot_start(
         user.id
     ):
 
-        keyboard = [[
-
-            InlineKeyboardButton(
-
-                "🌐 VIP RADARI AÇ",
-
-                web_app=WebAppInfo(
-                    url=MINI_APP_URL
+        keyboard = [
+            [
+                InlineKeyboardButton(
+                    "🌐 VIP RADARI AÇ",
+                    web_app=WebAppInfo(
+                        url=MINI_APP_URL
+                    ),
                 )
-
-            )
-
-        ]]
-
+            ]
+        ]
 
         await update.message.reply_text(
+            (
+                f"👑 Hoş geldin "
+                f"{user.first_name or 'VIP Üye'}!\n\n"
 
-            f"👑 Hoş geldin "
-            f"{user.first_name or 'VIP Üye'}!\n\n"
+                "VIP erişiminiz aktif.\n\n"
 
-            "VIP erişiminiz aktif.\n"
-
-            "👇 Radarı açabilirsiniz:",
-
-            reply_markup=
-                InlineKeyboardMarkup(
-                    keyboard
-                )
-
+                "👇 Radarı açabilirsiniz:"
+            ),
+            reply_markup=InlineKeyboardMarkup(
+                keyboard
+            ),
         )
-
 
         return
 
-
     # =====================================================
-    # NORMAL / YETKİSİZ
+    # NORMAL KULLANICI
     # =====================================================
 
     await update.message.reply_text(
+        (
+            "🔒 ERİŞİM KISITLI\n\n"
 
-        "🔒 ERİŞİM KISITLI\n\n"
+            "Bu bot yalnızca davetli VIP "
+            "üyeler için kullanılabilir.\n\n"
 
-        "Bu bot sadece davetli VIP üyeler "
-        "için kullanılabilir.\n\n"
-
-        "Geçerli bir VIP davet bağlantınız "
-        "yoksa radar açılmaz."
-
+            "Geçerli VIP davet bağlantınız "
+            "yoksa radar açılmaz."
+        )
     )
 
 
 # =========================================================
-# MINI APP HTML
+# MINI APP + NORMAL RADAR HTML
 # =========================================================
 
-MINI_APP_HTML = r"""
+RADAR_HTML = r"""
 <!DOCTYPE html>
 
 <html lang="tr">
@@ -3183,9 +2625,7 @@ body {
         );
 
     -webkit-background-clip: text;
-
-    -webkit-text-fill-color:
-        transparent;
+    -webkit-text-fill-color: transparent;
 }
 
 .sub {
@@ -3223,11 +2663,6 @@ body {
 
     font-weight: 1000;
 }
-
-
-/* =====================================================
-   İKİ SÜTUN
-   ===================================================== */
 
 .sections {
 
@@ -3430,7 +2865,6 @@ body {
     position: absolute;
 
     top: 6px;
-
     right: 6px;
 
     z-index: 10;
@@ -3483,11 +2917,6 @@ body {
     }
 }
 
-
-/* =====================================================
-   ALEV
-   ===================================================== */
-
 .card.hot {
 
     border-color:
@@ -3513,7 +2942,6 @@ body {
     100% {
 
         box-shadow:
-
             0 0 6px
             rgba(255,100,0,.30),
 
@@ -3524,7 +2952,6 @@ body {
     50% {
 
         box-shadow:
-
             0 0 13px
             rgba(255,100,0,.70),
 
@@ -3573,11 +3000,6 @@ body {
     }
 }
 
-
-/* =====================================================
-   İSİM
-   ===================================================== */
-
 .user-row {
 
     width: 100%;
@@ -3608,11 +3030,6 @@ body {
     overflow-wrap:
         anywhere;
 }
-
-
-/* =====================================================
-   COIN
-   ===================================================== */
 
 .coin-box {
 
@@ -3704,11 +3121,6 @@ body {
     }
 }
 
-
-/* =====================================================
-   BİLGİ
-   ===================================================== */
-
 .info-grid {
 
     width: 100%;
@@ -3772,11 +3184,6 @@ body {
     overflow-wrap:
         anywhere;
 }
-
-
-/* =====================================================
-   CANLI
-   ===================================================== */
 
 .live {
 
@@ -3846,11 +3253,6 @@ body {
     font-weight: 1000;
 }
 
-
-/* =====================================================
-   BÜYÜK EKRAN
-   ===================================================== */
-
 @media(min-width:600px) {
 
     body {
@@ -3890,11 +3292,6 @@ body {
         font-size: 10px;
     }
 }
-
-
-/* =====================================================
-   DAR TELEFON
-   ===================================================== */
 
 @media(max-width:340px) {
 
@@ -3978,7 +3375,6 @@ body {
 
 <body>
 
-
 <div class="head">
 
     <div class="title">
@@ -4000,7 +3396,6 @@ body {
 
 
 <div class="sections">
-
 
 <section class="panel">
 
@@ -4063,7 +3458,6 @@ body {
 
 </section>
 
-
 </div>
 
 
@@ -4072,10 +3466,20 @@ body {
 const tg =
     window.Telegram.WebApp;
 
+const insideTelegram =
+    !!(
+        tg
+        &&
+        tg.initData
+    );
 
-tg.ready();
 
-tg.expand();
+if (tg) {
+
+    tg.ready();
+    tg.expand();
+
+}
 
 
 const goodyList =
@@ -4106,10 +3510,8 @@ const statusEl =
 
 let firstLoad = true;
 
-
 const knownItems =
     new Set();
-
 
 const freshItems =
     new Map();
@@ -4233,7 +3635,6 @@ function isNewItem(d) {
         key
     );
 
-
     return false;
 }
 
@@ -4251,10 +3652,8 @@ function card(d) {
     const isGoody =
         d.type === "GOODY BAG";
 
-
     const hot =
         isHot(d);
-
 
     const fresh =
         isNewItem(d);
@@ -4365,7 +3764,6 @@ function card(d) {
 
             <div class="info-grid">
 
-
                 <div class="info">
 
                     <span class="info-label">
@@ -4424,7 +3822,6 @@ function card(d) {
                     </span>
 
                 </div>
-
 
             </div>
 
@@ -4506,28 +3903,40 @@ async function loadRadar() {
 
     try {
 
+        const endpoint =
+            insideTelegram
+            ?
+            "/api/miniapp-data"
+            :
+            "/api/all";
+
+
+        const headers = {};
+
+
+        if (insideTelegram) {
+
+            headers[
+                "X-Telegram-Init-Data"
+            ] =
+                tg.initData;
+
+        }
+
+
         const response =
             await fetch(
-
-                "/api/miniapp-data",
-
+                endpoint,
                 {
-
                     method:
                         "GET",
 
-                    headers: {
-
-                        "X-Telegram-Init-Data":
-                            tg.initData
-
-                    },
+                    headers:
+                        headers,
 
                     cache:
                         "no-store"
-
                 }
-
             );
 
 
@@ -4535,9 +3944,7 @@ async function loadRadar() {
             await response.json();
 
 
-        if (
-            !response.ok
-        ) {
+        if (!response.ok) {
 
             statusEl.textContent =
                 "🔴 VIP ERİŞİM YOK";
@@ -4575,12 +3982,14 @@ async function loadRadar() {
 
         const goodies =
             data.goody_bags
-            || [];
+            ||
+            [];
 
 
         const chests =
             data.chests
-            || [];
+            ||
+            [];
 
 
         if (firstLoad) {
@@ -4604,24 +4013,16 @@ async function loadRadar() {
 
 
         renderList(
-
             goodies,
-
             goodyList,
-
             goodyCount
-
         );
 
 
         renderList(
-
             chests,
-
             chestList,
-
             chestCount
-
         );
 
 
@@ -4634,10 +4035,8 @@ async function loadRadar() {
             error
         );
 
-
         statusEl.textContent =
             "🔴 BAĞLANTI HATASI";
-
     }
 }
 
@@ -4659,7 +4058,19 @@ setInterval(
 
 
 # =========================================================
-# VERIFY SAYFASI
+# MINI APP HTML
+# =========================================================
+#
+# RADAR_HTML aynı zamanda Mini App tasarımıdır.
+# Normal tarayıcıda /api/all,
+# Telegram Mini App'te /api/miniapp-data kullanır.
+# =========================================================
+
+MINI_APP_HTML = RADAR_HTML
+
+
+# =========================================================
+# VERIFY HTML
 # =========================================================
 
 VERIFY_HTML = r"""
@@ -4830,7 +4241,6 @@ const token =
         "token"
     );
 
-
 const area =
     document.getElementById(
         "area"
@@ -4852,7 +4262,6 @@ if (!token) {
 } else {
 
     const url =
-
         "https://t.me/YeniBirAirdropBot"
         +
         "?start=invite_"
@@ -4886,7 +4295,7 @@ if (!token) {
 
 
 # =========================================================
-# HTTP
+# HTTP PAGES
 # =========================================================
 
 async def radar_page(
@@ -4894,13 +4303,9 @@ async def radar_page(
 ):
 
     return web.Response(
-
         text=RADAR_HTML,
-
         content_type="text/html",
-
-        charset="utf-8"
-
+        charset="utf-8",
     )
 
 
@@ -4909,13 +4314,9 @@ async def miniapp_page(
 ):
 
     return web.Response(
-
         text=MINI_APP_HTML,
-
         content_type="text/html",
-
-        charset="utf-8"
-
+        charset="utf-8",
     )
 
 
@@ -4924,13 +4325,9 @@ async def verify_page(
 ):
 
     return web.Response(
-
         text=VERIFY_HTML,
-
         content_type="text/html",
-
-        charset="utf-8"
-
+        charset="utf-8",
     )
 
 
@@ -4943,35 +4340,26 @@ async def api_miniapp_data(
 ):
 
     init_data = request.headers.get(
-
         "X-Telegram-Init-Data",
-
-        ""
-
+        "",
     )
-
 
     user = validate_telegram_init_data(
         init_data
     )
 
-
     if not user:
 
         return web.json_response(
-
             {
                 "status":
                     "error",
 
                 "message":
-                    "Telegram doğrulaması başarısız."
+                    "Telegram doğrulaması başarısız.",
             },
-
-            status=401
-
+            status=401,
         )
-
 
     telegram_id = safe_int(
         user.get(
@@ -4979,50 +4367,45 @@ async def api_miniapp_data(
         )
     )
 
-
     if not is_vip(
         telegram_id
     ):
 
         return web.json_response(
-
             {
                 "status":
                     "error",
 
                 "message":
-                    "VIP erişiminiz yok."
+                    "VIP erişiminiz yok.",
             },
-
-            status=403
-
+            status=403,
         )
 
+    return web.json_response(
+        {
+            "status":
+                "success",
 
-    return web.json_response({
+            "user":
+                user,
 
-        "status":
-            "success",
+            "goody_bags":
+                list(
+                    LIVE_GOODY_BAGS.values()
+                ),
 
-        "user":
-            user,
+            "chests":
+                list(
+                    LIVE_CHESTS.values()
+                ),
 
-        "goody_bags":
-            list(
-                LIVE_GOODY_BAGS.values()
-            ),
-
-        "chests":
-            list(
-                LIVE_CHESTS.values()
-            ),
-
-        "server_time":
-            int(
-                time.time()
-            )
-
-    })
+            "server_time":
+                int(
+                    time.time()
+                ),
+        }
+    )
 
 
 # =========================================================
@@ -5033,33 +4416,30 @@ async def api_all(
     request
 ):
 
-    stats = db_stats()
+    return web.json_response(
+        {
+            "status":
+                "online",
 
+            "server_time":
+                int(
+                    time.time()
+                ),
 
-    return web.json_response({
+            "chests":
+                list(
+                    LIVE_CHESTS.values()
+                ),
 
-        "status":
-            "online",
+            "goody_bags":
+                list(
+                    LIVE_GOODY_BAGS.values()
+                ),
 
-        "server_time":
-            int(
-                time.time()
-            ),
-
-        "chests":
-            list(
-                LIVE_CHESTS.values()
-            ),
-
-        "goody_bags":
-            list(
-                LIVE_GOODY_BAGS.values()
-            ),
-
-        "stats":
-            stats
-
-    })
+            "stats":
+                db_stats(),
+        }
+    )
 
 
 async def api_boxes(
@@ -5067,11 +4447,9 @@ async def api_boxes(
 ):
 
     return web.json_response(
-
         list(
             LIVE_CHESTS.values()
         )
-
     )
 
 
@@ -5080,11 +4458,9 @@ async def api_goody(
 ):
 
     return web.json_response(
-
         list(
             LIVE_GOODY_BAGS.values()
         )
-
     )
 
 
@@ -5094,40 +4470,39 @@ async def api_status(
 
     stats = db_stats()
 
+    return web.json_response(
+        {
+            "status":
+                "online",
 
-    return web.json_response({
+            "chests":
+                len(
+                    LIVE_CHESTS
+                ),
 
-        "status":
-            "online",
+            "goody_bags":
+                len(
+                    LIVE_GOODY_BAGS
+                ),
 
-        "chests":
-            len(
-                LIVE_CHESTS
-            ),
+            "history":
+                stats["total"],
 
-        "goody_bags":
-            len(
-                LIVE_GOODY_BAGS
-            ),
+            "total_coins":
+                stats["total_coins"],
 
-        "history":
-            stats["total"],
+            "server_time":
+                int(
+                    time.time()
+                ),
 
-        "total_coins":
-            stats["total_coins"],
+            "coin_alarm":
+                COIN_ALARM_LIMIT,
 
-        "server_time":
-            int(
-                time.time()
-            ),
-
-        "coin_alarm":
-            COIN_ALARM_LIMIT,
-
-        "people_alarm":
-            PEOPLE_ALARM_LIMIT
-
-    })
+            "people_alarm":
+                PEOPLE_ALARM_LIMIT,
+        }
+    )
 
 
 # =========================================================
@@ -5142,30 +4517,27 @@ async def cors(
 
     if request.method == "OPTIONS":
 
-        return web.Response(
+        response = web.Response(
             status=204
         )
 
+    else:
 
-    response = await handler(
-        request
-    )
-
+        response = await handler(
+            request
+        )
 
     response.headers[
         "Access-Control-Allow-Origin"
     ] = "*"
 
-
     response.headers[
         "Access-Control-Allow-Methods"
     ] = "GET, OPTIONS"
 
-
     response.headers[
         "Access-Control-Allow-Headers"
     ] = "*"
-
 
     return response
 
@@ -5177,93 +4549,73 @@ async def cors(
 async def start_http():
 
     app = web.Application(
-
         middlewares=[
             cors
         ]
-
     )
-
 
     app.router.add_get(
         "/",
         radar_page
     )
 
-
     app.router.add_get(
         "/radar",
         radar_page
     )
-
 
     app.router.add_get(
         "/miniapp",
         miniapp_page
     )
 
-
     app.router.add_get(
         "/verify",
         verify_page
     )
-
 
     app.router.add_get(
         "/api/all",
         api_all
     )
 
-
     app.router.add_get(
         "/api/boxes",
         api_boxes
     )
-
 
     app.router.add_get(
         "/api/goody_bags",
         api_goody
     )
 
-
     app.router.add_get(
         "/api/status",
         api_status
     )
-
 
     app.router.add_get(
         "/api/miniapp-data",
         api_miniapp_data
     )
 
-
     runner = web.AppRunner(
         app
     )
 
-
     await runner.setup()
 
-
     site = web.TCPSite(
-
         runner,
-
         "0.0.0.0",
-
-        PORT
-
+        PORT,
     )
-
 
     await site.start()
 
-
     print(
         "[HTTP] Sunucu başladı:",
-        PORT
+        PORT,
     )
 
 
@@ -5271,80 +4623,64 @@ async def start_http():
 # TELEGRAM LISTENER
 # =========================================================
 
-async def listener(
-    event
-):
+async def listener(event):
 
     try:
 
         key = (
-
             event.chat_id,
-
-            event.message.id
-
+            event.message.id,
         )
-
 
         if key in processed_messages:
 
             return
 
-
         processed_messages.add(
             key
         )
 
-
-        if len(
-            processed_messages
-        ) > 50000:
+        if (
+            len(
+                processed_messages
+            )
+            >
+            50000
+        ):
 
             processed_messages.clear()
 
-
-        d = parse(
+        d = parse_event(
             event
         )
-
 
         if not d:
 
             return
 
-
-        d["source_chat_id"] = safe_int(
-            event.chat_id
-        )
-
-
-        if not add(
+        if not add_to_radar(
             d
         ):
 
             return
 
+        await telegram_queue.put(
+            {
+                "kind":
+                    "normal",
 
-        await telegram_queue.put({
-
-            "kind":
-                "normal",
-
-            "data":
-                d
-
-        })
-
+                "data":
+                    d,
+            }
+        )
 
         alarms = get_alarms(
             d
         )
 
-
         event_key = make_event_key(
             d
         )
-
 
         for alarm in alarms:
 
@@ -5354,36 +4690,30 @@ async def listener(
 
                 continue
 
-
             if save_alarm(
-
                 alarm["key"],
-
                 event_key,
-
-                alarm["type"]
-
+                alarm["type"],
             ):
 
-                await telegram_queue.put({
+                await telegram_queue.put(
+                    {
+                        "kind":
+                            "alarm",
 
-                    "kind":
-                        "alarm",
+                        "data":
+                            d,
 
-                    "data":
-                        d,
-
-                    "alarm":
-                        alarm
-
-                })
-
+                        "alarm":
+                            alarm,
+                    }
+                )
 
     except Exception as e:
 
         print(
             "[DİNLEYİCİ HATASI]",
-            repr(e)
+            repr(e),
         )
 
 
@@ -5394,7 +4724,6 @@ async def listener(
 async def telegram_connection_watch():
 
     global client
-
 
     while True:
 
@@ -5408,22 +4737,19 @@ async def telegram_connection_watch():
                         "[TELEGRAM] Bağlantı koptu."
                     )
 
-
                     try:
 
                         await client.connect()
-
 
                         print(
                             "[TELEGRAM] Yeniden bağlandı."
                         )
 
-
                     except Exception as e:
 
                         print(
                             "[TELEGRAM] Yeniden bağlanma:",
-                            repr(e)
+                            repr(e),
                         )
 
                 else:
@@ -5432,14 +4758,12 @@ async def telegram_connection_watch():
                         "[TELEGRAM] Bağlantı OK."
                     )
 
-
         except Exception as e:
 
             print(
                 "[WATCHDOG]",
-                repr(e)
+                repr(e),
             )
-
 
         await asyncio.sleep(
             30
@@ -5456,66 +4780,51 @@ async def main():
     global client
     global bot_application
 
-
     print(
         "🏆 ÖDÜL AVCISI BAŞLIYOR"
     )
-
 
     print(
         "🔐 DAVET TABANLI VIP SİSTEMİ AKTİF"
     )
 
-
     print(
         "📱 MINI APP AKTİF"
     )
-
 
     print(
         "🔥 YÜKSEK COIN EFEKTİ AKTİF"
     )
 
-
     print(
         "👑 ADMIN USER ID:",
-        ADMIN_USER_ID
+        ADMIN_USER_ID,
     )
-
 
     print(
         "👑 ADMIN CHAT ID:",
-        ADMIN_CHAT_ID
+        ADMIN_CHAT_ID,
     )
 
-
     db_load_recent()
-
 
     http_session = (
         aiohttp.ClientSession()
     )
 
-
     await start_http()
-
 
     # =====================================================
     # TELETHON
     # =====================================================
 
     client = TelegramClient(
-
         StringSession(
             STRING_SESSION
         ),
-
         API_ID,
-
-        API_HASH
-
+        API_HASH,
     )
-
 
     while True:
 
@@ -5523,145 +4832,106 @@ async def main():
 
             await client.start()
 
-
             print(
                 "[TELETHON] Bağlandı."
             )
 
-
             break
-
 
         except Exception as e:
 
             print(
                 "[TELETHON]",
-                repr(e)
+                repr(e),
             )
-
 
             await asyncio.sleep(
                 15
             )
 
-
     client.add_event_handler(
-
         listener,
-
         events.NewMessage(
             chats=SOURCE_CHATS
-        )
-
+        ),
     )
-
 
     # =====================================================
     # BOT
     # =====================================================
 
     bot_application = (
-
         ApplicationBuilder()
-
         .token(
             BOT_TOKEN
         )
-
         .build()
-
     )
 
-
     bot_application.add_handler(
-
         CommandHandler(
             "start",
             bot_start
         )
-
     )
 
-
     bot_application.add_handler(
-
         CommandHandler(
             "davet",
             bot_davet
         )
-
     )
 
-
     bot_application.add_handler(
-
         CommandHandler(
             "uyeler",
             bot_uyeler
         )
-
     )
 
-
     bot_application.add_handler(
-
         CommandHandler(
             "silvip",
             bot_silvip
         )
-
     )
 
-
     bot_application.add_handler(
-
         CommandHandler(
             "id",
             bot_id
         )
-
     )
-
 
     await bot_application.initialize()
 
-
     await bot_application.start()
-
 
     if bot_application.updater:
 
         await bot_application.updater.start_polling(
-
             drop_pending_updates=True
-
         )
-
 
     print(
         "[BOT] VIP bot aktif."
     )
 
-
     print(
         "[BOT] /davet hazır."
     )
-
 
     print(
         "[BOT] /uyeler hazır."
     )
 
-
     print(
         "[BOT] /silvip hazır."
     )
 
-
     print(
         "[BOT] /id hazır."
     )
-
 
     # =====================================================
     # TASKLER
@@ -5671,47 +4941,38 @@ async def main():
         sender()
     )
 
-
     asyncio.create_task(
         telegram_connection_watch()
     )
-
 
     print(
         "[HAZIR] RADAR"
     )
 
-
     print(
         "[HAZIR] VIP"
     )
-
 
     print(
         "[HAZIR] MINI APP"
     )
 
-
     print(
         "[HAZIR] DAVET SİSTEMİ"
     )
-
 
     print(
         "[HAZIR] ÜYE BİLDİRİMİ"
     )
 
-
     print(
         "[MINI APP]",
-        MINI_APP_URL
+        MINI_APP_URL,
     )
-
 
     try:
 
         await client.run_until_disconnected()
-
 
     finally:
 
@@ -5733,9 +4994,8 @@ async def main():
 
             print(
                 "[BOT STOP]",
-                repr(e)
+                repr(e),
             )
-
 
         try:
 
@@ -5749,9 +5009,8 @@ async def main():
 
             print(
                 "[BOT SHUTDOWN]",
-                repr(e)
+                repr(e),
             )
-
 
         try:
 
@@ -5759,10 +5018,9 @@ async def main():
 
                 await client.disconnect()
 
-        except:
+        except Exception:
 
             pass
-
 
         try:
 
@@ -5770,22 +5028,21 @@ async def main():
 
                 await http_session.close()
 
-        except:
+        except Exception:
 
             pass
-
 
         try:
 
             db.close()
 
-        except:
+        except Exception:
 
             pass
 
 
 # =========================================================
-# BAŞLAT
+# START
 # =========================================================
 
 if __name__ == "__main__":
@@ -5806,5 +5063,5 @@ if __name__ == "__main__":
 
         print(
             "[KRİTİK HATA]",
-            repr(e)
+            repr(e),
         )
