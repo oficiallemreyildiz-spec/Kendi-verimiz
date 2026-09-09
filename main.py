@@ -2,39 +2,46 @@ import os
 import asyncio
 import logging
 from aiohttp import web
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, WebAppInfo
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
 
-logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
+logging.basicConfig(
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    level=logging.INFO
+)
 
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
 
-# Sadece VIP Radara Doğrudan Erişim Linki
-VIP_RADAR_URL = "https://sites.google.com/view/gody-bag-ve-chesture-/vip-radar"
-SITE_URL = "https://sites.google.com/view/gody-bag-ve-chesture-/ana-sayfa"
+# GÜNCEL GOOGLE SITES ADRESLERİNİZ
+VIP_RADAR_URL = "https://sites.google.com/view/godybagvechesture/vip-radar"
+SITE_URL = "https://sites.google.com/view/godybagvechesture/ana-sayfa"
 PORT = int(os.environ.get("PORT", "10000"))
 
 # =========================================================
-# 1. TELEGRAM BOT KOMUTLARI (Şifreli / Token Onaylı)
+# TELEGRAM BOT KOMUTLARI
 # =========================================================
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user = update.effective_user
-    args = context.args  # /start komutunun yanındaki parametreyi okur
+    args = context.args  # Siteden gelen şifreli doğrulama anahtarını okur (?start=vip_onayli)
 
-    # Eğer kullanıcı sitedeki doğrulama butonundan geldiyse (/start vip_onayli)
+    # 1. KULLANICI SİTEDEKİ DOĞRULA BUTONUNDAN GELDİYSE
     if args and args[0] == "vip_onayli":
-        keyboard = [[InlineKeyboardButton("🌐 VIP RADARI AÇ", url=VIP_RADAR_URL)]]
+        keyboard = [
+            [InlineKeyboardButton("🌐 VIP RADARI AÇ", web_app=WebAppInfo(url=VIP_RADAR_URL))]
+        ]
         reply_markup = InlineKeyboardMarkup(keyboard)
         
         await update.message.reply_text(
             f"✅ **Doğrulama Başarılı, {user.first_name}!**\n\n"
-            "Siteden doğrulamanız onaylandı. VIP Canlı Radar ekranına erişmek için aşağıdaki butona tıklayabilirsiniz.",
+            "Siteden üyeliğiniz onaylandı. VIP Canlı Radar ekranına erişmek için aşağıdaki butona tıklayabilirsiniz.",
             reply_markup=reply_markup,
             parse_mode="Markdown"
         )
     else:
-        # Doğrudan bota gelen veya linki izinsiz paylaşan kullanıcılar için engelleme
-        keyboard = [[InlineKeyboardButton("🔒 SİTEDEN DOĞRULAMA YAP", url=SITE_URL)]]
+        # 2. BOTA DOĞRUDAN GİREN VEYA LİNKİ PAYLAŞANLAR İÇİN ENGEL
+        keyboard = [
+            [InlineKeyboardButton("🔒 SİTEDEN DOĞRULAMA YAP", url=SITE_URL)]
+        ]
         reply_markup = InlineKeyboardMarkup(keyboard)
         
         await update.message.reply_text(
@@ -45,13 +52,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             parse_mode="Markdown"
         )
 
-async def run_telegram_bot(application):
-    await application.initialize()
-    await application.start()
-    await application.updater.start_polling()
-
 # =========================================================
-# 2. RENDER İÇİN WEB SUNUCUSU
+# RENDER SAĞLIK KONTROLÜ VE WEB SUNUCUSU
 # =========================================================
 async def health_check(request):
     return web.Response(text="Bot Aktif ve Çalışıyor!", content_type="text/plain")
@@ -63,14 +65,11 @@ async def start_web_server():
     await runner.setup()
     site = web.TCPSite(runner, "0.0.0.0", PORT)
     await site.start()
-    print(f"[HTTP] Web sunucusu {PORT} portunda aktif edildi.")
+    print(f"[HTTP] Sunucu {PORT} portunda aktif edildi.")
 
-# =========================================================
-# 3. ANA ÇALIŞTIRMA
-# =========================================================
 async def main():
     if not BOT_TOKEN:
-        print("HATA: BOT_TOKEN bulunamadı!")
+        print("HATA: BOT_TOKEN bulunamadı! Render Environment Variables kısmını kontrol edin.")
         return
 
     application = ApplicationBuilder().token(BOT_TOKEN).build()
@@ -79,8 +78,9 @@ async def main():
     await start_web_server()
     print("Bot polling modunda başlatılıyor...")
     
-    await run_telegram_bot(application)
-    
+    await application.initialize()
+    await application.start()
+    await application.updater.start_polling()
     await asyncio.Event().wait()
 
 if __name__ == '__main__':
