@@ -8,7 +8,6 @@ import sqlite3
 from urllib.parse import unquote
 
 from aiohttp import web
-
 from telethon import TelegramClient, events, Button
 from telethon.sessions import StringSession
 
@@ -46,10 +45,7 @@ telegram_queue = asyncio.Queue()
 # =========================================================
 # İSTEMCİLER (ÇİFT MOTOR)
 # =========================================================
-# 1. UserClient: Senin hesabın, sadece kanalları okumak için
 user_client = TelegramClient(StringSession(STRING_SESSION), API_ID, API_HASH)
-
-# 2. BotClient: Senin botun, mesaj atmak ve buton göstermek için
 bot_client = TelegramClient('bot_session', API_ID, API_HASH)
 
 # =========================================================
@@ -121,15 +117,6 @@ def db_exists(event_key):
     try:
         return db.execute("SELECT 1 FROM radar_history WHERE event_key=? LIMIT 1", (event_key,)).fetchone() is not None
     except: return False
-
-def db_stats():
-    try:
-        total = db.execute("SELECT COUNT(*) FROM radar_history").fetchone()[0]
-        total_coins = db.execute("SELECT COALESCE(SUM(coins),0) FROM radar_history").fetchone()[0]
-        goody = db.execute("SELECT COUNT(*) FROM radar_history WHERE event_type='GOODY BAG'").fetchone()[0]
-        chest = db.execute("SELECT COUNT(*) FROM radar_history WHERE event_type='CHEST'").fetchone()[0]
-        return {"total": total, "total_coins": total_coins, "goody": goody, "chest": chest}
-    except: return {"total": 0, "total_coins": 0, "goody": 0, "chest": 0}
 
 def db_load_recent():
     try:
@@ -253,7 +240,6 @@ def add(d):
     db_save(d, event_key)
     processed_signatures.add(event_key)
     target[d["room"]] = d
-    print("[RADAR]", d["type"], "|", d["username"], "| COIN:", d["coins"], "| KİŞİ:", d["people"])
     return True
 
 def get_alarms(d):
@@ -276,7 +262,7 @@ def save_alarm(alarm_key, event_key, alarm_type):
     except: return False
 
 # =========================================================
-# TELEGRAM MESAJ GÖNDERİCİ (Artık Bot API kullanıyor)
+# TELEGRAM GÖNDERİCİ
 # =========================================================
 
 async def sender():
@@ -306,7 +292,6 @@ async def sender():
                     f"🏠 Oda: `{d['room']}`"
                 )
             
-            # Burada normal HTTP request yerine doğrudan botu kullanıyoruz (buton garantili)
             await bot_client.send_message(
                 TARGET_CHAT_ID,
                 text,
@@ -319,7 +304,7 @@ async def sender():
             telegram_queue.task_done()
 
 # =========================================================
-# HTML VE WEB SUNUCU
+# HTML + ÜYE GİRİŞ PANELİ (LOCKED INTERFACE)
 # =========================================================
 
 RADAR_HTML = """
@@ -330,18 +315,61 @@ RADAR_HTML = """
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>🏆 ÖDÜL AVCISI</title>
 <style>
-body{margin:0;padding:12px;background:#05060c;color:#fff;font-family:Arial,sans-serif;}
-.wrap{max-width:1600px;margin:auto;}
-.head{text-align:center;padding:12px 5px 18px;}
-.title{font-size:32px;font-weight:bold;color:#fff;}
+body{margin:0;padding:0;background:#05060c;color:#fff;font-family:Arial,sans-serif;height:100vh;display:flex;justify-content:center;align-items:center;}
+.wrap{width:100%;max-width:500px;padding:20px;box-sizing:border-box;}
+.card{background:#121324;border:1px solid #7c3aed;padding:30px;border-radius:15px;text-align:center;box-shadow:0 0 25px rgba(124,58,237,0.3);}
+.title{font-size:24px;font-weight:bold;margin-bottom:10px;color:#fff;}
+.sub{color:#a78bfa;font-size:14px;margin-bottom:25px;}
+input{width:100%;padding:14px;margin-bottom:15px;background:#05060c;border:1px solid #4c1d95;color:#fff;border-radius:8px;box-sizing:border-box;outline:none;font-size:16px;}
+button{width:100%;padding:14px;background:linear-gradient(135deg,#7c3aed,#4c1d95);color:#fff;border:none;border-radius:8px;font-weight:bold;cursor:pointer;font-size:16px;transition:0.3s;}
+button:hover{opacity:0.9;}
+#main-content{display:none;text-align:center;}
 </style>
 </head>
 <body>
+
 <div class="wrap">
-<div class="head">
-<div class="title">🏆 ÖDÜL AVCISI RADARI AKTİF</div>
+    <!-- GİRİŞ / ÜYE OL PANELİ -->
+    <div id="auth-modal" class="card">
+        <div style="font-size:40px;margin-bottom:10px;">🔒</div>
+        <div class="title">VIP ÜYE ALANI</div>
+        <div class="sub">TikTok Canlı Radar verilerine tam erişim sağlamak için Telegram kullanıcı adınızla giriş yapın.</div>
+        <input type="text" id="username-input" placeholder="Telegram Kullanıcı Adı (Örn: @KullaniciAdi)">
+        <button onclick="handleLogin()">🚀 Kilidi Aç / VIP Ol</button>
+    </div>
+
+    <!-- ASIL İÇERİK (Giriş Yapılınca Açılır) -->
+    <div id="main-content" class="card" style="border-color:#10b981;">
+        <div style="font-size:40px;margin-bottom:10px;">🟢</div>
+        <div class="title" style="color:#10b981;">RADAR AKTİF</div>
+        <div class="sub" id="welcome-msg">Sisteme başarıyla bağlandınız!</div>
+        <button style="background:#10b981;" onclick="location.reload()">Verileri Yenile</button>
+    </div>
 </div>
-</div>
+
+<script>
+window.onload = function() {
+    const savedUser = localStorage.getItem("vip_username");
+    if (savedUser) {
+        document.getElementById("auth-modal").style.display = "none";
+        document.getElementById("main-content").style.display = "block";
+        document.getElementById("welcome-msg").innerText = "Hoş geldin, " + savedUser + "! Canlı akış izleniyor.";
+    }
+};
+
+function handleLogin() {
+    const username = document.getElementById("username-input").value.trim();
+    if (username === "") {
+        alert("Lütfen Telegram kullanıcı adınızı girin!");
+        return;
+    }
+    localStorage.setItem("vip_username", username);
+    document.getElementById("auth-modal").style.display = "none";
+    document.getElementById("main-content").style.display = "block";
+    document.getElementById("welcome-msg").innerText = "Hoş geldin, " + username + "! Canlı akış izleniyor.";
+}
+</script>
+
 </body>
 </html>
 """
@@ -363,16 +391,14 @@ async def start_http():
 # =========================================================
 
 async def main():
-    print("🏆 ÖDÜL AVCISI BAŞLIYOR (ÇİFT MOTORLU SİSTEM)")
+    print("🏆 ÖDÜL AVCISI BAŞLIYOR (ÇİFT MOTORLU SİSTEM + ÜYE PANELİ)")
     db_load_recent()
     await start_http()
 
-    # İki istemciyi aynı anda başlatıyoruz
     await user_client.start()
     await bot_client.start(bot_token=BOT_TOKEN)
-    print("[TELEGRAM] Hesabın (Dinleyici) ve Bot'un (Gönderici) başarıyla bağlandı!")
+    print("[TELEGRAM] Dinleyici ve Bot başarıyla bağlandı!")
 
-    # 1. Kullanıcı İstemcisi: Sadece Kanalları Dinler
     @user_client.on(events.NewMessage(chats=SOURCE_CHATS))
     async def user_listener(event):
         try:
@@ -397,7 +423,6 @@ async def main():
         except Exception as e:
             print("[USER LİSTENER HATA]", repr(e))
 
-    # 2. Bot İstemcisi: Gelen /start Komutlarını Dinler ve Butonlu Yanıt Verir
     @bot_client.on(events.NewMessage(pattern=r'^/start'))
     async def bot_listener(event):
         await event.respond(
@@ -406,10 +431,8 @@ async def main():
             buttons=[[Button.url("🌐 RADARI AÇ", SITE_URL)]]
         )
 
-    # Gönderim kuyruğunu başlat
     asyncio.create_task(sender())
 
-    # Sistemi sonsuz döngüde açık tut
     await asyncio.gather(
         user_client.run_until_disconnected(),
         bot_client.run_until_disconnected()
