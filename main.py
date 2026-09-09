@@ -104,7 +104,7 @@ bot_application = None
 
 
 # =========================================================
-# SQLITE
+# DATABASE
 # =========================================================
 
 db = sqlite3.connect(
@@ -154,7 +154,7 @@ CREATE TABLE IF NOT EXISTS alarm_history (
 
 
 # =========================================================
-# VIP TABLOLARI
+# VIP DATABASE
 # =========================================================
 
 db.execute("""
@@ -186,26 +186,24 @@ db.commit()
 # YARDIMCI
 # =========================================================
 
-def safe_int(v, d=0):
+def safe_int(v, default=0):
 
     try:
         return int(float(v))
-
     except:
-        return d
+        return default
 
 
-def safe_float(v, d=0):
+def safe_float(v, default=0):
 
     try:
         return float(v)
-
     except:
-        return d
+        return default
 
 
 # =========================================================
-# SQLITE
+# RADAR DATABASE
 # =========================================================
 
 def db_save(d, event_key):
@@ -239,29 +237,17 @@ def db_save(d, event_key):
 
             d["username"],
 
-            safe_int(
-                d["coins"]
-            ),
+            safe_int(d["coins"]),
 
-            safe_int(
-                d["people"]
-            ),
+            safe_int(d["people"]),
 
-            safe_int(
-                d["joined"]
-            ),
+            safe_int(d["joined"]),
 
-            safe_float(
-                d["rate"]
-            ),
+            safe_float(d["rate"]),
 
-            safe_int(
-                d["view"]
-            ),
+            safe_int(d["view"]),
 
-            str(
-                d["room"]
-            ),
+            str(d["room"]),
 
             d.get(
                 "live",
@@ -289,11 +275,9 @@ def db_save(d, event_key):
             )
         ))
 
-
         db.commit()
 
         return True
-
 
     except Exception as e:
 
@@ -322,7 +306,6 @@ def db_exists(event_key):
         ).fetchone()
 
         return row is not None
-
 
     except Exception as e:
 
@@ -373,36 +356,23 @@ def db_stats():
 
 
         return {
-
-            "total":
-                total,
-
-            "total_coins":
-                total_coins,
-
-            "goody":
-                goody,
-
-            "chest":
-                chest
+            "total": total,
+            "total_coins": total_coins,
+            "goody": goody,
+            "chest": chest
         }
-
 
     except Exception as e:
 
         print(
-            "[SQLITE İSTATİSTİK HATASI]",
+            "[SQLITE ISTATISTIK]",
             repr(e)
         )
 
         return {
-
             "total": 0,
-
             "total_coins": 0,
-
             "goody": 0,
-
             "chest": 0
         }
 
@@ -495,7 +465,7 @@ def db_load_recent():
 
 
         print(
-            "[SQLITE] Geçmiş kayıtlar yüklendi:",
+            "[SQLITE] Geçmiş yüklendi:",
             len(rows)
         )
 
@@ -531,27 +501,22 @@ def create_verify_token(
     )
 
 
-    db.execute(
-        """
-        INSERT INTO verify_tokens
-        (
-            token,
-            telegram_id,
-            created_at,
-            expires_at,
-            used
-        )
-        VALUES (?, ?, ?, ?, 0)
-        """,
-        (
-            token,
-            safe_int(
-                telegram_id
-            ),
-            now,
-            expires
-        )
+    db.execute("""
+    INSERT INTO verify_tokens
+    (
+        token,
+        telegram_id,
+        created_at,
+        expires_at,
+        used
     )
+    VALUES (?, ?, ?, ?, 0)
+    """, (
+        token,
+        safe_int(telegram_id),
+        now,
+        expires
+    ))
 
 
     db.commit()
@@ -576,17 +541,14 @@ def verify_token_for_user(
     )
 
 
-    row = db.execute(
-        """
-        SELECT *
-        FROM verify_tokens
-        WHERE token=?
-        LIMIT 1
-        """,
-        (
-            token,
-        )
-    ).fetchone()
+    row = db.execute("""
+    SELECT *
+    FROM verify_tokens
+    WHERE token=?
+    LIMIT 1
+    """, (
+        token,
+    )).fetchone()
 
 
     if not row:
@@ -617,16 +579,13 @@ def verify_token_for_user(
         return False
 
 
-    db.execute(
-        """
-        UPDATE verify_tokens
-        SET used=1
-        WHERE token=?
-        """,
-        (
-            token,
-        )
-    )
+    db.execute("""
+    UPDATE verify_tokens
+    SET used=1
+    WHERE token=?
+    """, (
+        token,
+    ))
 
 
     vip_expires = (
@@ -642,43 +601,30 @@ def verify_token_for_user(
     )
 
 
-    db.execute(
-        """
-        INSERT INTO vip_users
-        (
-            telegram_id,
-            username,
-            first_name,
-            verified_at,
-            expires_at
-        )
-        VALUES (?, ?, ?, ?, ?)
-
-        ON CONFLICT(telegram_id)
-        DO UPDATE SET
-            username=excluded.username,
-            first_name=excluded.first_name,
-            verified_at=excluded.verified_at,
-            expires_at=excluded.expires_at
-        """,
-        (
-            safe_int(
-                telegram_id
-            ),
-
-            str(
-                username or ""
-            ),
-
-            str(
-                first_name or ""
-            ),
-
-            now,
-
-            vip_expires
-        )
+    db.execute("""
+    INSERT INTO vip_users
+    (
+        telegram_id,
+        username,
+        first_name,
+        verified_at,
+        expires_at
     )
+    VALUES (?, ?, ?, ?, ?)
+
+    ON CONFLICT(telegram_id)
+    DO UPDATE SET
+        username=excluded.username,
+        first_name=excluded.first_name,
+        verified_at=excluded.verified_at,
+        expires_at=excluded.expires_at
+    """, (
+        safe_int(telegram_id),
+        str(username or ""),
+        str(first_name or ""),
+        now,
+        vip_expires
+    ))
 
 
     db.commit()
@@ -695,19 +641,14 @@ def is_vip(
         return False
 
 
-    row = db.execute(
-        """
-        SELECT expires_at
-        FROM vip_users
-        WHERE telegram_id=?
-        LIMIT 1
-        """,
-        (
-            safe_int(
-                telegram_id
-            ),
-        )
-    ).fetchone()
+    row = db.execute("""
+    SELECT expires_at
+    FROM vip_users
+    WHERE telegram_id=?
+    LIMIT 1
+    """, (
+        safe_int(telegram_id),
+    )).fetchone()
 
 
     if not row:
@@ -727,7 +668,7 @@ def is_vip(
 
 
 # =========================================================
-# TELEGRAM MINI APP DOĞRULAMA
+# TELEGRAM MINI APP AUTH
 # =========================================================
 
 def validate_telegram_init_data(
@@ -840,18 +781,15 @@ def validate_telegram_init_data(
             return None
 
 
-        user = json.loads(
+        return json.loads(
             user_json
         )
-
-
-        return user
 
 
     except Exception as e:
 
         print(
-            "[MINI APP AUTH HATASI]",
+            "[MINI APP AUTH]",
             repr(e)
         )
 
@@ -883,6 +821,7 @@ def token_from_event(e):
         r'https?://[^ \n\]\)]+/t\.php\?token=([^&\s\]\)]+)',
 
         r'https?://[^ \n\]\)]+t\.php\?token=([^&\s\]\)]+)'
+
     ]
 
 
@@ -919,11 +858,8 @@ def token_from_event(e):
             if u:
 
                 m1 = re.search(
-
                     r't\.php\?token=([^&\s]+)',
-
                     u,
-
                     re.I
                 )
 
@@ -980,12 +916,7 @@ def decode_token(tok):
         )
 
 
-    except Exception as e:
-
-        print(
-            "[TOKEN HATA]",
-            repr(e)
-        )
+    except:
 
         return None
 
@@ -1001,6 +932,7 @@ def room_from_text(t):
         r'https?://live\.dichvu321\.com/t/\?p=([A-Za-z0-9_\-+/=]+)',
 
         r'https?://[^ \n]+/t/\?p=([A-Za-z0-9_\-+/=]+)'
+
     ]
 
 
@@ -1060,6 +992,7 @@ def username_from_text(t):
         r'^\s*##\s*T\d+\s*[›>:]\s*([^\s\n]+)',
 
         r'^\s*T\d+\s*[›>:]\s*([^\s\n]+)'
+
     ]
 
 
@@ -1096,6 +1029,7 @@ def coins(
         r'BOX\s*:\s*(\d+)\s*/',
 
         r'(\d+)\s*/\s*(\d+)'
+
     ]
 
 
@@ -1109,17 +1043,6 @@ def coins(
 
 
         if m:
-
-            if (
-                "TÚI" in p
-                or "TUI" in p
-                or "BOX" in p
-            ):
-
-                return safe_int(
-                    m.group(1)
-                )
-
 
             return safe_int(
                 m.group(1)
@@ -1161,6 +1084,7 @@ def people(t):
         r'BOX\s*:\s*\d+\s*/\s*(\d+)',
 
         r'(\d+)\s*/\s*(\d+)'
+
     ]
 
 
@@ -1207,6 +1131,7 @@ def joined(t):
         r'joined\s*:\s*(\d+)',
 
         r'join\s*:\s*(\d+)'
+
     ]
 
 
@@ -1267,6 +1192,7 @@ def rate(
         t or "",
 
         re.I
+
     )
 
 
@@ -1335,13 +1261,11 @@ def is_goody(
         if d.get(
             "is_goody_bag"
         ) in [
-
             True,
             1,
             "1",
             "true",
             "True"
-
         ]:
 
             return True
@@ -1350,13 +1274,11 @@ def is_goody(
         if d.get(
             "is_goody_bag"
         ) in [
-
             False,
             0,
             "0",
             "false",
             "False"
-
         ]:
 
             return False
@@ -1430,6 +1352,7 @@ def target_time(
         t or "",
 
         re.I
+
     )
 
 
@@ -1466,20 +1389,15 @@ def target_time(
 def parse(event):
 
     t = (
-
         event.message.raw_text
-
         or ""
-
     )
 
 
     d = decode_token(
-
         token_from_event(
             event
         )
-
     )
 
 
@@ -1701,7 +1619,6 @@ def parse(event):
         or
 
         (
-
             f"https://www.tiktok.com/share/live/{room}"
 
             if room
@@ -1709,7 +1626,6 @@ def parse(event):
             else
 
             f"https://www.tiktok.com/@{username}/live"
-
         )
 
     )
@@ -1858,11 +1774,7 @@ def add(d):
     )
 
 
-    if (
-        event_key
-        in
-        processed_signatures
-    ):
+    if event_key in processed_signatures:
 
         return False
 
@@ -1942,31 +1854,20 @@ def alarm_exists(
 
     try:
 
-        row = db.execute(
-
-            """
-            SELECT 1
-            FROM alarm_history
-            WHERE alarm_key=?
-            LIMIT 1
-            """,
-
-            (
-                alarm_key,
-            )
-
-        ).fetchone()
+        row = db.execute("""
+        SELECT 1
+        FROM alarm_history
+        WHERE alarm_key=?
+        LIMIT 1
+        """, (
+            alarm_key,
+        )).fetchone()
 
 
         return row is not None
 
 
-    except Exception as e:
-
-        print(
-            "[ALARM CHECK]",
-            repr(e)
-        )
+    except:
 
         return False
 
@@ -1979,29 +1880,23 @@ def save_alarm(
 
     try:
 
-        db.execute(
-
-            """
-            INSERT OR IGNORE INTO alarm_history
-            (
-                alarm_key,
-                event_key,
-                alarm_type,
-                created_at
-            )
-            VALUES (?, ?, ?, ?)
-            """,
-
-            (
-                alarm_key,
-                event_key,
-                alarm_type,
-                int(
-                    time.time()
-                )
-            )
-
+        db.execute("""
+        INSERT OR IGNORE INTO alarm_history
+        (
+            alarm_key,
+            event_key,
+            alarm_type,
+            created_at
         )
+        VALUES (?, ?, ?, ?)
+        """, (
+            alarm_key,
+            event_key,
+            alarm_type,
+            int(
+                time.time()
+            )
+        ))
 
 
         db.commit()
@@ -2009,12 +1904,7 @@ def save_alarm(
         return True
 
 
-    except Exception as e:
-
-        print(
-            "[ALARM SAVE]",
-            repr(e)
-        )
+    except:
 
         return False
 
@@ -2072,6 +1962,7 @@ def get_alarms(d):
                         COIN_ALARM_LIMIT
                     )
                 )
+
         })
 
 
@@ -2108,6 +1999,7 @@ def get_alarms(d):
                         PEOPLE_ALARM_LIMIT
                     )
                 )
+
         })
 
 
@@ -2115,7 +2007,7 @@ def get_alarms(d):
 
 
 # =========================================================
-# TELEGRAM NORMAL
+# TELEGRAM NORMAL MESAJ
 # =========================================================
 
 async def send_tg(d):
@@ -2170,24 +2062,17 @@ async def send_tg(d):
     )
 
 
-    if d.get(
-        "live"
-    ):
+    if d.get("live"):
 
         text += (
-
             f"\n🔴 "
             f"{d['live']}"
-
         )
 
 
     url = (
-
         "https://api.telegram.org/"
-
         f"bot{BOT_TOKEN}/sendMessage"
-
     )
 
 
@@ -2216,7 +2101,6 @@ async def send_tg(d):
                 }
 
             ) as response:
-
 
                 response_text = (
                     await response.text()
@@ -2254,7 +2138,6 @@ async def send_tg(d):
 
 
                     await asyncio.sleep(
-
                         max(
                             1,
                             safe_int(
@@ -2262,43 +2145,33 @@ async def send_tg(d):
                                 30
                             )
                         )
-
                     )
 
                     continue
 
 
                 if response.status in [
-
                     500,
                     502,
                     503,
                     504
-
                 ]:
 
                     await asyncio.sleep(
-
                         min(
                             5 * attempt,
                             30
                         )
-
                     )
 
                     continue
 
 
                 print(
-
                     "[TELEGRAM HATA]",
-
                     response.status,
-
                     response_text
-
                 )
-
 
                 return
 
@@ -2312,12 +2185,10 @@ async def send_tg(d):
 
 
             await asyncio.sleep(
-
                 min(
                     5 * attempt,
                     30
                 )
-
             )
 
 
@@ -2343,30 +2214,17 @@ async def send_alarm(
         title = "🚨 COIN ALARMI"
 
         reason = (
-
-            f"🪙 COIN: "
-            f"{d['coins']}\n"
-
-            f"🎯 LİMİT: "
-            f"{COIN_ALARM_LIMIT}"
-
+            f"🪙 COIN: {d['coins']}\n"
+            f"🎯 LİMİT: {COIN_ALARM_LIMIT}"
         )
-
 
     else:
 
-        title = (
-            "⚠️ DÜŞÜK KİŞİ ALARMI"
-        )
+        title = "⚠️ DÜŞÜK KİŞİ ALARMI"
 
         reason = (
-
-            f"👥 KİŞİ: "
-            f"{d['people']}\n"
-
-            f"🎯 LİMİT: "
-            f"{PEOPLE_ALARM_LIMIT}"
-
+            f"👥 KİŞİ: {d['people']}\n"
+            f"🎯 LİMİT: {PEOPLE_ALARM_LIMIT}"
         )
 
 
@@ -2410,24 +2268,17 @@ async def send_alarm(
     )
 
 
-    if d.get(
-        "live"
-    ):
+    if d.get("live"):
 
         text += (
-
             f"\n🔴 "
             f"{d['live']}"
-
         )
 
 
     url = (
-
         "https://api.telegram.org/"
-
         f"bot{BOT_TOKEN}/sendMessage"
-
     )
 
 
@@ -2455,13 +2306,9 @@ async def send_alarm(
             if response.status != 200:
 
                 print(
-
                     "[ALARM TELEGRAM]",
-
                     response.status,
-
                     await response.text()
-
                 )
 
 
@@ -2496,18 +2343,15 @@ async def sender():
             elif job["kind"] == "alarm":
 
                 await send_alarm(
-
                     job["data"],
-
                     job["alarm"]
-
                 )
 
 
         except Exception as e:
 
             print(
-                "[SENDER HATA]",
+                "[SENDER]",
                 repr(e)
             )
 
@@ -2518,7 +2362,7 @@ async def sender():
 
 
 # =========================================================
-# BOT /START
+# TELEGRAM BOT
 # =========================================================
 
 async def bot_start(
@@ -2526,9 +2370,7 @@ async def bot_start(
     context
 ):
 
-    user = (
-        update.effective_user
-    )
+    user = update.effective_user
 
 
     if not user:
@@ -2539,20 +2381,16 @@ async def bot_start(
     args = context.args
 
 
-    # =====================================================
+    # -----------------------------------------------------
     # VIP TOKEN
-    # =====================================================
+    # -----------------------------------------------------
 
     if (
-
         args
-
         and
-
         args[0].startswith(
             "vip_"
         )
-
     ):
 
         token = args[0][4:]
@@ -2593,9 +2431,7 @@ async def bot_start(
                 "🌐 VIP RADARI AÇ",
 
                 web_app=WebAppInfo(
-
                     url=MINI_APP_URL
-
                 )
 
             )
@@ -2605,43 +2441,33 @@ async def bot_start(
 
         await update.message.reply_text(
 
-            f"✅ **Doğrulama Başarılı, "
-            f"{user.first_name}!**\n\n"
+            f"✅ Doğrulama Başarılı, "
+            f"{user.first_name}!\n\n"
 
-            "VIP erişiminiz aktif.\n"
+            "VIP radar erişiminiz aktif.\n\n"
 
-            "Canlı Ödül Avcısı radarını "
-            "Telegram içerisinde açabilirsiniz.\n\n"
-
-            "👇 Aşağıdaki butona basın:",
+            "👇 Radarı açmak için butona basın:",
 
             reply_markup=
                 InlineKeyboardMarkup(
                     keyboard
-                ),
-
-            parse_mode="Markdown"
+                )
 
         )
 
 
         print(
-
             "[VIP] DOĞRULANDI:",
-
-            user.id,
-
-            user.username
-
+            user.id
         )
 
 
         return
 
 
-    # =====================================================
+    # -----------------------------------------------------
     # ZATEN VIP
-    # =====================================================
+    # -----------------------------------------------------
 
     if is_vip(
         user.id
@@ -2654,9 +2480,7 @@ async def bot_start(
                 "🌐 VIP RADARI AÇ",
 
                 web_app=WebAppInfo(
-
                     url=MINI_APP_URL
-
                 )
 
             )
@@ -2666,17 +2490,15 @@ async def bot_start(
 
         await update.message.reply_text(
 
-            f"✅ **VIP erişiminiz aktif, "
-            f"{user.first_name}!**\n\n"
+            f"✅ VIP erişiminiz aktif, "
+            f"{user.first_name}!\n\n"
 
             "Canlı radar ekranını açabilirsiniz.",
 
             reply_markup=
                 InlineKeyboardMarkup(
                     keyboard
-                ),
-
-            parse_mode="Markdown"
+                )
 
         )
 
@@ -2684,9 +2506,9 @@ async def bot_start(
         return
 
 
-    # =====================================================
+    # -----------------------------------------------------
     # YENİ KULLANICI
-    # =====================================================
+    # -----------------------------------------------------
 
     token = create_verify_token(
         user.id
@@ -2694,11 +2516,7 @@ async def bot_start(
 
 
     verify_link = (
-
-        f"{VERIFY_URL}"
-
-        f"?token={token}"
-
+        f"{VERIFY_URL}?token={token}"
     )
 
 
@@ -2717,7 +2535,7 @@ async def bot_start(
 
     await update.message.reply_text(
 
-        "⚠️ **ERİŞİM ENGELLENDİ!**\n\n"
+        "⚠️ ERİŞİM ENGELLENDİ!\n\n"
 
         "VIP Radarı kullanabilmek için "
         "önce doğrulama yapmanız gerekiyor.\n\n"
@@ -2727,24 +2545,13 @@ async def bot_start(
         reply_markup=
             InlineKeyboardMarkup(
                 keyboard
-            ),
-
-        parse_mode="Markdown"
-
-    )
-
-
-    print(
-
-        "[VIP] TOKEN OLUŞTURULDU:",
-
-        user.id
+            )
 
     )
 
 
 # =========================================================
-# VERIFY SAYFASI
+# VERIFY HTML
 # =========================================================
 
 VERIFY_HTML = r"""
@@ -2757,8 +2564,8 @@ VERIFY_HTML = r"""
 <meta charset="UTF-8">
 
 <meta
-    name="viewport"
-    content="width=device-width,initial-scale=1"
+name="viewport"
+content="width=device-width,initial-scale=1"
 >
 
 <title>VIP Doğrulama</title>
@@ -2773,7 +2580,6 @@ html,
 body {
 
     margin: 0;
-
     padding: 0;
 
     min-height: 100%;
@@ -2840,8 +2646,7 @@ body {
 
 h1 {
 
-    margin:
-        0 0 14px;
+    margin: 0 0 14px;
 
     color: #c084fc;
 
@@ -2885,10 +2690,6 @@ p {
     font-size: 17px;
 
     font-weight: 1000;
-
-    box-shadow:
-        0 8px 25px
-        rgba(124,58,237,.4);
 }
 
 .note {
@@ -2930,9 +2731,7 @@ p {
     </p>
 
     <div id="content">
-
         Doğrulama hazırlanıyor...
-
     </div>
 
 </div>
@@ -2948,7 +2747,6 @@ const params =
 const token =
     params.get("token");
 
-
 const content =
     document.getElementById(
         "content"
@@ -2960,9 +2758,7 @@ if (!token) {
     content.innerHTML = `
 
         <div class="error">
-
             ❌ Geçersiz doğrulama bağlantısı.
-
         </div>
 
     `;
@@ -2986,17 +2782,12 @@ if (!token) {
             class="button"
             href="${botUrl}"
         >
-
             🚀 TELEGRAM'DA DOĞRULA
-
         </a>
 
-
         <div class="note">
-
             Butona bastıktan sonra
             Telegram hesabınız doğrulanacaktır.
-
         </div>
 
     `;
@@ -3024,27 +2815,22 @@ MINI_APP_HTML = r"""
 <meta charset="UTF-8">
 
 <meta
-    name="viewport"
-    content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no"
+name="viewport"
+content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no"
 >
 
 <meta
-    name="theme-color"
-    content="#05070b"
+name="theme-color"
+content="#05070b"
 >
 
 <script
-    src="https://telegram.org/js/telegram-web-app.js"
+src="https://telegram.org/js/telegram-web-app.js"
 ></script>
 
 <title>ÖDÜL AVCISI</title>
 
-
 <style>
-
-/* =====================================================
-   TEMEL
-   ===================================================== */
 
 * {
 
@@ -3162,7 +2948,7 @@ body {
 
 
 /* =====================================================
-   İKİLİ PANEL
+   İKİ SÜTUN
    ===================================================== */
 
 .sections {
@@ -3210,7 +2996,7 @@ body {
 
 
 /* =====================================================
-   BAŞLIK
+   PANEL BAŞLIĞI
    ===================================================== */
 
 .section-title {
@@ -3255,8 +3041,7 @@ body {
 
     min-width: 27px;
 
-    padding:
-        5px;
+    padding: 5px;
 
     text-align: center;
 
@@ -3334,7 +3119,7 @@ body {
 
 
 /* =====================================================
-   YENİ KAYIT
+   YENİ KAYIT ANİMASYONU
    ===================================================== */
 
 .card.new-item {
@@ -3389,7 +3174,7 @@ body {
 
 
 /* =====================================================
-   YENİ ROZET
+   YENİ İŞARETİ
    ===================================================== */
 
 .new-badge {
@@ -3541,13 +3326,11 @@ body {
 @keyframes fireMove {
 
     0% {
-
         transform:
             translateX(-100%);
     }
 
     100% {
-
         transform:
             translateX(100%);
     }
@@ -3567,18 +3350,23 @@ body {
     align-items:
         flex-start;
 
-    justify-content:
-        space-between;
-
     gap: 3px;
 }
+
+
+/*
+   BURADA ARTIK GOODY / CHEST BADGE YOK.
+   İSMİN YANINDA SADECE YENİ ROZETİ GÖRÜNÜR.
+*/
 
 .user {
 
     min-width: 0;
 
+    width: 100%;
+
     padding-right:
-        2px;
+        25px;
 
     font-size: 13px;
 
@@ -3588,37 +3376,6 @@ body {
 
     overflow-wrap:
         anywhere;
-}
-
-.badge {
-
-    flex-shrink: 0;
-
-    padding:
-        4px
-        5px;
-
-    border-radius: 6px;
-
-    font-size: 6px;
-
-    line-height: 1;
-
-    font-weight: 1000;
-}
-
-.goody .badge {
-
-    background: #3b1761;
-
-    color: #dfbaff;
-}
-
-.chest .badge {
-
-    background: #504600;
-
-    color: #ffe878;
 }
 
 
@@ -3792,7 +3549,7 @@ body {
 
 
 /* =====================================================
-   CANLI BUTONU
+   CANLI
    ===================================================== */
 
 .live {
@@ -3875,7 +3632,7 @@ body {
 
 
 /* =====================================================
-   GENİŞ
+   BÜYÜK EKRAN
    ===================================================== */
 
 @media(min-width:600px) {
@@ -4003,7 +3760,6 @@ body {
 
 </head>
 
-
 <body>
 
 
@@ -4032,13 +3788,15 @@ body {
 
 
 <!-- =====================================================
-     YAN YANA
+     İKİ SÜTUN
      ===================================================== -->
 
 <div class="sections">
 
 
-    <!-- GOODY -->
+    <!-- =================================================
+         GOODY BAG
+         ================================================= -->
 
     <section class="panel">
 
@@ -4072,7 +3830,9 @@ body {
     </section>
 
 
-    <!-- CHEST -->
+    <!-- =================================================
+         HAZİNE
+         ================================================= -->
 
     <section class="panel">
 
@@ -4162,7 +3922,7 @@ let firstLoad = true;
 
 
 /* =====================================================
-   BİLİNENLER
+   DAHA ÖNCE GÖRÜLENLER
    ===================================================== */
 
 const knownItems =
@@ -4170,7 +3930,7 @@ const knownItems =
 
 
 /* =====================================================
-   GERÇEKTEN YENİ OLANLAR
+   YENİLER
    ===================================================== */
 
 const freshItems =
@@ -4178,7 +3938,7 @@ const freshItems =
 
 
 /* =====================================================
-   ESCAPE
+   HTML ESCAPE
    ===================================================== */
 
 function esc(value) {
@@ -4215,7 +3975,7 @@ function esc(value) {
 
 
 /* =====================================================
-   KAYIT ANAHTARI
+   KAYIT KEY
    ===================================================== */
 
 function itemKey(d) {
@@ -4239,7 +3999,7 @@ function itemKey(d) {
 
 
 /* =====================================================
-   YENİ Mİ?
+   YENİ KAYIT
    ===================================================== */
 
 function isNewItem(d) {
@@ -4247,11 +4007,6 @@ function isNewItem(d) {
     const key =
         itemKey(d);
 
-
-    /*
-       İlk açılışta mevcut kayıtlar
-       yeni sayılmıyor.
-    */
 
     if (firstLoad) {
 
@@ -4262,10 +4017,6 @@ function isNewItem(d) {
         return false;
     }
 
-
-    /*
-       Sonradan gelen yeni kayıt.
-    */
 
     if (
         !knownItems.has(
@@ -4285,10 +4036,6 @@ function isNewItem(d) {
         return true;
     }
 
-
-    /*
-       8 saniye boyunca YENİ etiketi.
-    */
 
     const created =
         freshItems.get(
@@ -4326,7 +4073,7 @@ function isNewItem(d) {
 
 
 /* =====================================================
-   100+ COIN ALEV
+   SICAK COIN
    ===================================================== */
 
 function isHot(d) {
@@ -4386,32 +4133,24 @@ function card(d) {
 
             ${
                 hot
-
                 ? `
-
                     <div
                         class="fire-line"
                     ></div>
-
                 `
-
                 : ""
             }
 
 
             ${
                 fresh
-
                 ? `
-
                     <div
                         class="new-badge"
                     >
                         ✨ YENİ
                     </div>
-
                 `
-
                 : ""
             }
 
@@ -4429,17 +4168,6 @@ function card(d) {
 
                 </div>
 
-
-                <div class="badge">
-
-                    ${
-                        isGoody
-                            ? "🟪 GOODY"
-                            : "🟨 CHEST"
-                    }
-
-                </div>
-
             </div>
 
 
@@ -4451,8 +4179,12 @@ function card(d) {
 
                     ${
                         hot
-                            ? `<span class="fire">🔥</span>`
-                            : "🪙"
+                        ? `
+                            <span class="fire">
+                                🔥
+                            </span>
+                        `
+                        : "🪙"
                     }
 
                     COIN
@@ -4468,8 +4200,8 @@ function card(d) {
 
                     ${
                         hot
-                            ? " 🔥"
-                            : ""
+                        ? " 🔥"
+                        : ""
                     }
 
                 </span>
@@ -4549,9 +4281,7 @@ function card(d) {
 
             ${
                 d.live
-
                 ? `
-
                     <a
                         class="live"
                         href="${esc(
@@ -4562,9 +4292,7 @@ function card(d) {
                     >
                         🔴 CANLI
                     </a>
-
                 `
-
                 : ""
             }
 
@@ -4576,7 +4304,7 @@ function card(d) {
 
 
 /* =====================================================
-   LİSTE
+   LİSTEYİ ÇİZ
    ===================================================== */
 
 function renderList(
@@ -4612,9 +4340,7 @@ function renderList(
         element.innerHTML = `
 
             <div class="empty">
-
                 Kayıt bekleniyor...
-
             </div>
 
         `;
@@ -4623,19 +4349,15 @@ function renderList(
     }
 
 
-    /*
-       En yeni yukarıda.
-    */
-
     element.innerHTML =
         sorted
-            .map(card)
-            .join("");
+        .map(card)
+        .join("");
 }
 
 
 /* =====================================================
-   RADAR
+   RADAR VERİSİ
    ===================================================== */
 
 async function loadRadar() {
@@ -4671,10 +4393,6 @@ async function loadRadar() {
             await response.json();
 
 
-        /* =============================================
-           VIP HATASI
-           ============================================= */
-
         if (
             !response.ok
         ) {
@@ -4709,10 +4427,6 @@ async function loadRadar() {
         }
 
 
-        /* =============================================
-           AKTİF
-           ============================================= */
-
         statusEl.textContent =
             "🟢 RADAR AKTİF • CANLI VERİ";
 
@@ -4727,35 +4441,30 @@ async function loadRadar() {
             || [];
 
 
-        /* =============================================
-           İLK YÜKLEME
-           ============================================= */
+        /*
+           İlk açılıştaki kayıtlar
+           YENİ olmayacak.
+        */
 
         if (firstLoad) {
 
             goodies.forEach(
-
-                d => knownItems.add(
-                    itemKey(d)
-                )
-
+                d =>
+                    knownItems.add(
+                        itemKey(d)
+                    )
             );
 
 
             chests.forEach(
-
-                d => knownItems.add(
-                    itemKey(d)
-                )
-
+                d =>
+                    knownItems.add(
+                        itemKey(d)
+                    )
             );
 
         }
 
-
-        /* =============================================
-           ÇİZ
-           ============================================= */
 
         renderList(
 
@@ -4779,10 +4488,6 @@ async function loadRadar() {
         );
 
 
-        /*
-           İlk yükleme tamamlandı.
-        */
-
         firstLoad = false;
 
 
@@ -4801,14 +4506,14 @@ async function loadRadar() {
 
 
 /* =====================================================
-   İLK ÇALIŞTIR
+   İLK
    ===================================================== */
 
 loadRadar();
 
 
 /* =====================================================
-   3 SANİYEDE BİR
+   3 SANİYE
    ===================================================== */
 
 setInterval(
@@ -4821,7 +4526,6 @@ setInterval(
 
 </script>
 
-
 </body>
 
 </html>
@@ -4829,7 +4533,7 @@ setInterval(
 
 
 # =========================================================
-# ANA RADAR SAYFASI
+# PUBLIC RADAR
 # =========================================================
 
 RADAR_HTML = r"""
@@ -4842,8 +4546,8 @@ RADAR_HTML = r"""
 <meta charset="UTF-8">
 
 <meta
-    name="viewport"
-    content="width=device-width,initial-scale=1"
+name="viewport"
+content="width=device-width,initial-scale=1"
 >
 
 <title>ÖDÜL AVCISI</title>
@@ -4863,6 +4567,7 @@ body {
     background: #07090d;
 
     color: white;
+
 }
 
 body {
@@ -5048,33 +4753,6 @@ body {
     opacity: .7;
 }
 
-.badge {
-
-    font-size: 12px;
-
-    font-weight: 1000;
-
-    padding:
-        8px
-        10px;
-
-    border-radius: 10px;
-}
-
-.g .badge {
-
-    background: #34145e;
-
-    color: #d9baff;
-}
-
-.c .badge {
-
-    background: #554900;
-
-    color: #ffe878;
-}
-
 .ig {
 
     display: grid;
@@ -5145,7 +4823,9 @@ body {
 
     text-align: center;
 
-    padding: 30px 10px;
+    padding:
+        30px
+        10px;
 
     font-size: 15px;
 
@@ -5210,9 +4890,7 @@ body {
 
 </head>
 
-
 <body>
-
 
 <div class="head">
 
@@ -5384,22 +5062,11 @@ function card(d) {
 
                         ${
                             isGoody
-                                ? "GOODY BAG"
-                                : "HAZİNE SANDIĞI"
+                            ? "GOODY BAG"
+                            : "HAZİNE SANDIĞI"
                         }
 
                     </div>
-
-                </div>
-
-
-                <div class="badge">
-
-                    ${
-                        isGoody
-                            ? "🟪 GOODY"
-                            : "🟨 CHEST"
-                    }
 
                 </div>
 
@@ -5490,9 +5157,7 @@ function card(d) {
 
             ${
                 d.live
-
                 ? `
-
                     <div class="go">
 
                         🔴 CANLI YAYIN
@@ -5514,9 +5179,7 @@ function card(d) {
                         </a>
 
                     </div>
-
                 `
-
                 : ""
             }
 
@@ -5568,8 +5231,8 @@ function render(
 
     element.innerHTML =
         sorted
-            .map(card)
-            .join("");
+        .map(card)
+        .join("");
 }
 
 
@@ -5579,14 +5242,11 @@ async function refresh() {
 
         const response =
             await fetch(
-
                 "/api/all",
-
                 {
                     cache:
                         "no-store"
                 }
-
             );
 
 
@@ -5656,7 +5316,6 @@ setInterval(
 
 </script>
 
-
 </body>
 
 </html>
@@ -5664,7 +5323,7 @@ setInterval(
 
 
 # =========================================================
-# HTTP
+# HTTP SAYFALARI
 # =========================================================
 
 async def radar_page(
@@ -5739,13 +5398,11 @@ async def api_miniapp_data(
         return web.json_response(
 
             {
-
                 "status":
                     "error",
 
                 "message":
                     "Telegram kullanıcı doğrulaması başarısız."
-
             },
 
             status=401
@@ -5767,13 +5424,11 @@ async def api_miniapp_data(
         return web.json_response(
 
             {
-
                 "status":
                     "error",
 
                 "message":
                     "Bu radar sadece VIP üyeler içindir."
-
             },
 
             status=403
@@ -5808,7 +5463,7 @@ async def api_miniapp_data(
 
 
 # =========================================================
-# API
+# PUBLIC API
 # =========================================================
 
 async def api_all(
@@ -5953,7 +5608,7 @@ async def cors(
 
 
 # =========================================================
-# HTTP BAŞLAT
+# HTTP SERVER
 # =========================================================
 
 async def start_http():
@@ -6021,28 +5676,6 @@ async def start_http():
     )
 
 
-    for path in [
-
-        "/api/all",
-        "/api/boxes",
-        "/api/goody_bags",
-        "/api/status",
-        "/api/miniapp-data"
-
-    ]:
-
-        app.router.add_options(
-
-            path,
-
-            lambda request:
-                web.Response(
-                    status=204
-                )
-
-        )
-
-
     runner = web.AppRunner(
         app
     )
@@ -6072,7 +5705,7 @@ async def start_http():
 
 
 # =========================================================
-# TELETHON LISTENER
+# TELEGRAM LISTENER
 # =========================================================
 
 async def listener(
@@ -6118,9 +5751,7 @@ async def listener(
 
 
         d["source_chat_id"] = safe_int(
-
             event.chat_id
-
         )
 
 
@@ -6130,8 +5761,6 @@ async def listener(
 
             return
 
-
-        # NORMAL
 
         await telegram_queue.put({
 
@@ -6143,8 +5772,6 @@ async def listener(
 
         })
 
-
-        # ALARM
 
         alarms = get_alarms(
             d
@@ -6175,27 +5802,6 @@ async def listener(
 
             ):
 
-                print(
-
-                    "[ALARM]",
-
-                    alarm["title"],
-
-                    "|",
-
-                    d["username"],
-
-                    "| COIN:",
-
-                    d["coins"],
-
-                    "| KİŞİ:",
-
-                    d["people"]
-
-                )
-
-
                 await telegram_queue.put({
 
                     "kind":
@@ -6219,7 +5825,7 @@ async def listener(
 
 
 # =========================================================
-# TELETHON WATCHDOG
+# WATCHDOG
 # =========================================================
 
 async def telegram_connection_watch():
@@ -6253,11 +5859,8 @@ async def telegram_connection_watch():
                     except Exception as e:
 
                         print(
-
-                            "[TELEGRAM] Yeniden bağlanma hatası:",
-
+                            "[TELEGRAM] Yeniden bağlanma:",
                             repr(e)
-
                         )
 
 
@@ -6271,7 +5874,7 @@ async def telegram_connection_watch():
         except Exception as e:
 
             print(
-                "[TELEGRAM WATCH]",
+                "[WATCHDOG]",
                 repr(e)
             )
 
@@ -6315,12 +5918,12 @@ async def main():
 
 
     print(
-        "📱 MINI APP AKTİF"
+        "📱 TELEGRAM MINI APP AKTİF"
     )
 
 
     print(
-        "🔥 100+ COIN ALEV EFEKTİ AKTİF"
+        "🔥 YÜKSEK COIN EFEKTİ AKTİF"
     )
 
 
@@ -6370,11 +5973,8 @@ async def main():
         except Exception as e:
 
             print(
-
-                "[TELETHON] Bağlantı hatası:",
-
+                "[TELETHON]",
                 repr(e)
-
             )
 
 
@@ -6414,11 +6014,8 @@ async def main():
     bot_application.add_handler(
 
         CommandHandler(
-
             "start",
-
             bot_start
-
         )
 
     )
@@ -6440,7 +6037,7 @@ async def main():
 
 
     print(
-        "[BOT] VIP Telegram bot aktif."
+        "[BOT] VIP bot aktif."
     )
 
 
@@ -6459,27 +6056,27 @@ async def main():
 
 
     print(
-        "[HAZIR] Goody Bag aktif."
+        "[HAZIR] GOODY BAG"
     )
 
 
     print(
-        "[HAZIR] Hazine Sandığı aktif."
+        "[HAZIR] HAZİNE SANDIĞI"
     )
 
 
     print(
-        "[HAZIR] VIP doğrulama aktif."
+        "[HAZIR] VIP"
     )
 
 
     print(
-        "[HAZIR] Mini App aktif."
+        "[HAZIR] MINI APP"
     )
 
 
     print(
-        "[HAZIR] Mini App URL:",
+        "[HAZIR] MINI APP:",
         MINI_APP_URL
     )
 
@@ -6492,28 +6089,22 @@ async def main():
     finally:
 
         print(
-            "[KAPANIŞ] Sistem kapatılıyor..."
+            "[KAPANIŞ]"
         )
 
 
         try:
 
             if (
-
                 bot_application
-
                 and
-
                 bot_application.updater
-
             ):
 
                 await (
-
                     bot_application
                     .updater
                     .stop()
-
                 )
 
         except Exception as e:
