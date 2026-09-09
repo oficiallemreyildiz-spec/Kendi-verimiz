@@ -681,6 +681,13 @@ async def send_tg(d):
 
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
 
+    # Telegram Inline Keyboard Butonu
+    reply_markup = {
+        "inline_keyboard": [
+            [{"text": "🌐 RADARI AÇ", "url": SITE_URL}]
+        ]
+    }
+
     for attempt in range(1, 9):
         try:
             async with http_session.post(
@@ -688,6 +695,7 @@ async def send_tg(d):
                 json={
                     "chat_id": TARGET_CHAT_ID,
                     "text": text,
+                    "reply_markup": reply_markup,
                     "disable_web_page_preview": True
                 }
             ) as response:
@@ -730,6 +738,12 @@ async def send_alarm(d, alarm):
 
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
 
+    reply_markup = {
+        "inline_keyboard": [
+            [{"text": "🌐 RADARI AÇ", "url": SITE_URL}]
+        ]
+    }
+
     for attempt in range(1, 9):
         try:
             async with http_session.post(
@@ -737,6 +751,7 @@ async def send_alarm(d, alarm):
                 json={
                     "chat_id": TARGET_CHAT_ID,
                     "text": text,
+                    "reply_markup": reply_markup,
                     "disable_web_page_preview": True
                 }
             ) as response:
@@ -800,7 +815,7 @@ body{margin:0;padding:12px;background:#05060c;color:#fff;font-family:Arial,sans-
 .max-stats{display:grid;grid-template-columns:1fr 1fr;gap:7px;}
 .max-stat{background:#ffffff09;border-radius:8px;padding:9px;font-size:10px;font-weight:800;color:#aab2c2;}
 .max-stat b{display:block;color:#fff;font-size:17px;margin-top:3px;word-break:break-word;}
-.max-live{display:block;color:#fff;text-decoration:none;background:#d71950;padding:11px;margin-top:9px;border-radius:9px;text-align:center;font-size:13px;font-weight:1000;}
+.max-live{display:block;color:#fff;text-decoration:none;background:#d71950;padding:11px;margin-top:9px;border-radius:99px;text-align:center;font-size:13px;font-weight:1000;}
 .max-link{display:block;color:#73a7ff;font-size:10px;margin-top:8px;word-break:break-all;text-decoration:none;}
 .panel{min-width:0;background:#090c15ed;border-radius:18px;padding:12px;}
 .panel.g{border:2px solid #9d51ff99;}
@@ -1034,25 +1049,21 @@ async def start_http():
 # TELEGRAM DİNLEYİCİ VE START HANDLER
 # =========================================================
 
-async def start_handler(event):
-    """Bota özelden /start atıldığında butonlu yanıt verir."""
+async def listener(event):
+    """Kaynak kanallardan gelen mesajları dinler."""
     try:
-        if event.is_private:
-            await client.send_message(
-                event.chat_id,
+        # /start komutu geldiyse doğrudan yanıt ver
+        text = event.message.raw_text or ""
+        if text.startswith("/start"):
+            await event.respond(
                 "👋 **Ödül Avcısı Radarına Hoş Geldiniz!**\n\n"
                 "Canlı radar verilerine ve sistem arayüzüne erişmek için aşağıdaki butona tıklayabilirsiniz.",
                 buttons=[
                     [Button.url("🌐 RADARI AÇ", SITE_URL)]
                 ]
             )
-    except Exception as e:
-        print("[START HANDLER HATASI]", repr(e))
+            return
 
-
-async def listener(event):
-    """Kaynak kanallardan gelen mesajları dinler."""
-    try:
         key = (event.chat_id, event.message.id)
         if key in processed_messages:
             return
@@ -1128,11 +1139,8 @@ async def main():
         API_HASH
     )
 
-    # 1. /start Komut Dinleyicisi
-    client.add_event_handler(start_handler, events.NewMessage(pattern=r'^/start'))
-
-    # 2. Kaynak Kanal Dinleyicisi
-    client.add_event_handler(listener, events.NewMessage(chats=SOURCE_CHATS))
+    # Genel mesaj dinleyicisi (Özel mesajlar + Kaynak Kanallar)
+    client.add_event_handler(listener, events.NewMessage())
 
     await client.start()
     print("[TELEGRAM] İstemci bağlandı ve dinleme başladı.")
