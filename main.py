@@ -93,14 +93,6 @@ CREATE TABLE IF NOT EXISTS alarm_history (
 )
 """)
 
-db.execute("""
-CREATE TABLE IF NOT EXISTS verified_users (
-    user_id INTEGER PRIMARY KEY,
-    name TEXT,
-    verified_at INTEGER
-)
-""")
-
 db.commit()
 
 # =========================================================
@@ -716,24 +708,6 @@ load();
 async def radar_page(request):
     return web.Response(text=RADAR_HTML, content_type="text/html", charset="utf-8")
 
-async def verify_page(request):
-    user_id = request.query.get("id")
-    if user_id:
-        try:
-            uid = int(user_id)
-            db.execute("INSERT OR REPLACE INTO verified_users (user_id, name, verified_at) VALUES (?, ?, ?)", (uid, "Kullanıcı", int(time.time())))
-            db.commit()
-            print(f"[VERIFY SUCCESS] User {uid} başarıyla doğrulandı.")
-        except Exception as e:
-            print("[VERIFY HATA]", repr(e))
-    
-    html = """<!DOCTYPE html>
-    <html lang="tr">
-    <head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Doğrulama Başarılı</title>
-    <style>body { background:#05060c; color:#fff; font-family:Arial,sans-serif; text-align:center; padding-top:60px; } .box { background:#090c15; border:2px solid #74ff9a; border-radius:18px; padding:30px; max-width:400px; margin:auto; } h1 { color:#74ff9a; font-size:24px; } p { color:#d6d9e5; font-size:14px; margin-top:15px; }</style>
-    </head><body><div class="box"><h1>✅ Doğrulama Başarılı!</h1><p>Üyeliğiniz onaylandı. Telegram botunuza dönüp <b>/start</b> yazarak VIP Radarı kullanabilirsiniz.</p></div></body></html>"""
-    return web.Response(text=html, content_type="text/html", charset="utf-8")
-
 @web.middleware
 async def cors(request, handler):
     if request.method == "OPTIONS": 
@@ -750,7 +724,6 @@ async def api_status(request): return web.json_response({"status": "online", "ch
 async def start_http():
     app = web.Application(middlewares=[cors])
     app.router.add_get("/", radar_page)
-    app.router.add_get("/verify", verify_page)
     app.router.add_get("/api/all", api_all)
     app.router.add_get("/api/boxes", api_boxes)
     app.router.add_get("/api/goody_bags", api_goody)
@@ -785,7 +758,7 @@ async def listener(event):
 
 async def handle_start(event):
     """
-    /start komutu geldiğinde görseldeki tasarımı birebir basan işleyici.
+    /start komutu geldiğinde doğrudan onaylı mesajı ve VIP Radar butonunu gönderir.
     """
     try:
         if not event.is_private:
@@ -803,28 +776,15 @@ async def handle_start(event):
             pass
             
         base_url = os.environ.get("WEB_URL", f"http://localhost:{PORT}").rstrip('/')
-        row = db.execute("SELECT name FROM verified_users WHERE user_id = ?", (user_id,)).fetchone()
         
-        if row:
-            # GÖRSELDEKİ ONAYLI DURUM (SOL TARAF ALT KISIM)
-            msg = (
-                f"✅ **Doğrulama Başarılı, {first_name}!**\n\n"
-                "Siteden üyeliğiniz onaylandı. VIP Canlı Radar ekranına erişmek için aşağıdaki butona tıklayabilirsiniz."
-            )
-            buttons = [
-                [Button.url("🌐 VIP RADARI AÇ", base_url)]
-            ]
-        else:
-            # GÖRSELDEKİ ONAYSIZ DURUM (SOL TARAF ÜST KISIM)
-            msg = (
-                "⚠️ **Erişim Engellendi!**\n\n"
-                "Bu bota doğrudan erişim izni bulunmamaktadır.\n"
-                "VIP Radarı kullanabilmek için önce web sitemiz üzerinden doğrulama yapmalısınız."
-            )
-            verify_link = f"{base_url}/verify?id={user_id}" if base_url else SITE_URL
-            buttons = [
-                [Button.url("🔒 SİTEDEN DOĞRULAMA YAP", verify_link)]
-            ]
+        # Doğrudan onaylı mesaj ve buton gönderiliyor
+        msg = (
+            f"✅ **Doğrulama Başarılı, {first_name}!**\n\n"
+            "Siteden üyeliğiniz onaylandı. VIP Canlı Radar ekranına erişmek için aşağıdaki butona tıklayabilirsiniz."
+        )
+        buttons = [
+            [Button.url("🌐 VIP RADARI AÇ", base_url if base_url.startswith("http") else SITE_URL)]
+        ]
             
         await event.respond(msg, buttons=buttons, parse_mode="md")
         print(f"[START YANITLANDI] User ID: {user_id}")
