@@ -784,6 +784,9 @@ async def listener(event):
         print("[DİNLEYİCİ HATASI]", repr(e))
 
 async def handle_start(event):
+    """
+    /start komutu geldiğinde görseldeki tasarımı birebir basan işleyici.
+    """
     try:
         if not event.is_private:
             return
@@ -803,24 +806,24 @@ async def handle_start(event):
         row = db.execute("SELECT name FROM verified_users WHERE user_id = ?", (user_id,)).fetchone()
         
         if row:
+            # GÖRSELDEKİ ONAYLI DURUM (SOL TARAF ALT KISIM)
             msg = (
-                f"👋 **Merhaba {first_name}!**\n\n"
-                "✅ **Doğrulama Başarılı!**\n"
-                "VIP Canlı Radar ekranına erişmek için aşağıdaki butonları kullanabilirsiniz."
+                f"✅ **Doğrulama Başarılı, {first_name}!**\n\n"
+                "Siteden üyeliğiniz onaylandı. VIP Canlı Radar ekranına erişmek için aşağıdaki butona tıklayabilirsiniz."
             )
             buttons = [
-                [Button.url("🚀 VIP RADARI AÇ", base_url)],
-                [Button.url("🌐 SİTEYE GİT", SITE_URL)]
+                [Button.url("🌐 VIP RADARI AÇ", base_url)]
             ]
         else:
+            # GÖRSELDEKİ ONAYSIZ DURUM (SOL TARAF ÜST KISIM)
             msg = (
-                f"👋 **Merhaba {first_name}!**\n\n"
-                "🔒 VIP Radar sistemine erişim sağlamak için önce web sitemiz üzerinden doğrulama yapmalısınız.\n"
-                "Aşağıdaki butona tıklayarak doğrulama sayfasına gidin."
+                "⚠️ **Erişim Engellendi!**\n\n"
+                "Bu bota doğrudan erişim izni bulunmamaktadır.\n"
+                "VIP Radarı kullanabilmek için önce web sitemiz üzerinden doğrulama yapmalısınız."
             )
+            verify_link = f"{base_url}/verify?id={user_id}" if base_url else SITE_URL
             buttons = [
-                [Button.url("🚀 SİTEDEN DOĞRULA VE AÇ", SITE_URL)],
-                [Button.url("🔒 DOĞRULAMA SAYFASI", f"{base_url}/verify?id={user_id}")]
+                [Button.url("🔒 SİTEDEN DOĞRULAMA YAP", verify_link)]
             ]
             
         await event.respond(msg, buttons=buttons, parse_mode="md")
