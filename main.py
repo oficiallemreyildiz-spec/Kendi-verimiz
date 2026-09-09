@@ -93,6 +93,14 @@ CREATE TABLE IF NOT EXISTS alarm_history (
 )
 """)
 
+db.execute("""
+CREATE TABLE IF NOT EXISTS verified_users (
+    user_id INTEGER PRIMARY KEY,
+    name TEXT,
+    verified_at INTEGER
+)
+""")
+
 db.commit()
 
 # =========================================================
@@ -166,6 +174,22 @@ def db_load_recent():
         print("[SQLITE] Geçmiş veriler belleğe aktarıldı:", len(rows))
     except Exception as e:
         print("[SQLITE YÜKLEME HATASI]", repr(e))
+
+def is_user_verified(user_id):
+    try:
+        row = db.execute("SELECT 1 FROM verified_users WHERE user_id=? LIMIT 1", (safe_int(user_id),)).fetchone()
+        return row is not None
+    except:
+        return False
+
+def verify_user(user_id, name="Kullanıcı"):
+    try:
+        db.execute("INSERT OR REPLACE INTO verified_users (user_id, name, verified_at) VALUES (?, ?, ?)", (safe_int(user_id), name, int(time.time())))
+        db.commit()
+        return True
+    except Exception as e:
+        print("[DOĞRULAMA KAYIT HATASI]", repr(e))
+        return False
 
 # =========================================================
 # MESAJ VE TOKEN AYRIŞTIRMA (PARSING)
@@ -708,6 +732,28 @@ load();
 async def radar_page(request):
     return web.Response(text=RADAR_HTML, content_type="text/html", charset="utf-8")
 
+async def verify_page(request):
+    try:
+        user_id = request.query.get("id")
+        if not user_id:
+            return web.Response(text="<h1>Hata: Kullanıcı ID bulunamadı!</h1>", content_type="text/html", charset="utf-8")
+        
+        verify_user(user_id, "WebKullanici")
+        
+        html = """
+        <!DOCTYPE html>
+        <html lang="tr">
+        <head><meta charset="utf-8"><title>Doğrulama Başarılı</title></head>
+        <body style="background:#05060c;color:#fff;font-family:Arial;text-align:center;padding-top:50px;">
+            <h1>✅ Doğrulama Başarılı!</h1>
+            <p>Telegram botuna geri dönerek /start yazabilir ve VIP Radara erişebilirsiniz.</p>
+        </body>
+        </html>
+        """
+        return web.Response(text=html, content_type="text/html", charset="utf-8")
+    except Exception as e:
+        return web.Response(text=f"Doğrulama hatası: {str(e)}", status=500)
+
 @web.middleware
 async def cors(request, handler):
     if request.method == "OPTIONS": 
@@ -724,6 +770,7 @@ async def api_status(request): return web.json_response({"status": "online", "ch
 async def start_http():
     app = web.Application(middlewares=[cors])
     app.router.add_get("/", radar_page)
+    app.router.add_get("/verify", verify_page)
     app.router.add_get("/api/all", api_all)
     app.router.add_get("/api/boxes", api_boxes)
     app.router.add_get("/api/goody_bags", api_goody)
@@ -757,37 +804,43 @@ async def listener(event):
         print("[DİNLEYİCİ HATASI]", repr(e))
 
 async def handle_start(event):
-    """
-    /start komutu geldiğinde doğrudan onaylı mesajı ve VIP Radar butonunu gönderir.
-    """
     try:
         if not event.is_private:
             return
             
         user_id = event.sender_id
-        print(f"[START ALINDI] User ID: {user_id}")
-        
         first_name = "Kullanıcı"
         try:
             sender = await event.get_sender()
             if sender and getattr(sender, 'first_name', None):
                 first_name = sender.first_name
+                verify_user(user_id, first_name)
         except:
             pass
             
         base_url = os.environ.get("WEB_URL", f"http://localhost:{PORT}").rstrip('/')
         
-        # Doğrudan onaylı mesaj ve buton gönderiliyor
-        msg = (
-            f"✅ **Doğrulama Başarılı, {first_name}!**\n\n"
-            "Siteden üyeliğiniz onaylandı. VIP Canlı Radar ekranına erişmek için aşağıdaki butona tıklayabilirsiniz."
-        )
-        buttons = [
-            [Button.url("🌐 VIP RADARI AÇ", base_url if base_url.startswith("http") else SITE_URL)]
-        ]
+        # Doğrulama Kontrolü
+        if is_user_verified(user_id):
+            msg = (
+                f"✅ **Doğrulama Başarılı, {first_name}!**\n\n"
+                "Siteden üyeliğiniz onaylandı. VIP Canlı Radar ekranına erişmek için aşağıdaki butona tıklayabilirsiniz."
+            )
+            buttons = [
+                [Button.url("🌐 VIP RADARI AÇ", base_url if base_url.startswith("http") else SITE_URL)]
+            ]
+        else:
+            verify_link = f"{base_url}/verify?id={user_id}"
+            msg = (
+                "⚠️ **Erişim Engellendi!**\n\n"
+                "Bu bota doğrudan erişim izni bulunmamaktadır.\n"
+                "VIP Radarı kullanabilmek için önce web sitemiz üzerinden doğrulama yapmalısınız."
+            )
+            buttons = [
+                [Button.url("🔒 SİTEDEN DOĞRULAMA YAP", verify_link)]
+            ]
             
         await event.respond(msg, buttons=buttons, parse_mode="md")
-        print(f"[START YANITLANDI] User ID: {user_id}")
     except Exception as e:
         print("[START İŞLEME HATASI]", repr(e))
 
