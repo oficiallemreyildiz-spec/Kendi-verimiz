@@ -13,16 +13,19 @@ SITE_URL = "https://sites.google.com/view/gody-bag-ve-chesture-/ana-sayfa"
 PORT = int(os.environ.get("PORT", "10000"))
 
 # =========================================================
-# 1. TELEGRAM BOT KOMUTLARI
+# 1. TELEGRAM BOT KOMUTLARI (VIP Üyelik Onaylı)
 # =========================================================
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user = update.effective_user
+    username_str = f"(@{user.username})" if user.username else ""
+    
     keyboard = [[InlineKeyboardButton("🌐 RADARI VE LİNKLERİ AÇ", url=SITE_URL)]]
     reply_markup = InlineKeyboardMarkup(keyboard)
     
     await update.message.reply_text(
-        f"👋 **Hoş Geldin, {user.first_name}!**\n\n"
-        "Canlı radar verilerine ve sistem arayüzüne erişmek için aşağıdaki butona tıklayabilirsin.",
+        f"👋 **Hoş Geldin, {user.first_name} {username_str}!**\n\n"
+        "✅ **Üyeliğin başarıyla onaylandı ve sisteme kaydedildi.**\n"
+        "Canlı radar verilerine ve airdrop odalarına erişmek için aşağıdaki butona tıklayabilirsin.",
         reply_markup=reply_markup,
         parse_mode="Markdown"
     )
@@ -48,7 +51,7 @@ async def start_web_server():
     print(f"[HTTP] Web sunucusu {PORT} portunda aktif edildi.")
 
 # =========================================================
-# 3. ANA ÇALIŞTIRMA (İkisi Aynı Anda)
+# 3. ANA ÇALIŞTIRMA
 # =========================================================
 async def main():
     if not BOT_TOKEN:
@@ -59,13 +62,12 @@ async def main():
     application = ApplicationBuilder().token(BOT_TOKEN).build()
     application.add_handler(CommandHandler("start", start))
 
-    # Web sunucusunu ve botu aynı anda (asyncio) ayağa kaldır
+    # Web sunucusunu ve botu aynı anda ayağa kaldır
     await start_web_server()
     print("Bot polling modunda başlatılıyor...")
     
     await run_telegram_bot(application)
     
-    # Sonsuza kadar çalışmaya devam etmesi için
     await asyncio.Event().wait()
 
 if __name__ == '__main__':
