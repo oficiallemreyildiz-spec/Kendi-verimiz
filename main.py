@@ -10,7 +10,7 @@ from urllib.parse import unquote
 import aiohttp
 from aiohttp import web
 
-from telethon import TelegramClient, events
+from telethon import TelegramClient, events, Button
 from telethon.sessions import StringSession
 
 # =========================================================
@@ -106,6 +106,14 @@ CREATE TABLE IF NOT EXISTS alarm_history (
     event_key TEXT,
     alarm_type TEXT,
     created_at INTEGER
+)
+""")
+
+db.execute("""
+CREATE TABLE IF NOT EXISTS verified_users (
+    user_id INTEGER PRIMARY KEY,
+    name TEXT,
+    verified_at INTEGER
 )
 """)
 
@@ -1237,6 +1245,41 @@ async def radar_page(request):
         charset="utf-8"
     )
 
+async def verify_page(request):
+    user_id = request.query.get("id")
+    if user_id:
+        try:
+            uid = int(user_id)
+            db.execute(
+                "INSERT OR REPLACE INTO verified_users (user_id, name, verified_at) VALUES (?, ?, ?)",
+                (uid, "JIMIN", int(time.time()))
+            )
+            db.commit()
+        except Exception as e:
+            print("[VERIFY HATA]", repr(e))
+    
+    html = """<!DOCTYPE html>
+    <html lang="tr">
+    <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width,initial-scale=1">
+    <title>Doğrulama Başarılı</title>
+    <style>
+    body { background:#05060c; color:#fff; font-family:Arial,sans-serif; text-align:center; padding-top:60px; }
+    .box { background:#090c15; border:2px solid #74ff9a; border-radius:18px; padding:30px; max-width:400px; margin:auto; }
+    h1 { color:#74ff9a; font-size:24px; }
+    p { color:#d6d9e5; font-size:14px; margin-top:15px; }
+    </style>
+    </head>
+    <body>
+    <div class="box">
+      <h1>✅ Doğrulama Başarılı!</h1>
+      <p>Üyeliğiniz onaylandı. Şimdi Telegram botuna geri dönerek <b>/start</b> yazabilir ve VIP Radarı açabilirsiniz.</p>
+    </div>
+    </body>
+    </html>"""
+    return web.Response(text=html, content_type="text/html", charset="utf-8")
+
 @web.middleware
 async def cors(request, handler):
     if request.method == "OPTIONS":
@@ -1299,6 +1342,7 @@ async def start_http():
     app = web.Application(middlewares=[cors])
     app.router.add_get("/", radar_page)
     app.router.add_get("/radar", radar_page)
+    app.router.add_get("/verify", verify_page)
     app.router.add_get("/api/all", api_all)
     app.router.add_get("/api/boxes", api_boxes)
     app.router.add_get("/api/goody_bags", api_goody)
@@ -1319,7 +1363,7 @@ async def start_http():
     print("[HTTP] Sunucu başladı:", PORT)
 
 # =========================================================
-# LISTENER
+# LISTENER & BOT COMMANDS
 # =========================================================
 
 async def listener(event):
@@ -1360,6 +1404,39 @@ async def listener(event):
                 })
     except Exception as e:
         print("[DİNLEYİCİ HATASI]", repr(e))
+
+async def bot_start_handler(event):
+    try:
+        if not event.is_private:
+            return
+        user_id = event.sender_id
+        
+        # Dinamik web taban URL'ini belirle (Render veya yerel)
+        base_url = os.environ.get("WEB_URL", f"http://localhost:{PORT}")
+        
+        row = db.execute(
+            "SELECT name FROM verified_users WHERE user_id = ?",
+            (user_id,)
+        ).fetchone()
+        
+        if row:
+            name = row["name"] or "JIMIN"
+            msg = (
+                f"✅ **Doğrulama Başarılı, {name}!**\n\n"
+                f"Siteden üyeliğiniz onaylandı. VIP Canlı Radar ekranına erişmek için aşağıdaki butona tıklayabilirsiniz."
+            )
+            buttons = [Button.url("🌐 VIP RADARI AÇ", base_url)]
+            await event.respond(msg, buttons=buttons)
+        else:
+            msg = (
+                "⚠️ **Erişim Engellendi!**\n\n"
+                f"Bu bota doğrudan erişim izni bulunmamaktadır.\n"
+                f"VIP Radarı kullanabilmek için önce web sitemiz üzerinden doğrulama yapmalısınız."
+            )
+            buttons = [Button.url("🔒 SİTEDEN DOĞRULAMA YAP", f"{base_url}/verify?id={user_id}")]
+            await event.respond(msg, buttons=buttons)
+    except Exception as e:
+        print("[BOT START HATA]", repr(e))
 
 # =========================================================
 # TELEGRAM WATCHDOG
@@ -1409,17 +1486,25 @@ async def main():
         except Exception as e:
             print("[TELEGRAM] Bağlantı hatası:", repr(e))
             await asyncio.sleep(15)
+            
+    # Kaynak kanal dinleyicisi
     client.add_event_handler(
         listener,
         events.NewMessage(chats=SOURCE_CHATS)
     )
+    
+    # /start komut dinleyicisi (Özel mesajlar için)
+    client.add_event_handler(
+        bot_start_handler,
+        events.NewMessage(pattern=r'/start', incoming=True)
+    )
+    
     asyncio.create_task(sender())
     asyncio.create_task(telegram_connection_watch())
     print("[HAZIR] Goody Bag + Hazine Sandığı aktif.")
     print("[HAZIR] Büyük yazılı mobil arayüz aktif.")
-    print("[HAZIR] Coin alarmı aktif.")
-    print("[HAZIR] Düşük kişi alarmı aktif.")
-    print("[HAZIR] Telegram normal tıklanabilir link aktif.")
+    print("[HAZIR] /start komutu ve doğrulama sistemi aktif.")
+    print("[HAZIR] Coin ve düşük kişi alarmı aktif.")
     try:
         await client.run_until_disconnected()
     finally:
