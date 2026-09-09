@@ -1,11 +1,11 @@
 # ============================================================
 # main.py
 # ÖDÜL AVCISI
-#
 # GOODY BAG + HAZİNE SANDIĞI RADARI
 # TELEGRAM BOT + TELETHON + MINI APP
 # VIP / DAVET SİSTEMİ
 # 429 KORUMASI
+# PRIORITY QUEUE HATASI DÜZELTİLDİ
 # BÜYÜK YAZI MOBİL ARAYÜZ
 # ============================================================
 
@@ -47,11 +47,19 @@ from telegram.ext import (
 # ============================================================
 
 API_ID = int(os.environ["API_ID"])
+
 API_HASH = os.environ["API_HASH"]
+
 STRING_SESSION = os.environ["STRING_SESSION"]
+
 BOT_TOKEN = os.environ["BOT_TOKEN"]
 
-PORT = int(os.environ.get("PORT", "10000"))
+PORT = int(
+    os.environ.get(
+        "PORT",
+        "10000"
+    )
+)
 
 BASE_URL = os.environ.get(
     "BASE_URL",
@@ -64,7 +72,10 @@ BOT_USERNAME = os.environ.get(
 )
 
 ADMIN_USER_ID = int(
-    os.environ.get("ADMIN_USER_ID", "0")
+    os.environ.get(
+        "ADMIN_USER_ID",
+        "0"
+    )
 )
 
 ADMIN_CHAT_ID = int(
@@ -85,7 +96,7 @@ TARGET_CHAT_ID = -1004421946217
 
 
 # ============================================================
-# KAYNAK TELEGRAM KANALLARI
+# SOURCE CHATS
 # ============================================================
 
 SOURCE_CHATS = [
@@ -102,6 +113,7 @@ SOURCE_CHATS = [
 # ============================================================
 
 COIN_ALARM_LIMIT = 100
+
 PEOPLE_ALARM_LIMIT = 5
 
 
@@ -110,6 +122,7 @@ PEOPLE_ALARM_LIMIT = 5
 # ============================================================
 
 LIVE_GOODY_BAGS = {}
+
 LIVE_CHESTS = {}
 
 processed_messages = set()
@@ -126,7 +139,16 @@ telegram_queue = asyncio.PriorityQueue()
 telegram_send_lock = asyncio.Lock()
 
 last_telegram_send = 0.0
+
 telegram_retry_until = 0.0
+
+# ============================================================
+# ÖNEMLİ:
+# PriorityQueue içinde aynı priority değerinde dict
+# karşılaştırılmasın diye benzersiz sıra numarası kullanıyoruz.
+# ============================================================
+
+queue_counter = 0
 
 
 # ============================================================
@@ -137,6 +159,7 @@ DB_FILE = "radar.db"
 
 
 def db():
+
     return sqlite3.connect(
         DB_FILE,
         timeout=30,
@@ -147,6 +170,7 @@ def db():
 def init_db():
 
     conn = db()
+
     cur = conn.cursor()
 
     cur.execute("""
@@ -198,6 +222,7 @@ def init_db():
     """)
 
     conn.commit()
+
     conn.close()
 
 
@@ -212,7 +237,12 @@ def add_vip(
 ):
 
     now = int(time.time())
-    expires = now + VIP_DAYS * 86400
+
+    expires = (
+        now
+        +
+        VIP_DAYS * 86400
+    )
 
     conn = db()
 
@@ -241,6 +271,7 @@ def add_vip(
     ))
 
     conn.commit()
+
     conn.close()
 
     return expires
@@ -269,6 +300,7 @@ def get_vip(user_id):
     conn.close()
 
     if not row:
+
         return None
 
     if int(row[3]) <= int(time.time()):
@@ -281,6 +313,7 @@ def get_vip(user_id):
         )
 
         conn.commit()
+
         conn.close()
 
         return None
@@ -304,9 +337,12 @@ def remove_vip(user_id):
         (user_id,)
     )
 
-    removed = cur.rowcount > 0
+    removed = (
+        cur.rowcount > 0
+    )
 
     conn.commit()
+
     conn.close()
 
     return removed
@@ -348,7 +384,11 @@ def create_invite():
 
     now = int(time.time())
 
-    expires = now + 24 * 3600
+    expires = (
+        now
+        +
+        24 * 3600
+    )
 
     conn = db()
 
@@ -368,6 +408,7 @@ def create_invite():
     ))
 
     conn.commit()
+
     conn.close()
 
     return token
@@ -379,6 +420,7 @@ def use_invite(
 ):
 
     if not token:
+
         return False
 
     conn = db()
@@ -432,13 +474,18 @@ def use_invite(
     if cur.rowcount != 1:
 
         conn.rollback()
+
         conn.close()
 
         return False
 
     now = int(time.time())
 
-    expires = now + VIP_DAYS * 86400
+    expires = (
+        now
+        +
+        VIP_DAYS * 86400
+    )
 
     cur.execute("""
         INSERT INTO vip_users
@@ -465,13 +512,14 @@ def use_invite(
     ))
 
     conn.commit()
+
     conn.close()
 
     return True
 
 
 # ============================================================
-# YARDIMCI
+# HELPERS
 # ============================================================
 
 def safe_int(
@@ -482,9 +530,12 @@ def safe_int(
     try:
 
         if value is None:
+
             return default
 
-        return int(float(value))
+        return int(
+            float(value)
+        )
 
     except Exception:
 
@@ -513,7 +564,10 @@ def extract_token_from_event(event):
 
     try:
 
-        text = event.message.raw_text or ""
+        text = (
+            event.message.raw_text
+            or ""
+        )
 
     except Exception:
 
@@ -555,6 +609,7 @@ def extract_token_from_event(event):
             )
 
             if not url:
+
                 continue
 
             match = re.search(
@@ -570,6 +625,7 @@ def extract_token_from_event(event):
                 )
 
     except Exception:
+
         pass
 
     return None
@@ -578,6 +634,7 @@ def extract_token_from_event(event):
 def decode_token(token):
 
     if not token:
+
         return None
 
     try:
@@ -590,8 +647,10 @@ def decode_token(token):
             -len(token) % 4
         )
 
-        decoded = base64.urlsafe_b64decode(
-            token + padding
+        decoded = (
+            base64.urlsafe_b64decode(
+                token + padding
+            )
         )
 
         data = json.loads(
@@ -609,6 +668,7 @@ def decode_token(token):
             return data
 
     except Exception:
+
         pass
 
     return None
@@ -621,6 +681,7 @@ def decode_token(token):
 def extract_p_room(text):
 
     if not text:
+
         return None
 
     patterns = [
@@ -640,6 +701,7 @@ def extract_p_room(text):
         )
 
         if not match:
+
             continue
 
         try:
@@ -650,18 +712,23 @@ def extract_p_room(text):
                 -len(encoded) % 4
             )
 
-            room = base64.urlsafe_b64decode(
-                encoded + padding
-            ).decode(
-                "utf-8",
-                errors="ignore"
-            ).strip()
+            room = (
+                base64.urlsafe_b64decode(
+                    encoded + padding
+                )
+                .decode(
+                    "utf-8",
+                    errors="ignore"
+                )
+                .strip()
+            )
 
             if room.isdigit():
 
                 return room
 
         except Exception:
+
             pass
 
     return None
@@ -674,6 +741,7 @@ def extract_p_room(text):
 def extract_username_from_text(text):
 
     if not text:
+
         return None
 
     patterns = [
@@ -694,7 +762,10 @@ def extract_username_from_text(text):
 
         if match:
 
-            return match.group(1).strip()
+            return (
+                match.group(1)
+                .strip()
+            )
 
     return None
 
@@ -763,6 +834,7 @@ def extract_coins(
 def extract_people(text):
 
     if not text:
+
         return 0
 
     patterns = [
@@ -808,6 +880,7 @@ def extract_people(text):
 def extract_joined(text):
 
     if not text:
+
         return 0
 
     patterns = [
@@ -844,6 +917,7 @@ def extract_joined(text):
 def extract_viewers(text):
 
     if not text:
+
         return 0
 
     match = re.search(
@@ -975,7 +1049,9 @@ def calculate_target_time(
     token_data=None
 ):
 
-    now = int(time.time())
+    now = int(
+        time.time()
+    )
 
     if token_data:
 
@@ -991,6 +1067,7 @@ def calculate_target_time(
             )
 
             if value is None:
+
                 continue
 
             try:
@@ -1013,9 +1090,12 @@ def calculate_target_time(
                     < 86400
                 ):
 
-                    return now + value
+                    return (
+                        now + value
+                    )
 
             except Exception:
+
                 pass
 
     if text:
@@ -1040,7 +1120,9 @@ def calculate_target_time(
 
             if duration > 0:
 
-                return now + duration
+                return (
+                    now + duration
+                )
 
     return now + 180
 
@@ -1115,6 +1197,7 @@ def parse_source_message(event):
     )
 
     if is_goody is None:
+
         return None
 
     username = None
@@ -1138,7 +1221,9 @@ def parse_source_message(event):
 
     username = (
         username
-        or extract_username_from_text(text)
+        or extract_username_from_text(
+            text
+        )
         or "bilinmiyor"
     )
 
@@ -1196,6 +1281,7 @@ def parse_source_message(event):
                 )
 
                 if people:
+
                     break
 
     joined = extract_joined(
@@ -1221,6 +1307,7 @@ def parse_source_message(event):
                 )
 
                 if joined:
+
                     break
 
     rate = extract_rate(
@@ -1251,6 +1338,7 @@ def parse_source_message(event):
                 )
 
                 if viewers:
+
                     break
 
     now = int(
@@ -1329,6 +1417,7 @@ def add_to_radar(data):
     )
 
     if not room:
+
         return False
 
     if room in target:
@@ -1341,8 +1430,10 @@ def add_to_radar(data):
 
         if (
             int(time.time())
-            - old_time
-            < 5
+            -
+            old_time
+            <
+            5
         ):
 
             return False
@@ -1382,6 +1473,7 @@ def add_to_radar(data):
         ))
 
         conn.commit()
+
         conn.close()
 
     except Exception as e:
@@ -1410,7 +1502,8 @@ def should_alarm(data):
 
     if (
         coins >= COIN_ALARM_LIMIT
-        and people <= PEOPLE_ALARM_LIMIT
+        and
+        people <= PEOPLE_ALARM_LIMIT
     ):
 
         return True
@@ -1445,6 +1538,7 @@ def save_alarm(data):
         ))
 
         conn.commit()
+
         conn.close()
 
     except Exception as e:
@@ -1457,7 +1551,6 @@ def save_alarm(data):
 
 # ============================================================
 # TELEGRAM API
-# 429 KORUMASI
 # ============================================================
 
 async def telegram_api(
@@ -1470,6 +1563,7 @@ async def telegram_api(
     global telegram_retry_until
 
     if not http_session:
+
         return False, None
 
     url = (
@@ -1610,7 +1704,7 @@ async def telegram_api(
 
 
 # ============================================================
-# TELEGRAM RADAR MESAJI
+# NORMAL TELEGRAM MESAJI
 # ============================================================
 
 async def send_telegram_message(data):
@@ -1663,7 +1757,7 @@ async def send_telegram_message(data):
 
 
 # ============================================================
-# ALARM MESAJI
+# ALARM
 # ============================================================
 
 async def send_alarm(data):
@@ -1719,14 +1813,24 @@ async def send_alarm(data):
 
 
 # ============================================================
-# TELEGRAM KUYRUK
+# TELEGRAM QUEUE
+#
+# ESKİ HATA:
+# (priority, dict)
+#
+# Aynı priority olunca Python dict karşılaştırıyordu.
+#
+# YENİ:
+# (priority, sıra_no, dict)
+#
+# Sıra_no her zaman farklı olduğu için dict karşılaştırılmaz.
 # ============================================================
 
 async def telegram_sender():
 
     while True:
 
-        priority, data = (
+        priority, sequence, data = (
             await telegram_queue.get()
         )
 
@@ -1784,7 +1888,7 @@ async def send_admin(text):
 
 
 # ============================================================
-# TELEGRAM MINI APP AUTH
+# TELEGRAM INIT DATA
 # ============================================================
 
 def validate_telegram_init_data(
@@ -1825,8 +1929,10 @@ def validate_telegram_init_data(
 
         if (
             int(time.time())
-            - auth_date
-            > 86400
+            -
+            auth_date
+            >
+            86400
         ):
 
             return None
@@ -1875,8 +1981,8 @@ def validate_telegram_init_data(
 
 
 # ============================================================
-# MINI APP HTML
-# BÜYÜK YAZI SÜRÜMÜ
+# MINI APP
+# BÜYÜK YAZI
 # ============================================================
 
 MINI_APP_HTML = r"""
@@ -1958,14 +2064,14 @@ body{
     padding:
         8px
         4px
-        14px;
+        15px;
 
 }
 
 .title{
 
     font-size:
-        clamp(30px,8vw,48px);
+        clamp(34px,9vw,52px);
 
     font-weight:1000;
 
@@ -1980,13 +2086,13 @@ body{
 
 .subtitle{
 
-    margin-top:9px;
+    margin-top:10px;
 
-    font-size:14px;
+    font-size:15px;
 
     color:#aeb7ca;
 
-    font-weight:900;
+    font-weight:1000;
 
 }
 
@@ -1994,11 +2100,11 @@ body{
 
     display:inline-flex;
 
-    margin-top:10px;
+    margin-top:11px;
 
     padding:
-        9px
-        15px;
+        10px
+        16px;
 
     border-radius:999px;
 
@@ -2008,7 +2114,7 @@ body{
 
     color:#69ff9a;
 
-    font-size:13px;
+    font-size:14px;
 
     font-weight:1000;
 
@@ -2022,14 +2128,14 @@ body{
 
 
 /* ============================================================
-   SON YAKALANAN
+   LATEST
    ============================================================ */
 
 .latest-box{
 
-    margin-bottom:10px;
+    margin-bottom:11px;
 
-    padding:12px;
+    padding:13px;
 
     border-radius:18px;
 
@@ -2046,11 +2152,11 @@ body{
 
 .latest-title{
 
-    font-size:18px;
+    font-size:19px;
 
     font-weight:1000;
 
-    margin-bottom:9px;
+    margin-bottom:10px;
 
 }
 
@@ -2060,9 +2166,9 @@ body{
 
     align-items:center;
 
-    gap:10px;
+    gap:11px;
 
-    padding:10px;
+    padding:11px;
 
     border-radius:15px;
 
@@ -2086,9 +2192,9 @@ body{
 
 .latest-icon{
 
-    width:50px;
+    width:52px;
 
-    height:50px;
+    height:52px;
 
     display:flex;
 
@@ -2100,7 +2206,7 @@ body{
 
     background:#1c2030;
 
-    font-size:27px;
+    font-size:29px;
 
     flex-shrink:0;
 
@@ -2116,7 +2222,7 @@ body{
 
 .latest-user{
 
-    font-size:17px;
+    font-size:18px;
 
     font-weight:1000;
 
@@ -2136,11 +2242,11 @@ body{
 
     gap:7px;
 
-    margin-top:6px;
+    margin-top:7px;
 
     color:#c0c8d9;
 
-    font-size:13px;
+    font-size:14px;
 
     font-weight:900;
 
@@ -2157,12 +2263,12 @@ body{
     background:#df1650;
 
     padding:
-        10px
-        13px;
+        11px
+        14px;
 
     border-radius:10px;
 
-    font-size:12px;
+    font-size:13px;
 
     font-weight:1000;
 
@@ -2178,10 +2284,10 @@ body{
     width:100%;
 
     padding:
-        14px
-        15px;
+        15px
+        16px;
 
-    margin-bottom:9px;
+    margin-bottom:10px;
 
     border-radius:14px;
 
@@ -2193,7 +2299,7 @@ body{
 
     color:#fff;
 
-    font-size:16px;
+    font-size:17px;
 
     font-weight:700;
 
@@ -2214,11 +2320,11 @@ body{
 
     display:flex;
 
-    gap:7px;
+    gap:8px;
 
     overflow-x:auto;
 
-    padding-bottom:9px;
+    padding-bottom:10px;
 
     scrollbar-width:none;
 
@@ -2235,8 +2341,8 @@ body{
     flex-shrink:0;
 
     padding:
-        10px
-        14px;
+        11px
+        15px;
 
     border-radius:12px;
 
@@ -2246,7 +2352,7 @@ body{
 
     color:#aeb7ca;
 
-    font-size:13px;
+    font-size:14px;
 
     font-weight:1000;
 
@@ -2264,7 +2370,7 @@ body{
 
 
 /* ============================================================
-   RADAR
+   GRID
    ============================================================ */
 
 .radar-grid{
@@ -2310,7 +2416,7 @@ body{
 
 
 /* ============================================================
-   PANEL
+   PANEL TITLE
    ============================================================ */
 
 .panel-title{
@@ -2322,15 +2428,15 @@ body{
     justify-content:space-between;
 
     padding:
-        3px
-        3px
-        9px;
+        4px
+        4px
+        10px;
 
 }
 
 .panel-name{
 
-    font-size:15px;
+    font-size:16px;
 
     font-weight:1000;
 
@@ -2350,10 +2456,10 @@ body{
 
 .panel-count{
 
-    min-width:29px;
+    min-width:31px;
 
     padding:
-        5px
+        6px
         8px;
 
     border-radius:999px;
@@ -2362,7 +2468,7 @@ body{
 
     text-align:center;
 
-    font-size:12px;
+    font-size:13px;
 
     font-weight:1000;
 
@@ -2379,11 +2485,11 @@ body{
 
     overflow:hidden;
 
-    margin-bottom:7px;
+    margin-bottom:8px;
 
-    padding:9px;
+    padding:10px;
 
-    border-radius:13px;
+    border-radius:14px;
 
     background:
         linear-gradient(
@@ -2472,7 +2578,7 @@ body{
 
     gap:7px;
 
-    margin-bottom:8px;
+    margin-bottom:9px;
 
 }
 
@@ -2480,7 +2586,7 @@ body{
 
     min-width:0;
 
-    font-size:14px;
+    font-size:16px;
 
     font-weight:1000;
 
@@ -2497,8 +2603,8 @@ body{
     flex-shrink:0;
 
     padding:
-        5px
-        7px;
+        6px
+        8px;
 
     border-radius:7px;
 
@@ -2514,7 +2620,7 @@ body{
 
 
 /* ============================================================
-   BİLGİLER
+   INFO
    ============================================================ */
 
 .info-grid{
@@ -2524,7 +2630,7 @@ body{
     grid-template-columns:
         1fr 1fr;
 
-    gap:5px;
+    gap:6px;
 
 }
 
@@ -2532,15 +2638,15 @@ body{
 
     min-width:0;
 
-    padding:8px;
+    padding:9px;
 
-    border-radius:8px;
+    border-radius:9px;
 
     background:#151a27;
 
     color:#a3aec2;
 
-    font-size:11px;
+    font-size:12px;
 
     font-weight:900;
 
@@ -2552,11 +2658,11 @@ body{
 
     display:block;
 
-    margin-top:4px;
+    margin-top:5px;
 
     color:#fff;
 
-    font-size:14px;
+    font-size:16px;
 
     font-weight:1000;
 
@@ -2570,20 +2676,20 @@ body{
 
 
 /* ============================================================
-   CANLI
+   LIVE BUTTON
    ============================================================ */
 
 .live-button{
 
     display:block;
 
-    margin-top:8px;
+    margin-top:9px;
 
     padding:
-        11px
+        12px
         5px;
 
-    border-radius:9px;
+    border-radius:10px;
 
     text-align:center;
 
@@ -2593,7 +2699,7 @@ body{
 
     background:#e31850;
 
-    font-size:12px;
+    font-size:13px;
 
     font-weight:1000;
 
@@ -2607,14 +2713,14 @@ body{
 .empty{
 
     padding:
-        22px
+        24px
         5px;
 
     text-align:center;
 
     color:#7d879d;
 
-    font-size:13px;
+    font-size:14px;
 
     font-weight:700;
 
@@ -2631,17 +2737,19 @@ body{
 
     color:#68748b;
 
-    font-size:11px;
+    font-size:12px;
+
+    font-weight:700;
 
     padding:
-        15px
+        16px
         0;
 
 }
 
 
 /* ============================================================
-   TELEFON
+   MOBİL
    ============================================================ */
 
 @media(max-width:700px){
@@ -2654,45 +2762,45 @@ body{
 
     .title{
 
-        font-size:32px;
+        font-size:34px;
 
     }
 
     .subtitle{
 
-        font-size:13px;
+        font-size:14px;
 
     }
 
     .status{
 
-        font-size:12px;
+        font-size:13px;
 
         padding:
-            8px
-            12px;
+            9px
+            13px;
 
     }
 
     .latest-user{
 
-        font-size:16px;
+        font-size:17px;
 
     }
 
     .latest-info{
 
-        font-size:12px;
+        font-size:13px;
 
     }
 
     .latest-live{
 
         padding:
-            9px
-            11px;
+            10px
+            12px;
 
-        font-size:11px;
+        font-size:12px;
 
     }
 
@@ -2713,27 +2821,27 @@ body{
 
     .panel-name{
 
-        font-size:13px;
+        font-size:14px;
 
     }
 
     .panel-count{
 
-        font-size:11px;
+        font-size:12px;
 
-        min-width:26px;
+        min-width:28px;
 
     }
 
     .card{
 
-        padding:8px;
+        padding:9px;
 
     }
 
     .user{
 
-        font-size:13px;
+        font-size:14px;
 
     }
 
@@ -2742,31 +2850,31 @@ body{
         font-size:10px;
 
         padding:
-            4px
-            6px;
+            5px
+            7px;
 
     }
 
     .info{
 
-        padding:7px;
+        padding:8px;
 
-        font-size:10px;
+        font-size:11px;
 
     }
 
     .info b{
 
-        font-size:13px;
+        font-size:15px;
 
     }
 
     .live-button{
 
-        font-size:11px;
+        font-size:12px;
 
         padding:
-            10px
+            11px
             3px;
 
     }
@@ -2775,20 +2883,26 @@ body{
 
 
 /* ============================================================
-   ÇOK DAR TELEFON
+   DAR TELEFON
    ============================================================ */
 
 @media(max-width:390px){
 
+    .title{
+
+        font-size:31px;
+
+    }
+
     .panel-name{
 
-        font-size:12px;
+        font-size:13px;
 
     }
 
     .user{
 
-        font-size:12px;
+        font-size:13px;
 
     }
 
@@ -2800,13 +2914,13 @@ body{
 
     .info b{
 
-        font-size:12px;
+        font-size:14px;
 
     }
 
     .live-button{
 
-        font-size:10px;
+        font-size:11px;
 
     }
 
@@ -3106,8 +3220,11 @@ function itemKey(item){
 
 function latestFive(items){
 
-    if(!Array.isArray(items))
+    if(!Array.isArray(items)){
+
         return [];
+
+    }
 
     return [...items]
         .sort(
@@ -3210,7 +3327,7 @@ function filterItems(
 
 
 /* ============================================================
-   NEW
+   NEW ITEMS
    ============================================================ */
 
 function detectNewItems(
@@ -3219,8 +3336,11 @@ function detectNewItems(
     newSet
 ){
 
-    if(!Array.isArray(items))
+    if(!Array.isArray(items)){
+
         return;
+
+    }
 
     items.forEach(
         item => {
@@ -3228,8 +3348,11 @@ function detectNewItems(
             const key =
                 itemKey(item);
 
-            if(!key)
+            if(!key){
+
                 return;
+
+            }
 
             if(firstLoad){
 
@@ -3337,9 +3460,7 @@ function renderLatest(){
     container.innerHTML = `
 
         <div
-            class="latest-card
-            ${cls}
-            ${changed ? "latest-new" : ""}"
+            class="latest-card ${cls}"
         >
 
             <div class="latest-icon">
@@ -3349,9 +3470,11 @@ function renderLatest(){
             <div class="latest-main">
 
                 <div class="latest-user">
+
                     ${escapeHtml(
                         item.username
                     )}
+
                 </div>
 
                 <div class="latest-info">
@@ -3421,7 +3544,7 @@ function renderLatest(){
 
 
 /* ============================================================
-   ITEMS
+   RENDER ITEMS
    ============================================================ */
 
 function renderItems(
@@ -3480,10 +3603,11 @@ function renderItems(
                 return `
 
                 <div
-                    class="card
-                    ${isNew
-                        ? "new-card"
-                        : ""}"
+                    class="card ${
+                        isNew
+                            ? "new-card"
+                            : ""
+                    }"
                 >
 
                     <div class="user-row">
@@ -3497,6 +3621,7 @@ function renderItems(
                             )}
 
                         </div>
+
 
                         ${
                             isNew
@@ -3581,18 +3706,21 @@ function renderItems(
                         </div>
 
 
-                        <div class="info">
+                        <div
+                            class="info"
+                            title="${escapeHtml(
+                                item.room
+                            )}"
+                        >
 
                             🏠 ODA
 
-                            <b
-                                title="${escapeHtml(
-                                    item.room
-                                )}"
-                            >
+                            <b>
+
                                 ${escapeHtml(
                                     item.room
                                 )}
+
                             </b>
 
                         </div>
@@ -3685,6 +3813,7 @@ async function loadRadar(){
 
         const headers = {};
 
+
         if(
             tg &&
             tg.initData
@@ -3702,6 +3831,7 @@ async function loadRadar(){
 
         }
 
+
         const response =
             await fetch(
                 url,
@@ -3713,6 +3843,7 @@ async function loadRadar(){
                         headers
                 }
             );
+
 
         if(!response.ok){
 
@@ -3734,8 +3865,10 @@ async function loadRadar(){
 
         }
 
+
         const data =
             await response.json();
+
 
         radarData = {
 
@@ -3755,20 +3888,26 @@ async function loadRadar(){
 
         };
 
+
         const status =
             document.getElementById(
                 "status"
             );
 
+
         status.className =
             "status";
+
 
         status.textContent =
             "🟢 RADAR AKTİF • CANLI VERİ";
 
+
         renderRadar();
 
+
         firstLoad = false;
+
 
     }
     catch(error){
@@ -3778,13 +3917,16 @@ async function loadRadar(){
             error
         );
 
+
         const status =
             document.getElementById(
                 "status"
             );
 
+
         status.className =
             "status error";
+
 
         status.textContent =
             "🔴 "
@@ -3845,12 +3987,15 @@ document
                             }
                         );
 
+
                     this.classList.add(
                         "active"
                     );
 
+
                     activeFilter =
                         this.dataset.filter;
+
 
                     renderRadar();
 
@@ -3869,6 +4014,7 @@ setInterval(
     loadRadar,
     2000
 );
+
 
 loadRadar();
 
@@ -3948,7 +4094,7 @@ async def cors_middleware(
 
 
 # ============================================================
-# API
+# API BOXES
 # ============================================================
 
 async def api_boxes(request):
@@ -3960,6 +4106,10 @@ async def api_boxes(request):
     )
 
 
+# ============================================================
+# API GOODY
+# ============================================================
+
 async def api_goody_bags(request):
 
     return web.json_response(
@@ -3969,6 +4119,10 @@ async def api_goody_bags(request):
     )
 
 
+# ============================================================
+# API STATUS
+# ============================================================
+
 async def api_status(request):
 
     return web.json_response({
@@ -3977,16 +4131,26 @@ async def api_status(request):
             "online",
 
         "chests":
-            len(LIVE_CHESTS),
+            len(
+                LIVE_CHESTS
+            ),
 
         "goody_bags":
-            len(LIVE_GOODY_BAGS),
+            len(
+                LIVE_GOODY_BAGS
+            ),
 
         "server_time":
-            int(time.time()),
+            int(
+                time.time()
+            ),
 
     })
 
+
+# ============================================================
+# API ALL
+# ============================================================
 
 async def api_all(request):
 
@@ -3996,7 +4160,9 @@ async def api_all(request):
             "online",
 
         "server_time":
-            int(time.time()),
+            int(
+                time.time()
+            ),
 
         "chests":
             list(
@@ -4012,7 +4178,7 @@ async def api_all(request):
 
 
 # ============================================================
-# VIP MINI APP API
+# MINI APP API
 # ============================================================
 
 async def api_miniapp_data(request):
@@ -4030,7 +4196,9 @@ async def api_miniapp_data(request):
 
         return web.json_response(
             {
-                "ok": False,
+                "ok":
+                    False,
+
                 "error":
                     "Geçersiz Telegram erişimi"
             },
@@ -4049,7 +4217,9 @@ async def api_miniapp_data(request):
 
         return web.json_response(
             {
-                "ok": False,
+                "ok":
+                    False,
+
                 "error":
                     "VIP erişimi gerekli"
             },
@@ -4090,7 +4260,9 @@ async def api_miniapp_data(request):
             ),
 
         "server_time":
-            int(time.time()),
+            int(
+                time.time()
+            ),
 
     })
 
@@ -4172,7 +4344,7 @@ async def start_http_server():
 
 
 # ============================================================
-# VIP BUTONU
+# VIP KEYBOARD
 # ============================================================
 
 def vip_keyboard():
@@ -4202,6 +4374,7 @@ async def start_cmd(
     user = update.effective_user
 
     if not user:
+
         return
 
     vip = get_vip(
@@ -4237,11 +4410,18 @@ async def start_cmd(
 
         value = args[0]
 
-        # BURASI DÜZELTİLDİ
-        if value.startswith("invite_"):
+        # ====================================================
+        # DÜZELTİLDİ
+        # ====================================================
+
+        if value.startswith(
+            "invite_"
+        ):
 
             invite_token = (
-                value[len("invite_"):]
+                value[
+                    len("invite_"):
+                ]
             )
 
 
@@ -4265,6 +4445,7 @@ async def start_cmd(
                     vip_keyboard()
 
             )
+
 
             await send_admin(
 
@@ -4303,6 +4484,7 @@ async def davet_cmd(
     user = update.effective_user
 
     if not user:
+
         return
 
     if user.id != ADMIN_USER_ID:
@@ -4344,6 +4526,7 @@ async def uyeler_cmd(
     user = update.effective_user
 
     if not user:
+
         return
 
     if user.id != ADMIN_USER_ID:
@@ -4418,6 +4601,7 @@ async def silvip_cmd(
     user = update.effective_user
 
     if not user:
+
         return
 
     if user.id != ADMIN_USER_ID:
@@ -4478,6 +4662,7 @@ async def id_cmd(
     user = update.effective_user
 
     if not user:
+
         return
 
     await update.message.reply_text(
@@ -4493,6 +4678,8 @@ async def id_cmd(
 # ============================================================
 
 async def message_listener(event):
+
+    global queue_counter
 
     try:
 
@@ -4515,22 +4702,43 @@ async def message_listener(event):
 
             processed_messages.clear()
 
+
         data = parse_source_message(
             event
         )
+
 
         if not data:
 
             return
 
+
         if add_to_radar(data):
+
+            # =================================================
+            # DÜZELTME:
+            #
+            # ESKİ:
+            # await telegram_queue.put(
+            #     (0, data)
+            # )
+            #
+            # YENİ:
+            # (priority, sequence, data)
+            # =================================================
+
+            queue_counter += 1
+
+            priority = 0
 
             await telegram_queue.put(
                 (
-                    0,
+                    priority,
+                    queue_counter,
                     data
                 )
             )
+
 
             print(
                 "[RADAR]",
@@ -4542,6 +4750,7 @@ async def message_listener(event):
                 "| KİŞİ",
                 data["people"]
             )
+
 
     except Exception as e:
 
@@ -4559,18 +4768,26 @@ async def main():
 
     global http_session
 
-    print("=" * 70)
+    print(
+        "=" * 70
+    )
 
     print(
         "🏆 ÖDÜL AVCISI BAŞLIYOR"
     )
 
-    print("=" * 70)
+    print(
+        "=" * 70
+    )
+
 
     init_db()
 
-    # BURASI DA DÜZELTİLDİ
-    http_session = aiohttp.ClientSession()
+
+    http_session = (
+        aiohttp.ClientSession()
+    )
+
 
     await start_http_server()
 
@@ -4585,12 +4802,14 @@ async def main():
         .build()
     )
 
+
     application.add_handler(
         CommandHandler(
             "start",
             start_cmd
         )
     )
+
 
     application.add_handler(
         CommandHandler(
@@ -4599,12 +4818,14 @@ async def main():
         )
     )
 
+
     application.add_handler(
         CommandHandler(
             "uyeler",
             uyeler_cmd
         )
     )
+
 
     application.add_handler(
         CommandHandler(
@@ -4613,6 +4834,7 @@ async def main():
         )
     )
 
+
     application.add_handler(
         CommandHandler(
             "id",
@@ -4620,13 +4842,16 @@ async def main():
         )
     )
 
+
     await application.initialize()
 
     await application.start()
 
+
     if application.updater:
 
         await application.updater.start_polling()
+
 
     print(
         "[BOT] Telegram bot başladı."
@@ -4645,11 +4870,14 @@ async def main():
         API_HASH
     )
 
+
     await client.start()
+
 
     print(
         "[TELEGRAM] İstemci bağlandı."
     )
+
 
     client.add_event_handler(
         message_listener,
@@ -4660,7 +4888,7 @@ async def main():
 
 
     # ========================================================
-    # QUEUE
+    # QUEUE WORKER
     # ========================================================
 
     asyncio.create_task(
@@ -4692,10 +4920,19 @@ async def main():
         "[HAZIR] Büyük yazı modu aktif."
     )
 
+    print(
+        "[HAZIR] Telegram Queue aktif."
+    )
+
+
+    # ========================================================
+    # RUN
+    # ========================================================
 
     try:
 
         await client.run_until_disconnected()
+
 
     finally:
 
@@ -4705,11 +4942,14 @@ async def main():
 
                 await application.updater.stop()
 
+
             await application.stop()
 
             await application.shutdown()
 
+
         except Exception:
+
             pass
 
 
@@ -4718,6 +4958,7 @@ async def main():
             await client.disconnect()
 
         except Exception:
+
             pass
 
 
