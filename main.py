@@ -1035,10 +1035,11 @@ async def start_http():
 # =========================================================
 
 async def start_handler(event):
-    """Bota özelden /start atıldığında yanıt verir."""
+    """Bota özelden /start atıldığında butonlu yanıt verir."""
     try:
         if event.is_private:
-            await event.respond(
+            await client.send_message(
+                event.chat_id,
                 "👋 **Ödül Avcısı Radarına Hoş Geldiniz!**\n\n"
                 "Canlı radar verilerine ve sistem arayüzüne erişmek için aşağıdaki butona tıklayabilirsiniz.",
                 buttons=[
