@@ -1,6 +1,9 @@
 # ============================================================
 # 🏆 ÖDÜL AVCISI
-# TELEGRAM 429 KORUMALI + VIP + MINI APP
+# GOODY BAG + HAZİNE SANDIĞI RADARI
+# VIP / DAVET SİSTEMİ
+# MINI APP
+# TELEGRAM 429 RATE LIMIT KORUMASI
 # ============================================================
 
 import os
@@ -42,6 +45,7 @@ from telegram.ext import (
 
 API_ID = int(os.environ["API_ID"])
 API_HASH = os.environ["API_HASH"]
+
 STRING_SESSION = os.environ["STRING_SESSION"]
 BOT_TOKEN = os.environ["BOT_TOKEN"]
 
@@ -55,7 +59,12 @@ SOURCE_CHATS = [
     -1002583301445,
 ]
 
-PORT = int(os.environ.get("PORT", "10000"))
+PORT = int(
+    os.environ.get(
+        "PORT",
+        "10000"
+    )
+)
 
 DATABASE_PATH = os.environ.get(
     "DATABASE_PATH",
@@ -106,7 +115,7 @@ INVITE_EXPIRE_MINUTES = int(
 
 
 # ============================================================
-# ALARM
+# ALARM AYARLARI
 # ============================================================
 
 COIN_ALARM_LIMIT = 100
@@ -138,10 +147,10 @@ bot_application = None
 
 
 # ============================================================
-# 429 RATE LIMIT KORUMASI
+# TELEGRAM RATE LIMIT
 # ============================================================
 
-send_lock = asyncio.Lock()
+telegram_send_lock = asyncio.Lock()
 
 last_send_at = {}
 
@@ -149,7 +158,7 @@ retry_until = {}
 
 
 # ============================================================
-# SQLITE
+# DATABASE
 # ============================================================
 
 db = sqlite3.connect(
@@ -158,7 +167,6 @@ db = sqlite3.connect(
 )
 
 db.row_factory = sqlite3.Row
-
 
 db.executescript(
     """
@@ -213,6 +221,7 @@ db.commit()
 # ============================================================
 
 def safe_int(value, default=0):
+
     try:
         return int(float(value))
     except Exception:
@@ -220,6 +229,7 @@ def safe_int(value, default=0):
 
 
 def safe_float(value, default=0):
+
     try:
         return float(value)
     except Exception:
@@ -227,7 +237,7 @@ def safe_float(value, default=0):
 
 
 # ============================================================
-# TOKEN ÇIKAR
+# TOKEN BUL
 # ============================================================
 
 def extract_token_from_event(event):
@@ -245,15 +255,15 @@ def extract_token_from_event(event):
 
     for pattern in patterns:
 
-        m = re.search(
+        match = re.search(
             pattern,
             text,
             re.I
         )
 
-        if m:
+        if match:
             return unquote(
-                m.group(1)
+                match.group(1)
             )
 
     try:
@@ -269,19 +279,23 @@ def extract_token_from_event(event):
             if not url:
                 continue
 
-            m = re.search(
+            match = re.search(
                 r't\.php\?token=([^&\s]+)',
                 url,
                 re.I
             )
 
-            if m:
+            if match:
                 return unquote(
-                    m.group(1)
+                    match.group(1)
                 )
 
-    except Exception:
-        pass
+    except Exception as e:
+
+        print(
+            "[TOKEN ENTITY]",
+            repr(e)
+        )
 
     return None
 
@@ -297,40 +311,43 @@ def decode_token(token):
 
     try:
 
-        token = unquote(
+        value = unquote(
             str(token)
         ).strip()
 
         padding = "=" * (
-            -len(token) % 4
+            -len(value) % 4
         )
 
-        decoded = base64.urlsafe_b64decode(
-            token + padding
+        raw = base64.urlsafe_b64decode(
+            value + padding
         )
 
         data = json.loads(
-            decoded.decode(
+            raw.decode(
                 "utf-8",
                 errors="ignore"
-            ).strip()
+            )
         )
 
-        return (
-            data
-            if isinstance(data, dict)
-            else None
+        if isinstance(data, dict):
+            return data
+
+    except Exception as e:
+
+        print(
+            "[TOKEN HATA]",
+            repr(e)
         )
 
-    except Exception:
-        return None
+    return None
 
 
 # ============================================================
 # ROOM ID
 # ============================================================
 
-def extract_p_room(text):
+def extract_room_from_text(text):
 
     if not text:
         return None
@@ -342,18 +359,18 @@ def extract_p_room(text):
 
     for pattern in patterns:
 
-        m = re.search(
+        match = re.search(
             pattern,
             text,
             re.I
         )
 
-        if not m:
+        if not match:
             continue
 
         try:
 
-            encoded = m.group(1)
+            encoded = match.group(1)
 
             padding = "=" * (
                 -len(encoded) % 4
@@ -391,14 +408,14 @@ def extract_username_from_text(text):
 
     for pattern in patterns:
 
-        m = re.search(
+        match = re.search(
             pattern,
             text,
             re.M
         )
 
-        if m:
-            return m.group(1).strip()
+        if match:
+            return match.group(1).strip()
 
     return None
 
@@ -407,7 +424,10 @@ def extract_username_from_text(text):
 # COIN
 # ============================================================
 
-def extract_coins(text, token_data=None):
+def extract_coins(
+    text,
+    token_data=None
+):
 
     patterns = [
         r'(?:TÚI|TUI)\s*:\s*(\d+)\s*/',
@@ -417,15 +437,16 @@ def extract_coins(text, token_data=None):
 
     for pattern in patterns:
 
-        m = re.search(
+        match = re.search(
             pattern,
             text or "",
             re.I
         )
 
-        if m:
+        if match:
+
             return safe_int(
-                m.group(1)
+                match.group(1)
             )
 
     if token_data:
@@ -452,10 +473,10 @@ def extract_coins(text, token_data=None):
 
 
 # ============================================================
-# KİŞİ
+# PEOPLE
 # ============================================================
 
-def extract_people_from_message(text):
+def extract_people(text):
 
     if not text:
         return 0
@@ -468,13 +489,13 @@ def extract_people_from_message(text):
 
     for pattern in patterns:
 
-        m = re.search(
+        match = re.search(
             pattern,
             text,
             re.I
         )
 
-        if not m:
+        if not match:
             continue
 
         if (
@@ -482,12 +503,13 @@ def extract_people_from_message(text):
             or "TUI" in pattern
             or "BOX" in pattern
         ):
+
             return safe_int(
-                m.group(1)
+                match.group(1)
             )
 
         return safe_int(
-            m.group(2)
+            match.group(2)
         )
 
     return 0
@@ -510,22 +532,23 @@ def extract_joined(text):
 
     for pattern in patterns:
 
-        m = re.search(
+        match = re.search(
             pattern,
             text,
             re.I
         )
 
-        if m:
+        if match:
+
             return safe_int(
-                m.group(1)
+                match.group(1)
             )
 
     return 0
 
 
 # ============================================================
-# VIEWERS
+# VIEW
 # ============================================================
 
 def extract_viewers(text):
@@ -533,14 +556,15 @@ def extract_viewers(text):
     if not text:
         return 0
 
-    m = re.search(
+    match = re.search(
         r'👀\s*(\d+)',
         text
     )
 
-    if m:
+    if match:
+
         return safe_int(
-            m.group(1)
+            match.group(1)
         )
 
     return 0
@@ -555,15 +579,16 @@ def extract_rate(
     token_data=None
 ):
 
-    m = re.search(
+    match = re.search(
         r'Rate\s*:\s*([0-9]+(?:\.[0-9]+)?)',
         text or "",
         re.I
     )
 
-    if m:
+    if match:
+
         return safe_float(
-            m.group(1)
+            match.group(1)
         )
 
     if token_data:
@@ -583,7 +608,7 @@ def extract_rate(
 
 
 # ============================================================
-# TİP
+# GOODY / CHEST
 # ============================================================
 
 def detect_type(
@@ -591,25 +616,25 @@ def detect_type(
     token_data
 ):
 
-    text_upper = (
+    upper = (
         text or ""
     ).upper()
 
     if re.search(
         r'TÚI|TUI',
-        text_upper
+        upper
     ):
         return True
 
     if re.search(
         r'GOODY\s*BAG|REWARD\s*BAG',
-        text_upper
+        upper
     ):
         return True
 
     if re.search(
         r'\bBOX\b|RƯƠNG|TREO|HAZİNE',
-        text_upper
+        upper
     ):
         return False
 
@@ -629,6 +654,7 @@ def detect_type(
             "true",
             "True",
         ]:
+
             return True
 
         if value in [
@@ -638,6 +664,7 @@ def detect_type(
             "false",
             "False",
         ]:
+
             return False
 
     return None
@@ -684,29 +711,37 @@ def calculate_target_time(
                 if value > 1_000_000_000:
                     return value
 
-                if 0 < value < 86_400:
+                if (
+                    value > 0
+                    and value < 86400
+                ):
+
                     return now + value
 
             except Exception:
                 pass
 
-    if text:
+    match = re.search(
+        r'TIME\s*:\s*(\d+):(\d+)',
+        text or "",
+        re.I
+    )
 
-        m = re.search(
-            r'TIME\s*:\s*(\d+):(\d+)',
-            text,
-            re.I
+    if match:
+
+        seconds = (
+            safe_int(
+                match.group(1)
+            ) * 60
+            +
+            safe_int(
+                match.group(2)
+            )
         )
 
-        if m:
+        if seconds > 0:
 
-            duration = (
-                safe_int(m.group(1)) * 60
-                + safe_int(m.group(2))
-            )
-
-            if duration > 0:
-                return now + duration
+            return now + seconds
 
     return now + 180
 
@@ -730,12 +765,12 @@ def parse_source_message(event):
         token
     )
 
-    is_goody = detect_type(
+    goody = detect_type(
         text,
         token_data
     )
 
-    if is_goody is None:
+    if goody is None:
         return None
 
     username = None
@@ -759,7 +794,9 @@ def parse_source_message(event):
 
     username = (
         username
-        or extract_username_from_text(text)
+        or extract_username_from_text(
+            text
+        )
         or "bilinmiyor"
     )
 
@@ -785,11 +822,13 @@ def parse_source_message(event):
 
     room = (
         room
-        or extract_p_room(text)
+        or extract_room_from_text(
+            text
+        )
         or f"msg:{event.message.id}"
     )
 
-    people = extract_people_from_message(
+    people = extract_people(
         text
     )
 
@@ -833,11 +872,6 @@ def parse_source_message(event):
                 if joined:
                     break
 
-    rate = extract_rate(
-        text,
-        token_data
-    )
-
     viewers = extract_viewers(
         text
     )
@@ -875,21 +909,29 @@ def parse_source_message(event):
                 key
             )
 
-            if value and str(value).startswith(
-                (
-                    "http://",
-                    "https://",
+            if (
+                value
+                and str(value).startswith(
+                    (
+                        "http://",
+                        "https://",
+                    )
                 )
             ):
 
-                live = str(value)
+                live = str(
+                    value
+                )
 
                 break
 
-    if not live and username != "bilinmiyor":
+    if (
+        not live
+        and username != "bilinmiyor"
+    ):
 
         live = (
-            f"https://www.tiktok.com/"
+            "https://www.tiktok.com/"
             f"@{username}/live"
         )
 
@@ -900,12 +942,12 @@ def parse_source_message(event):
     return {
         "type": (
             "GOODY BAG"
-            if is_goody
+            if goody
             else "CHEST"
         ),
         "box_name": (
             "Goody Bag"
-            if is_goody
+            if goody
             else "Hazine Sandığı"
         ),
         "username": username,
@@ -915,7 +957,10 @@ def parse_source_message(event):
         ),
         "people": people,
         "joined": joined,
-        "rate": rate,
+        "rate": extract_rate(
+            text,
+            token_data
+        ),
         "view": viewers,
         "room": room,
         "live": live,
@@ -924,7 +969,8 @@ def parse_source_message(event):
             token_data
         ),
         "detected_at": now,
-        "source_message_id": event.message.id,
+        "source_message_id":
+            event.message.id,
     }
 
 
@@ -950,7 +996,7 @@ def add_to_radar(data):
 
     if room in target:
 
-        old_time = safe_int(
+        old = safe_int(
             target[room].get(
                 "detected_at"
             )
@@ -958,9 +1004,10 @@ def add_to_radar(data):
 
         if (
             int(time.time())
-            - old_time
+            - old
             < 5
         ):
+
             return False
 
     target[room] = data
@@ -1006,10 +1053,10 @@ def add_to_radar(data):
         data["type"],
         "|",
         data["username"],
-        "| coin",
+        "| COIN:",
         data["coins"],
-        "| kişi",
-        data["people"],
+        "| KİŞİ:",
+        data["people"]
     )
 
     return True
@@ -1019,25 +1066,25 @@ def add_to_radar(data):
 # ALARM
 # ============================================================
 
-def make_alarm(data):
+def create_alarm(data):
 
     if (
         data["coins"]
         < COIN_ALARM_LIMIT
     ):
-        return None
+        return False
 
     if (
         data["people"]
         <= 0
     ):
-        return None
+        return False
 
     if (
         data["people"]
         > PEOPLE_ALARM_LIMIT
     ):
-        return None
+        return False
 
     key = (
         f'{data["type"]}:'
@@ -1047,7 +1094,7 @@ def make_alarm(data):
     )
 
     if key in processed_alarm_keys:
-        return None
+        return False
 
     processed_alarm_keys.add(
         key
@@ -1079,24 +1126,20 @@ def make_alarm(data):
 
     except sqlite3.IntegrityError:
 
-        return None
+        return False
 
-    return key
+    return True
 
 
 # ============================================================
 # TELEGRAM API
-#
-# EN ÖNEMLİ BÖLÜM:
-# 1.25 saniye minimum aralık
-# 429 retry_after desteği
-# tek lock
+# 429 KORUMASI
 # ============================================================
 
 async def telegram_api(
     method,
     payload,
-    target_chat=None
+    chat_id
 ):
 
     global http_session
@@ -1104,42 +1147,37 @@ async def telegram_api(
     if not http_session:
         return False
 
-    chat_id = (
-        target_chat
-        if target_chat is not None
-        else TARGET_CHAT_ID
-    )
-
     url = (
-        f"https://api.telegram.org/"
+        "https://api.telegram.org/"
         f"bot{BOT_TOKEN}/{method}"
     )
 
-    # Bütün Telegram gönderimlerini
-    # tek tek sıraya sokuyoruz.
-    async with send_lock:
+    async with telegram_send_lock:
 
         for attempt in range(
             1,
             13
         ):
 
-            # Telegram daha önce 429 verdiyse
-            # belirlenen zamana kadar bekle.
+            # --------------------------------------------
+            # ÖNCEKİ 429 BEKLEMESİ
+            # --------------------------------------------
+
+            wait_until = retry_until.get(
+                chat_id,
+                0
+            )
+
             wait = max(
                 0,
-                retry_until.get(
-                    chat_id,
-                    0
-                )
+                wait_until
                 - time.monotonic()
             )
 
             if wait > 0:
 
                 print(
-                    f"[TELEGRAM] "
-                    f"{chat_id} için "
+                    "[TELEGRAM]",
                     f"{wait:.1f} sn bekleniyor..."
                 )
 
@@ -1147,22 +1185,27 @@ async def telegram_api(
                     wait
                 )
 
-            # Aynı chat'e çok hızlı
-            # mesaj göndermeyi engelle.
-            gap = (
-                1.25
-                - (
-                    time.monotonic()
-                    - last_send_at.get(
-                        chat_id,
-                        0
-                    )
+            # --------------------------------------------
+            # MESAJLAR ARASINDA 1.25 SN
+            # --------------------------------------------
+
+            elapsed = (
+                time.monotonic()
+                - last_send_at.get(
+                    chat_id,
+                    0
                 )
             )
 
-            if gap > 0:
+            remaining = (
+                1.25
+                - elapsed
+            )
+
+            if remaining > 0:
+
                 await asyncio.sleep(
-                    gap
+                    remaining
                 )
 
             try:
@@ -1175,14 +1218,14 @@ async def telegram_api(
                     },
                     timeout=aiohttp.ClientTimeout(
                         total=45
-                    ),
+                    )
                 ) as response:
 
                     body = await response.text()
 
-                    # ------------------------------------------------
+                    # ------------------------------------
                     # BAŞARILI
-                    # ------------------------------------------------
+                    # ------------------------------------
 
                     if response.status == 200:
 
@@ -1192,23 +1235,23 @@ async def telegram_api(
 
                         return True
 
-                    # ------------------------------------------------
-                    # TELEGRAM 429
-                    # ------------------------------------------------
+                    # ------------------------------------
+                    # 429
+                    # ------------------------------------
 
                     if response.status == 429:
 
                         try:
 
+                            info = json.loads(
+                                body
+                            )
+
                             retry_after = safe_int(
-                                json.loads(
-                                    body
-                                )
-                                .get(
+                                info.get(
                                     "parameters",
                                     {}
-                                )
-                                .get(
+                                ).get(
                                     "retry_after",
                                     15
                                 ),
@@ -1232,16 +1275,15 @@ async def telegram_api(
                         )
 
                         print(
-                            f"[TELEGRAM 429] "
-                            f"retry_after="
-                            f"{retry_after} sn"
+                            "[TELEGRAM 429]",
+                            f"retry_after={retry_after}"
                         )
 
                         continue
 
-                    # ------------------------------------------------
-                    # TELEGRAM SUNUCU HATALARI
-                    # ------------------------------------------------
+                    # ------------------------------------
+                    # SUNUCU HATALARI
+                    # ------------------------------------
 
                     if response.status in (
                         500,
@@ -1250,7 +1292,7 @@ async def telegram_api(
                         504,
                     ):
 
-                        wait_seconds = min(
+                        delay = min(
                             5 * attempt,
                             30
                         )
@@ -1258,18 +1300,18 @@ async def telegram_api(
                         print(
                             "[TELEGRAM]",
                             response.status,
-                            f"{wait_seconds} sn bekleniyor"
+                            f"{delay} sn bekleniyor"
                         )
 
                         await asyncio.sleep(
-                            wait_seconds
+                            delay
                         )
 
                         continue
 
-                    # ------------------------------------------------
-                    # DİĞER HATA
-                    # ------------------------------------------------
+                    # ------------------------------------
+                    # DİĞER HATALAR
+                    # ------------------------------------
 
                     print(
                         "[TELEGRAM HATA]",
@@ -1299,14 +1341,14 @@ async def telegram_api(
 
         print(
             "[TELEGRAM] "
-            "Gönderim yeniden deneme limiti doldu."
+            "Maksimum tekrar sayısına ulaşıldı."
         )
 
         return False
 
 
 # ============================================================
-# NORMAL TELEGRAM MESAJI
+# NORMAL RADAR MESAJI
 # ============================================================
 
 async def send_radar(data):
@@ -1336,9 +1378,9 @@ async def send_radar(data):
     if data.get("live"):
 
         text += (
-            f'\n🔴 <a href="'
-            f'{data["live"]}'
-            f'">TIKTOK CANLI YAYIN</a>'
+            "\n🔴 <a href=\""
+            f"{data['live']}"
+            "\">TIKTOK CANLI YAYIN</a>"
         )
 
     return await telegram_api(
@@ -1385,9 +1427,9 @@ async def send_alarm(data):
     if data.get("live"):
 
         text += (
-            f'\n\n🔴 <a href="'
-            f'{data["live"]}'
-            f'">CANLI YAYINA GİT</a>'
+            "\n\n🔴 <a href=\""
+            f"{data['live']}"
+            "\">CANLI YAYINA GİT</a>"
         )
 
     return await telegram_api(
@@ -1402,7 +1444,7 @@ async def send_alarm(data):
 
 
 # ============================================================
-# ADMİNE ÖZEL MESAJ
+# ADMİNE MESAJ
 # ============================================================
 
 async def send_admin(text):
@@ -1445,10 +1487,7 @@ async def enqueue(
 
 
 # ============================================================
-# TELEGRAM SENDER
-#
-# priority 0 = ALARM
-# priority 10 = NORMAL
+# TEK TELEGRAM SENDER
 # ============================================================
 
 async def sender():
@@ -1490,7 +1529,7 @@ async def sender():
 
 
 # ============================================================
-# VIP DAVET
+# DAVET OLUŞTUR
 # ============================================================
 
 def create_invite():
@@ -1505,7 +1544,10 @@ def create_invite():
 
     expires = (
         now
-        + INVITE_EXPIRE_MINUTES * 60
+        +
+        INVITE_EXPIRE_MINUTES
+        *
+        60
     )
 
     db.execute(
@@ -1530,7 +1572,7 @@ def create_invite():
 
     db.commit()
 
-    return token, expires
+    return token
 
 
 # ============================================================
@@ -1581,9 +1623,12 @@ def use_invite(
             "Davetin süresi dolmuş."
         )
 
-    expires = (
+    vip_expires = (
         now
-        + VIP_DAYS * 86400
+        +
+        VIP_DAYS
+        *
+        86400
     )
 
     db.execute(
@@ -1620,7 +1665,7 @@ def use_invite(
             user.id,
             user.username or "",
             user.first_name or "",
-            expires,
+            vip_expires,
             now,
         )
     )
@@ -1629,7 +1674,7 @@ def use_invite(
 
     return (
         True,
-        expires
+        vip_expires
     )
 
 
@@ -1654,13 +1699,16 @@ def is_vip(user_id):
         return False
 
     return (
-        row["expires_at"]
-        > int(time.time())
+        safe_int(
+            row["expires_at"]
+        )
+        >
+        int(time.time())
     )
 
 
 # ============================================================
-# TELEGRAM MINI APP INITDATA DOĞRULA
+# TELEGRAM MINI APP INITDATA
 # ============================================================
 
 def validate_telegram_init_data(
@@ -1708,6 +1756,7 @@ def validate_telegram_init_data(
             calculated_hash,
             received_hash
         ):
+
             return None
 
         auth_date = safe_int(
@@ -1718,10 +1767,12 @@ def validate_telegram_init_data(
 
         if (
             auth_date
-            and int(time.time())
+            and
+            int(time.time())
             - auth_date
             > 86400
         ):
+
             return None
 
         user_json = pairs.get(
@@ -1742,6 +1793,9 @@ def validate_telegram_init_data(
 
 # ============================================================
 # /START
+#
+# ÖNEMLİ:
+# VIP OLDUKTAN SONRA BUTON AYNI MESAJDA
 # ============================================================
 
 async def start_cmd(
@@ -1755,14 +1809,17 @@ async def start_cmd(
     if not message or not user:
         return
 
-    # Zaten VIP
+    # ========================================================
+    # ZATEN VIP
+    # ========================================================
+
     if is_vip(user.id):
 
         keyboard = InlineKeyboardMarkup(
             [
                 [
                     InlineKeyboardButton(
-                        "🏆 RADARI AÇ",
+                        "🌐 VIP RADARI AÇ",
                         web_app=WebAppInfo(
                             url=MINI_APP_URL
                         )
@@ -1772,21 +1829,27 @@ async def start_cmd(
         )
 
         await message.reply_text(
-            "✅ VIP erişimin aktif.",
+            "✅ VIP erişimin aktif!\n\n"
+            "🏆 Radarı açmak için "
+            "aşağıdaki butona bas:",
             reply_markup=keyboard
         )
 
         return
+
+    # ========================================================
+    # DAVET
+    # ========================================================
 
     args = (
         context.args
         or []
     )
 
-    # DAVET
     if (
         args
-        and args[0].startswith(
+        and
+        args[0].startswith(
             "invite_"
         )
     ):
@@ -1806,24 +1869,16 @@ async def start_cmd(
 
             return
 
-        await message.reply_text(
-            f"✅ VIP erişim açıldı.\n"
-            f"⏳ Süre: {VIP_DAYS} gün"
-        )
-
-        await send_admin(
-            "🆕 YENİ VIP\n\n"
-            f"👤 @{user.username or 'yok'}\n"
-            f"🆔 {user.id}\n"
-            f"👤 {user.first_name or ''}\n"
-            f"⏳ {VIP_DAYS} gün"
-        )
+        # ====================================================
+        # VIP BAŞARILI
+        # BUTON AYNI MESAJDA
+        # ====================================================
 
         keyboard = InlineKeyboardMarkup(
             [
                 [
                     InlineKeyboardButton(
-                        "🏆 RADARI AÇ",
+                        "🌐 VIP RADARI AÇ",
                         web_app=WebAppInfo(
                             url=MINI_APP_URL
                         )
@@ -1833,12 +1888,27 @@ async def start_cmd(
         )
 
         await message.reply_text(
-            "Hazır. Aşağıdaki "
-            "butondan radarı açabilirsin.",
+            "✅ VIP erişim açıldı!\n\n"
+            f"⏳ Süre: {VIP_DAYS} gün\n\n"
+            "🏆 Radarı açmak için "
+            "aşağıdaki butona bas:",
             reply_markup=keyboard
         )
 
+        # Admin bildirimi
+        await send_admin(
+            "🆕 YENİ VIP\n\n"
+            f"👤 @{user.username or 'yok'}\n"
+            f"🆔 {user.id}\n"
+            f"👤 {user.first_name or ''}\n"
+            f"⏳ {VIP_DAYS} gün"
+        )
+
         return
+
+    # ========================================================
+    # VIP DEĞİL
+    # ========================================================
 
     await message.reply_text(
         "🔒 Bu bot davet/VIP sistemiyle çalışıyor.\n\n"
@@ -1848,7 +1918,7 @@ async def start_cmd(
 
 
 # ============================================================
-# ADMİN KONTROL
+# ADMİN
 # ============================================================
 
 def admin_only(update):
@@ -1860,8 +1930,8 @@ def admin_only(update):
 
     return (
         ADMIN_USER_ID
-        and user.id
-        == ADMIN_USER_ID
+        and
+        user.id == ADMIN_USER_ID
     )
 
 
@@ -1877,7 +1947,7 @@ async def davet_cmd(
     if not admin_only(update):
         return
 
-    token, expires = create_invite()
+    token = create_invite()
 
     link = (
         f"https://t.me/"
@@ -1917,39 +1987,39 @@ async def uyeler_cmd(
     if not rows:
 
         await update.effective_message.reply_text(
-            "VIP üye yok."
+            "👥 VIP üye yok."
         )
 
         return
-
-    lines = [
-        "👥 VIP ÜYELER\n"
-    ]
 
     now = int(
         time.time()
     )
 
+    lines = [
+        "👥 VIP ÜYELER\n"
+    ]
+
     for row in rows:
 
-        status = (
+        active = (
             "✅"
             if row["expires_at"] > now
             else "❌"
         )
 
-        date = time.strftime(
-            "%Y-%m-%d",
+        expires = time.strftime(
+            "%d.%m.%Y",
             time.localtime(
                 row["expires_at"]
             )
         )
 
         lines.append(
-            f'{status} '
+            f'{active} '
             f'{row["user_id"]} '
             f'@{row["username"] or "yok"} '
-            f'• {date}'
+            f'• {expires}'
         )
 
     await update.effective_message.reply_text(
@@ -2019,11 +2089,12 @@ async def id_cmd(
 
     if (
         update.effective_message
-        and update.effective_user
+        and
+        update.effective_user
     ):
 
         await update.effective_message.reply_text(
-            f"🆔 Telegram ID: "
+            "🆔 Telegram ID: "
             f"{update.effective_user.id}"
         )
 
@@ -2034,18 +2105,19 @@ async def id_cmd(
 
 MINI_APP_HTML = r"""
 <!doctype html>
+
 <html lang="tr">
 
 <head>
 
-<meta charset="utf-8">
+<meta charset="UTF-8">
 
 <meta
     name="viewport"
     content="width=device-width,initial-scale=1"
 >
 
-<title>ÖDÜL AVCISI</title>
+<title>🏆 ÖDÜL AVCISI</title>
 
 <style>
 
@@ -2056,49 +2128,49 @@ MINI_APP_HTML = r"""
 body{
     margin:0;
     padding:6px;
-    background:#070910;
+    background:#05060c;
     color:#fff;
     font-family:Arial,sans-serif
 }
 
 .wrap{
-    max-width:1100px;
+    max-width:1200px;
     margin:auto
 }
 
 .head{
     text-align:center;
-    padding:5px 3px 8px
+    padding:5px 3px 9px
 }
 
 .title{
     font-size:clamp(
-        25px,
+        26px,
         7vw,
-        44px
+        48px
     );
     font-weight:1000;
     text-shadow:
         0 0 6px #fff,
-        0 0 18px #9d51ff,
-        0 0 35px #6425ff
+        0 0 17px #8b55ff,
+        0 0 35px #5d25ff
 }
 
 .sub{
     font-size:8px;
-    color:#9da6bb;
+    color:#aeb5c8;
     font-weight:900;
     margin-top:5px
 }
 
 .status{
     display:inline-block;
-    margin-top:6px;
+    margin-top:7px;
     padding:5px 9px;
     border-radius:999px;
-    background:#111522;
-    border:1px solid #30394d;
-    color:#69ff9a;
+    background:#141428;
+    border:1px solid #9d5cff55;
+    color:#74ff9a;
     font-size:7px;
     font-weight:900
 }
@@ -2111,25 +2183,33 @@ body{
 
 .box{
     min-width:0;
-    padding:6px;
+    background:#090c15ed;
+    border:1px solid #293448;
     border-radius:12px;
-    background:#0d111c;
-    border:1px solid #293246
+    padding:6px
 }
 
 .g{
-    border-color:#9d51ff77
+    border-color:#9d51ff99
 }
 
 .c{
-    border-color:#f1c84b66
+    border-color:#f1c84b88
+}
+
+.g .pn{
+    color:#d5a8ff
+}
+
+.c .pn{
+    color:#ffe37b
 }
 
 .pnrow{
     display:flex;
     justify-content:space-between;
     align-items:center;
-    padding:1px 1px 6px
+    padding:2px 2px 6px
 }
 
 .pn{
@@ -2137,17 +2217,9 @@ body{
     font-weight:1000
 }
 
-.g .pn{
-    color:#d8adff
-}
-
-.c .pn{
-    color:#ffe47b
-}
-
 .cnt{
     font-size:6px;
-    background:#fff1;
+    background:#ffffff12;
     border-radius:99px;
     padding:3px 5px
 }
@@ -2160,9 +2232,13 @@ body{
         linear-gradient(
             145deg,
             #171d2d,
-            #0b0f18
+            #0a0e17
         );
-    border:1px solid #293246
+    border:1px solid #293448
+}
+
+.card:last-child{
+    margin-bottom:0
 }
 
 .g .card{
@@ -2176,26 +2252,15 @@ body{
 .ur{
     display:flex;
     justify-content:space-between;
-    gap:4px;
     align-items:center;
+    gap:4px;
     margin-bottom:5px
 }
 
 .user{
     font-size:8px;
     font-weight:1000;
-    overflow:hidden;
-    text-overflow:ellipsis;
-    white-space:nowrap
-}
-
-.badge{
-    padding:3px 5px;
-    border-radius:5px;
-    font-size:6px;
-    font-weight:1000;
-    background:#e52c59;
-    flex-shrink:0
+    word-break:break-word
 }
 
 .info{
@@ -2224,7 +2289,7 @@ body{
     text-align:center;
     color:#fff;
     text-decoration:none;
-    background:#df1650;
+    background:#d71950;
     padding:5px;
     margin-top:5px;
     border-radius:6px;
@@ -2232,26 +2297,47 @@ body{
     font-weight:1000
 }
 
+.badge{
+    padding:3px 5px;
+    border-radius:5px;
+    font-size:6px;
+    font-weight:1000;
+    background:#8d35ff;
+    color:#fff
+}
+
+.c .badge{
+    background:#f4d35e;
+    color:#211700
+}
+
 .empty{
     text-align:center;
     padding:16px;
-    color:#657087;
+    color:#626e82;
     font-size:7px
+}
+
+.new-card{
+    animation:
+        newCard
+        .8s
+        ease-out
 }
 
 @keyframes newCard{
 
     0%{
-        opacity:.25;
+        opacity:.2;
         transform:
-            translateY(-8px)
+            translateY(-9px)
             scale(.97)
     }
 
     50%{
         box-shadow:
             0 0 25px
-            rgba(157,81,255,.55)
+            #9d51ff77
     }
 
     100%{
@@ -2261,21 +2347,27 @@ body{
 
 }
 
-.card.new-card{
-    animation:
-        newCard
-        .8s
-        ease-out
-}
-
 @media(max-width:700px){
+
+    body{
+        padding:4px
+    }
+
+    .title{
+        font-size:27px
+    }
+
+    .sub{
+        font-size:7px
+    }
 
     .grid{
         gap:4px
     }
 
     .box{
-        padding:5px
+        padding:5px;
+        border-radius:9px
     }
 
     .pn{
@@ -2292,6 +2384,16 @@ body{
 
     .info b{
         font-size:7px
+    }
+
+    .badge{
+        font-size:5px;
+        padding:2px 4px
+    }
+
+    .go{
+        font-size:5px;
+        padding:4px
     }
 
 }
@@ -2318,7 +2420,7 @@ body{
     id="status"
     class="status"
 >
-🟡 BAĞLANIYOR...
+🟡 RADAR BAĞLANIYOR...
 </div>
 
 </div>
@@ -2380,20 +2482,14 @@ body{
 
 let firstLoad = true;
 
-let seenGoody =
-    new Set();
+const seenGoody = new Set();
+const seenChest = new Set();
 
-let seenChest =
-    new Set();
-
-let newGoody =
-    new Set();
-
-let newChest =
-    new Set();
+const newGoody = new Set();
+const newChest = new Set();
 
 
-function escapeHtml(value){
+function esc(value){
 
     return String(
         value ?? ""
@@ -2422,7 +2518,7 @@ function escapeHtml(value){
 }
 
 
-function itemKey(item){
+function key(item){
 
     return String(
         item.source_message_id
@@ -2431,15 +2527,13 @@ function itemKey(item){
         ??
         (
             String(
-                item.username
-                ?? ""
+                item.username ?? ""
             )
             +
             "_"
             +
             String(
-                item.detected_at
-                ?? ""
+                item.detected_at ?? ""
             )
         )
     );
@@ -2467,7 +2561,9 @@ function latestFive(items){
     if(
         !Array.isArray(items)
     ){
+
         return [];
+
     }
 
     return [
@@ -2495,7 +2591,7 @@ function renderList(
     type
 ){
 
-    const container =
+    const element =
         document.getElementById(
             elementId
         );
@@ -2505,16 +2601,16 @@ function renderList(
             counterId
         );
 
-    const arr =
+    const array =
         latestFive(items);
 
     counter.textContent =
-        arr.length;
+        array.length;
 
-    if(!arr.length){
+    if(!array.length){
 
-        container.innerHTML =
-            '<div class="empty">⚡ Veri yok.</div>';
+        element.innerHTML =
+            '<div class="empty">⚡ Henüz veri yok.</div>';
 
         return;
 
@@ -2532,31 +2628,25 @@ function renderList(
         : newChest;
 
 
-    arr.forEach(
+    array.forEach(
         item => {
 
-            const key =
-                itemKey(item);
+            const k =
+                key(item);
 
             if(firstLoad){
 
-                seen.add(
-                    key
-                );
+                seen.add(k);
 
             }else{
 
                 if(
-                    !seen.has(key)
+                    !seen.has(k)
                 ){
 
-                    seen.add(
-                        key
-                    );
+                    seen.add(k);
 
-                    fresh.add(
-                        key
-                    );
+                    fresh.add(k);
 
                 }
 
@@ -2566,15 +2656,16 @@ function renderList(
     );
 
 
-    container.innerHTML =
-        arr.map(
+    element.innerHTML =
+        array
+        .map(
             item => {
 
-                const key =
-                    itemKey(item);
+                const k =
+                    key(item);
 
                 const isNew =
-                    fresh.has(key);
+                    fresh.has(k);
 
                 return `
 
@@ -2588,9 +2679,7 @@ function renderList(
 
 <div class="user">
 ${icon}
-${escapeHtml(
-    item.username
-)}
+${esc(item.username)}
 </div>
 
 ${
@@ -2607,61 +2696,44 @@ ${
 <div class="ig">
 
 <div class="info">
-🪙
+🪙 COIN
 <b>
-${escapeHtml(
-    item.coins
-)}
+${esc(item.coins)}
 </b>
 </div>
 
-
 <div class="info">
-👥
+👥 KİŞİ
 <b>
-${escapeHtml(
-    item.people
-)}
+${esc(item.people)}
 </b>
 </div>
 
-
 <div class="info">
-🙋
+🙋 KATILAN
 <b>
-${escapeHtml(
-    item.joined
-)}
+${esc(item.joined)}
 </b>
 </div>
 
-
 <div class="info">
-📈
+📈 ORAN
 <b>
-${escapeHtml(
-    item.rate
-)}
+${esc(item.rate)}
 </b>
 </div>
 
-
 <div class="info">
-👀
+👀 İZLENME
 <b>
-${escapeHtml(
-    item.view
-)}
+${esc(item.view)}
 </b>
 </div>
 
-
 <div class="info">
-🏠
+🏠 ODA
 <b>
-${escapeHtml(
-    item.room
-)}
+${esc(item.room)}
 </b>
 </div>
 
@@ -2674,9 +2746,7 @@ ${
     `
 <a
     class="go"
-    href="${escapeHtml(
-        item.live
-    )}"
+    href="${esc(item.live)}"
     target="_blank"
     rel="noopener"
 >
@@ -2702,16 +2772,22 @@ async function loadRadar(){
 
     try{
 
-        const initData =
+        const telegram =
             window.Telegram
-            ?.WebApp
-            ?.initData
-            ||
-            "";
+            &&
+            window.Telegram.WebApp;
 
-        let url;
+        let url =
+            "/api/all?t="
+            +
+            Date.now();
 
-        if(initData){
+
+        if(
+            telegram
+            &&
+            telegram.initData
+        ){
 
             url =
                 "/api/miniapp-data"
@@ -2719,13 +2795,12 @@ async function loadRadar(){
                 "?initData="
                 +
                 encodeURIComponent(
-                    initData
-                );
-
-        }else{
-
-            url =
-                "/api/all";
+                    telegram.initData
+                )
+                +
+                "&t="
+                +
+                Date.now();
 
         }
 
@@ -2740,9 +2815,7 @@ async function loadRadar(){
             );
 
 
-        if(
-            !response.ok
-        ){
+        if(!response.ok){
 
             throw new Error(
                 "HTTP "
@@ -2775,51 +2848,36 @@ async function loadRadar(){
         );
 
 
-        const status =
-            document.getElementById(
-                "status"
-            );
-
-
-        status.textContent =
+        document.getElementById(
+            "status"
+        ).textContent =
             "🟢 RADAR AKTİF • CANLI VERİ";
-
-
-        if(!firstLoad){
-
-            setTimeout(
-                () => {
-
-                    newGoody.clear();
-                    newChest.clear();
-
-                    loadRadar();
-
-                },
-                4000
-            );
-
-        }
 
 
         firstLoad = false;
 
 
-    }catch(error){
+        setTimeout(
+            () => {
 
-        console.error(
-            "Radar hatası:",
-            error
+                newGoody.clear();
+                newChest.clear();
+
+            },
+            3500
         );
 
 
-        const status =
-            document.getElementById(
-                "status"
-            );
+    }catch(error){
 
-        status.textContent =
-            "🔴 ERİŞİM / VERİ HATASI";
+        console.error(
+            error
+        );
+
+        document.getElementById(
+            "status"
+        ).textContent =
+            "🔴 VERİ / VIP HATASI";
 
     }
 
@@ -2828,10 +2886,13 @@ async function loadRadar(){
 
 if(
     window.Telegram
-    ?.WebApp
+    &&
+    window.Telegram.WebApp
 ){
 
     Telegram.WebApp.ready();
+
+    Telegram.WebApp.expand();
 
 }
 
@@ -2859,7 +2920,7 @@ RADAR_HTML = MINI_APP_HTML
 
 
 # ============================================================
-# RADAR SAYFASI
+# NORMAL RADAR SAYFASI
 # ============================================================
 
 async def radar_page(request):
@@ -2872,50 +2933,15 @@ async def radar_page(request):
 
 
 # ============================================================
-# MINI APP
+# MINI APP SAYFASI
+#
+# ÖNEMLİ:
+# Burada initData kontrolü YAPMIYORUZ.
+# Telegram Mini App açıldıktan sonra JS üzerinden
+# /api/miniapp-data çağrılıyor.
 # ============================================================
 
 async def miniapp_page(request):
-
-    init_data = (
-        request.query.get(
-            "initData",
-            ""
-        )
-    )
-
-    if not init_data:
-
-        return web.Response(
-            status=401,
-            text=(
-                "Telegram Mini App gerekli."
-            )
-        )
-
-    user = validate_telegram_init_data(
-        init_data
-    )
-
-    if not user:
-
-        return web.Response(
-            status=403,
-            text=(
-                "Telegram doğrulaması başarısız."
-            )
-        )
-
-    if not is_vip(
-        user.get("id")
-    ):
-
-        return web.Response(
-            status=403,
-            text=(
-                "VIP erişim gerekli."
-            )
-        )
 
     return web.Response(
         text=MINI_APP_HTML,
@@ -2925,7 +2951,7 @@ async def miniapp_page(request):
 
 
 # ============================================================
-# API
+# API ALL
 # ============================================================
 
 async def api_all(request):
@@ -2946,6 +2972,10 @@ async def api_all(request):
     )
 
 
+# ============================================================
+# API BOXES
+# ============================================================
+
 async def api_boxes(request):
 
     return web.json_response(
@@ -2955,6 +2985,10 @@ async def api_boxes(request):
     )
 
 
+# ============================================================
+# API GOODY
+# ============================================================
+
 async def api_goody_bags(request):
 
     return web.json_response(
@@ -2963,6 +2997,10 @@ async def api_goody_bags(request):
         )
     )
 
+
+# ============================================================
+# API STATUS
+# ============================================================
 
 async def api_status(request):
 
@@ -2978,15 +3016,14 @@ async def api_status(request):
             "server_time": int(
                 time.time()
             ),
-            "telegram_queue": (
-                telegram_queue.qsize()
-            ),
+            "telegram_queue":
+                telegram_queue.qsize(),
         }
     )
 
 
 # ============================================================
-# MINI APP API
+# VIP MINI APP API
 # ============================================================
 
 async def api_miniapp_data(request):
@@ -3012,8 +3049,23 @@ async def api_miniapp_data(request):
             status=403
         )
 
+    user_id = safe_int(
+        user.get("id"),
+        0
+    )
+
+    if not user_id:
+
+        return web.json_response(
+            {
+                "error":
+                    "Kullanıcı bulunamadı"
+            },
+            status=403
+        )
+
     if not is_vip(
-        user.get("id")
+        user_id
     ):
 
         return web.json_response(
@@ -3024,8 +3076,19 @@ async def api_miniapp_data(request):
             status=403
         )
 
-    return await api_all(
-        request
+    return web.json_response(
+        {
+            "status": "online",
+            "server_time": int(
+                time.time()
+            ),
+            "chests": list(
+                LIVE_CHESTS.values()
+            ),
+            "goody_bags": list(
+                LIVE_GOODY_BAGS.values()
+            ),
+        }
     )
 
 
@@ -3124,6 +3187,10 @@ async def start_http():
         api_miniapp_data
     )
 
+    print(
+        "[HTTP] Sunucu hazırlanıyor..."
+    )
+
     runner = web.AppRunner(
         app
     )
@@ -3141,14 +3208,6 @@ async def start_http():
     print(
         "[HTTP] Sunucu başladı:",
         PORT
-    )
-
-    print(
-        "[HTTP] Radar aktif."
-    )
-
-    print(
-        "[HTTP] Mini App aktif."
     )
 
 
@@ -3190,17 +3249,22 @@ async def listener(event):
             data
         ):
 
-            # Alarm varsa priority 0
-            alarm_key = make_alarm(
+            # --------------------------------------------
+            # ALARM
+            # --------------------------------------------
+
+            alarm = create_alarm(
                 data
             )
 
-            if alarm_key:
+            if alarm:
 
                 print(
                     "[ALARM]",
                     data["username"],
+                    "|",
                     data["coins"],
+                    "|",
                     data["people"]
                 )
 
@@ -3210,7 +3274,10 @@ async def listener(event):
                     0
                 )
 
-            # Normal radar mesajı
+            # --------------------------------------------
+            # NORMAL RADAR
+            # --------------------------------------------
+
             await enqueue(
                 "normal",
                 data,
@@ -3226,7 +3293,7 @@ async def listener(event):
 
 
 # ============================================================
-# BOTU BAŞLAT
+# BOT
 # ============================================================
 
 async def start_bot():
@@ -3235,7 +3302,9 @@ async def start_bot():
 
     bot_application = (
         ApplicationBuilder()
-        .token(BOT_TOKEN)
+        .token(
+            BOT_TOKEN
+        )
         .build()
     )
 
@@ -3288,7 +3357,7 @@ async def start_bot():
 
 
 # ============================================================
-# ANA
+# MAIN
 # ============================================================
 
 async def main():
@@ -3297,7 +3366,7 @@ async def main():
     global client
 
     print(
-        "=" * 70
+        "=" * 65
     )
 
     print(
@@ -3305,24 +3374,39 @@ async def main():
     )
 
     print(
-        "=" * 70
+        "=" * 65
     )
 
-    # HTTP
+    # --------------------------------------------
+    # HTTP SESSION
+    # --------------------------------------------
+
     http_session = aiohttp.ClientSession()
 
-    # Web server
+    # --------------------------------------------
+    # WEB
+    # --------------------------------------------
+
     await start_http()
 
-    # Bot
+    # --------------------------------------------
+    # BOT
+    # --------------------------------------------
+
     await start_bot()
 
-    # TEK Telegram sender
+    # --------------------------------------------
+    # TEK TELEGRAM SENDER
+    # --------------------------------------------
+
     asyncio.create_task(
         sender()
     )
 
-    # Telethon
+    # --------------------------------------------
+    # TELETHON
+    # --------------------------------------------
+
     client = TelegramClient(
         StringSession(
             STRING_SESSION
@@ -3337,7 +3421,6 @@ async def main():
         "[TELEGRAM] İstemci bağlandı."
     )
 
-    # Kaynak mesajları dinle
     client.add_event_handler(
         listener,
         events.NewMessage(
@@ -3346,15 +3429,11 @@ async def main():
     )
 
     print(
-        "[HAZIR] Radar çalışıyor."
+        "[HAZIR] Goody Bag aktif."
     )
 
     print(
-        "[HAZIR] Goody Bag algılama aktif."
-    )
-
-    print(
-        "[HAZIR] Hazine Sandığı algılama aktif."
+        "[HAZIR] Hazine Sandığı aktif."
     )
 
     print(
@@ -3362,12 +3441,20 @@ async def main():
     )
 
     print(
+        "[HAZIR] Mini App aktif."
+    )
+
+    print(
         "[HAZIR] Telegram 429 koruması aktif."
     )
 
     print(
-        "[HAZIR] Mesajlar minimum "
-        "1.25 saniye aralıkla gönderilecek."
+        "[HAZIR] Gönderimler minimum "
+        "1.25 saniye aralıklı."
+    )
+
+    print(
+        "=" * 65
     )
 
     try:
@@ -3376,13 +3463,21 @@ async def main():
 
     finally:
 
+        print(
+            "[KAPANIYOR]"
+        )
+
         if bot_application:
 
             try:
 
                 if bot_application.updater:
 
-                    await bot_application.updater.stop()
+                    await (
+                        bot_application
+                        .updater
+                        .stop()
+                    )
 
                 await bot_application.stop()
 
@@ -3397,16 +3492,15 @@ async def main():
 
         if http_session:
 
-            await http_session.close()
+            try:
+                await http_session.close()
+            except Exception:
+                pass
 
         try:
             db.close()
         except Exception:
             pass
-
-        print(
-            "[DURDU] Sistem kapandı."
-        )
 
 
 # ============================================================
