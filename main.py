@@ -10,6 +10,7 @@ import hashlib
 import hmac
 
 from urllib.parse import unquote, parse_qsl
+from html import escape as html_escape
 
 import aiohttp
 from aiohttp import web
@@ -20,12 +21,14 @@ from telethon.sessions import StringSession
 from telegram import (
     InlineKeyboardButton,
     InlineKeyboardMarkup,
-    WebAppInfo
+    WebAppInfo,
+    Update
 )
 
 from telegram.ext import (
     ApplicationBuilder,
-    CommandHandler
+    CommandHandler,
+    ContextTypes
 )
 
 
@@ -40,6 +43,35 @@ BOT_TOKEN = os.environ["BOT_TOKEN"]
 
 TARGET_CHAT_ID = -1004421946217
 
+# ---------------------------------------------------------
+# SENİN TELEGRAM ID'N
+# Render Environment Variables'a ekle:
+#
+# ADMIN_USER_ID = senin Telegram ID'n
+# ADMIN_CHAT_ID = senin özel sohbet ID'n
+#
+# İkisi aynı olabilir.
+# ---------------------------------------------------------
+
+ADMIN_USER_ID = int(
+    os.environ.get(
+        "ADMIN_USER_ID",
+        "0"
+    )
+)
+
+ADMIN_CHAT_ID = int(
+    os.environ.get(
+        "ADMIN_CHAT_ID",
+        "0"
+    )
+)
+
+
+# =========================================================
+# KAYNAK TELEGRAM GRUPLARI
+# =========================================================
+
 SOURCE_CHATS = [
     -1004427105311,
     -1003965749742,
@@ -47,6 +79,11 @@ SOURCE_CHATS = [
     -1002485768492,
     -1002583301445
 ]
+
+
+# =========================================================
+# SERVER
+# =========================================================
 
 PORT = int(
     os.environ.get(
@@ -79,11 +116,21 @@ MINI_APP_URL = (
     "https://kendi-verimiz.onrender.com/miniapp"
 )
 
-VERIFY_URL = (
-    "https://kendi-verimiz.onrender.com/verify"
+BOT_USERNAME = "YeniBirAirdropBot"
+
+VIP_DAYS = int(
+    os.environ.get(
+        "VIP_DAYS",
+        "30"
+    )
 )
 
-VIP_DAYS = 30
+INVITE_EXPIRE_MINUTES = int(
+    os.environ.get(
+        "INVITE_EXPIRE_MINUTES",
+        "60"
+    )
+)
 
 
 # =========================================================
@@ -154,7 +201,7 @@ CREATE TABLE IF NOT EXISTS alarm_history (
 
 
 # =========================================================
-# VIP DATABASE
+# VIP USERS
 # =========================================================
 
 db.execute("""
@@ -163,18 +210,24 @@ CREATE TABLE IF NOT EXISTS vip_users (
     username TEXT DEFAULT '',
     first_name TEXT DEFAULT '',
     verified_at INTEGER DEFAULT 0,
-    expires_at INTEGER DEFAULT 0
+    expires_at INTEGER DEFAULT 0,
+    invite_token TEXT DEFAULT ''
 )
 """)
 
 
+# =========================================================
+# DAVET TOKENLARI
+# =========================================================
+
 db.execute("""
-CREATE TABLE IF NOT EXISTS verify_tokens (
+CREATE TABLE IF NOT EXISTS invite_tokens (
     token TEXT PRIMARY KEY,
-    telegram_id INTEGER NOT NULL,
     created_at INTEGER NOT NULL,
     expires_at INTEGER NOT NULL,
-    used INTEGER DEFAULT 0
+    used INTEGER DEFAULT 0,
+    used_by INTEGER DEFAULT 0,
+    used_at INTEGER DEFAULT 0
 )
 """)
 
@@ -186,27 +239,309 @@ db.commit()
 # YARDIMCI
 # =========================================================
 
-def safe_int(v, default=0):
+def safe_int(
+    value,
+    default=0
+):
 
     try:
-        return int(float(v))
+
+        return int(
+            float(value)
+        )
+
     except:
+
         return default
 
 
-def safe_float(v, default=0):
+def safe_float(
+    value,
+    default=0
+):
 
     try:
-        return float(v)
+
+        return float(value)
+
     except:
+
         return default
+
+
+# =========================================================
+# VIP DAVET OLUŞTUR
+# =========================================================
+
+def create_invite_token():
+
+    token = secrets.token_urlsafe(
+        32
+    )
+
+    now = int(
+        time.time()
+    )
+
+    expires = (
+        now
+        +
+        INVITE_EXPIRE_MINUTES
+        * 60
+    )
+
+
+    db.execute("""
+    INSERT INTO invite_tokens
+    (
+        token,
+        created_at,
+        expires_at,
+        used,
+        used_by,
+        used_at
+    )
+    VALUES (?, ?, ?, 0, 0, 0)
+    """, (
+        token,
+        now,
+        expires
+    ))
+
+
+    db.commit()
+
+    return token
+
+
+# =========================================================
+# DAVET KULLAN
+# =========================================================
+
+def use_invite_token(
+    token,
+    telegram_id,
+    username="",
+    first_name=""
+):
+
+    if not token:
+
+        return False, "Token yok."
+
+
+    now = int(
+        time.time()
+    )
+
+
+    row = db.execute("""
+    SELECT *
+    FROM invite_tokens
+    WHERE token=?
+    LIMIT 1
+    """, (
+        token,
+    )).fetchone()
+
+
+    if not row:
+
+        return False, "Davet bağlantısı geçersiz."
+
+
+    if safe_int(
+        row["used"]
+    ) == 1:
+
+        return False, "Bu davet bağlantısı daha önce kullanılmış."
+
+
+    if safe_int(
+        row["expires_at"]
+    ) < now:
+
+        return False, "Bu davet bağlantısının süresi dolmuş."
+
+
+    # -----------------------------------------------------
+    # TOKEN'I TEK KULLANIMLIK YAP
+    # -----------------------------------------------------
+
+    db.execute("""
+    UPDATE invite_tokens
+    SET
+        used=1,
+        used_by=?,
+        used_at=?
+    WHERE token=?
+    """, (
+        safe_int(
+            telegram_id
+        ),
+        now,
+        token
+    ))
+
+
+    # -----------------------------------------------------
+    # VIP SÜRESİ
+    # -----------------------------------------------------
+
+    expires_at = (
+
+        now
+
+        +
+
+        VIP_DAYS
+        *
+        24
+        *
+        60
+        *
+        60
+
+    )
+
+
+    db.execute("""
+    INSERT INTO vip_users
+    (
+        telegram_id,
+        username,
+        first_name,
+        verified_at,
+        expires_at,
+        invite_token
+    )
+    VALUES (?, ?, ?, ?, ?, ?)
+
+    ON CONFLICT(telegram_id)
+    DO UPDATE SET
+
+        username=excluded.username,
+
+        first_name=excluded.first_name,
+
+        verified_at=excluded.verified_at,
+
+        expires_at=excluded.expires_at,
+
+        invite_token=excluded.invite_token
+    """, (
+        safe_int(
+            telegram_id
+        ),
+        str(
+            username or ""
+        ),
+        str(
+            first_name or ""
+        ),
+        now,
+        expires_at,
+        token
+    ))
+
+
+    db.commit()
+
+
+    return True, "VIP aktif."
+
+
+# =========================================================
+# VIP KONTROL
+# =========================================================
+
+def is_vip(
+    telegram_id
+):
+
+    if not telegram_id:
+
+        return False
+
+
+    row = db.execute("""
+    SELECT expires_at
+    FROM vip_users
+    WHERE telegram_id=?
+    LIMIT 1
+    """, (
+        safe_int(
+            telegram_id
+        ),
+    )).fetchone()
+
+
+    if not row:
+
+        return False
+
+
+    expires_at = safe_int(
+        row["expires_at"]
+    )
+
+
+    return (
+        expires_at
+        >
+        int(
+            time.time()
+        )
+    )
+
+
+# =========================================================
+# VIP BİLGİ
+# =========================================================
+
+def get_vip_user(
+    telegram_id
+):
+
+    return db.execute("""
+    SELECT *
+    FROM vip_users
+    WHERE telegram_id=?
+    LIMIT 1
+    """, (
+        safe_int(
+            telegram_id
+        ),
+    )).fetchone()
+
+
+# =========================================================
+# DAVET LİNKİ
+# =========================================================
+
+def make_invite_link(
+    token
+):
+
+    return (
+        "https://t.me/"
+        +
+        BOT_USERNAME
+        +
+        "?start=invite_"
+        +
+        token
+    )
 
 
 # =========================================================
 # RADAR DATABASE
 # =========================================================
 
-def db_save(d, event_key):
+def db_save(
+    d,
+    event_key
+):
 
     try:
 
@@ -237,17 +572,29 @@ def db_save(d, event_key):
 
             d["username"],
 
-            safe_int(d["coins"]),
+            safe_int(
+                d["coins"]
+            ),
 
-            safe_int(d["people"]),
+            safe_int(
+                d["people"]
+            ),
 
-            safe_int(d["joined"]),
+            safe_int(
+                d["joined"]
+            ),
 
-            safe_float(d["rate"]),
+            safe_float(
+                d["rate"]
+            ),
 
-            safe_int(d["view"]),
+            safe_int(
+                d["view"]
+            ),
 
-            str(d["room"]),
+            str(
+                d["room"]
+            ),
 
             d.get(
                 "live",
@@ -273,11 +620,14 @@ def db_save(d, event_key):
                     "source_chat_id"
                 )
             )
+
         ))
+
 
         db.commit()
 
         return True
+
 
     except Exception as e:
 
@@ -289,30 +639,26 @@ def db_save(d, event_key):
         return False
 
 
-def db_exists(event_key):
+def db_exists(
+    event_key
+):
 
     try:
 
-        row = db.execute(
-            """
-            SELECT 1
-            FROM radar_history
-            WHERE event_key=?
-            LIMIT 1
-            """,
-            (
-                event_key,
-            )
-        ).fetchone()
+        row = db.execute("""
+        SELECT 1
+        FROM radar_history
+        WHERE event_key=?
+        LIMIT 1
+        """, (
+            event_key,
+        )).fetchone()
+
 
         return row is not None
 
-    except Exception as e:
 
-        print(
-            "[SQLITE KONTROL HATASI]",
-            repr(e)
-        )
+    except:
 
         return False
 
@@ -356,24 +702,34 @@ def db_stats():
 
 
         return {
-            "total": total,
-            "total_coins": total_coins,
-            "goody": goody,
-            "chest": chest
+
+            "total":
+                total,
+
+            "total_coins":
+                total_coins,
+
+            "goody":
+                goody,
+
+            "chest":
+                chest
+
         }
 
-    except Exception as e:
 
-        print(
-            "[SQLITE ISTATISTIK]",
-            repr(e)
-        )
+    except:
 
         return {
+
             "total": 0,
+
             "total_coins": 0,
+
             "goody": 0,
+
             "chest": 0
+
         }
 
 
@@ -442,6 +798,7 @@ def db_load_recent():
 
                 "source_chat_id":
                     row["source_chat_id"]
+
             }
 
 
@@ -453,7 +810,9 @@ def db_load_recent():
                 == "GOODY BAG"
 
                 else
+
                 LIVE_CHESTS
+
             )
 
 
@@ -473,198 +832,9 @@ def db_load_recent():
     except Exception as e:
 
         print(
-            "[SQLITE YÜKLEME HATASI]",
+            "[SQLITE YÜKLEME]",
             repr(e)
         )
-
-
-# =========================================================
-# VIP TOKEN
-# =========================================================
-
-def create_verify_token(
-    telegram_id
-):
-
-    token = secrets.token_urlsafe(
-        32
-    )
-
-    now = int(
-        time.time()
-    )
-
-    expires = (
-        now
-        +
-        15 * 60
-    )
-
-
-    db.execute("""
-    INSERT INTO verify_tokens
-    (
-        token,
-        telegram_id,
-        created_at,
-        expires_at,
-        used
-    )
-    VALUES (?, ?, ?, ?, 0)
-    """, (
-        token,
-        safe_int(telegram_id),
-        now,
-        expires
-    ))
-
-
-    db.commit()
-
-    return token
-
-
-def verify_token_for_user(
-    token,
-    telegram_id,
-    username="",
-    first_name=""
-):
-
-    if not token:
-
-        return False
-
-
-    now = int(
-        time.time()
-    )
-
-
-    row = db.execute("""
-    SELECT *
-    FROM verify_tokens
-    WHERE token=?
-    LIMIT 1
-    """, (
-        token,
-    )).fetchone()
-
-
-    if not row:
-
-        return False
-
-
-    if safe_int(
-        row["used"]
-    ) == 1:
-
-        return False
-
-
-    if safe_int(
-        row["telegram_id"]
-    ) != safe_int(
-        telegram_id
-    ):
-
-        return False
-
-
-    if safe_int(
-        row["expires_at"]
-    ) < now:
-
-        return False
-
-
-    db.execute("""
-    UPDATE verify_tokens
-    SET used=1
-    WHERE token=?
-    """, (
-        token,
-    ))
-
-
-    vip_expires = (
-        now
-        +
-        VIP_DAYS
-        *
-        24
-        *
-        60
-        *
-        60
-    )
-
-
-    db.execute("""
-    INSERT INTO vip_users
-    (
-        telegram_id,
-        username,
-        first_name,
-        verified_at,
-        expires_at
-    )
-    VALUES (?, ?, ?, ?, ?)
-
-    ON CONFLICT(telegram_id)
-    DO UPDATE SET
-        username=excluded.username,
-        first_name=excluded.first_name,
-        verified_at=excluded.verified_at,
-        expires_at=excluded.expires_at
-    """, (
-        safe_int(telegram_id),
-        str(username or ""),
-        str(first_name or ""),
-        now,
-        vip_expires
-    ))
-
-
-    db.commit()
-
-    return True
-
-
-def is_vip(
-    telegram_id
-):
-
-    if not telegram_id:
-
-        return False
-
-
-    row = db.execute("""
-    SELECT expires_at
-    FROM vip_users
-    WHERE telegram_id=?
-    LIMIT 1
-    """, (
-        safe_int(telegram_id),
-    )).fetchone()
-
-
-    if not row:
-
-        return False
-
-
-    return (
-        safe_int(
-            row["expires_at"]
-        )
-        >
-        int(
-            time.time()
-        )
-    )
 
 
 # =========================================================
@@ -759,13 +929,19 @@ def validate_telegram_init_data(
 
 
         if (
+
             int(
                 time.time()
             )
+
             -
+
             auth_date
+
             >
+
             86400
+
         ):
 
             return None
@@ -871,12 +1047,9 @@ def token_from_event(e):
                     )
 
 
-    except Exception as e:
+    except:
 
-        print(
-            "[TOKEN ENTITY]",
-            repr(e)
-        )
+        pass
 
 
     return None
@@ -1043,6 +1216,17 @@ def coins(
 
 
         if m:
+
+            if (
+                "TÚI" in p
+                or "TUI" in p
+                or "BOX" in p
+            ):
+
+                return safe_int(
+                    m.group(1)
+                )
+
 
             return safe_int(
                 m.group(1)
@@ -1697,6 +1881,7 @@ def parse(event):
             safe_int(
                 event.chat_id
             )
+
     }
 
 
@@ -2007,7 +2192,7 @@ def get_alarms(d):
 
 
 # =========================================================
-# TELEGRAM NORMAL MESAJ
+# TELEGRAM MESAJ
 # =========================================================
 
 async def send_tg(d):
@@ -2076,124 +2261,46 @@ async def send_tg(d):
     )
 
 
-    for attempt in range(
-        1,
-        9
-    ):
+    try:
 
-        try:
+        async with http_session.post(
 
-            async with http_session.post(
+            url,
 
-                url,
+            json={
 
-                json={
+                "chat_id":
+                    TARGET_CHAT_ID,
 
-                    "chat_id":
-                        TARGET_CHAT_ID,
+                "text":
+                    text,
 
-                    "text":
-                        text,
+                "disable_web_page_preview":
+                    True
 
-                    "disable_web_page_preview":
-                        True
+            }
 
-                }
+        ) as response:
 
-            ) as response:
-
-                response_text = (
-                    await response.text()
-                )
-
-
-                if response.status == 200:
-
-                    return
-
-
-                if response.status == 429:
-
-                    try:
-
-                        wait_time = (
-
-                            json.loads(
-                                response_text
-                            )
-                            .get(
-                                "parameters",
-                                {}
-                            )
-                            .get(
-                                "retry_after",
-                                30
-                            )
-
-                        )
-
-                    except:
-
-                        wait_time = 30
-
-
-                    await asyncio.sleep(
-                        max(
-                            1,
-                            safe_int(
-                                wait_time,
-                                30
-                            )
-                        )
-                    )
-
-                    continue
-
-
-                if response.status in [
-                    500,
-                    502,
-                    503,
-                    504
-                ]:
-
-                    await asyncio.sleep(
-                        min(
-                            5 * attempt,
-                            30
-                        )
-                    )
-
-                    continue
-
+            if response.status != 200:
 
                 print(
                     "[TELEGRAM HATA]",
                     response.status,
-                    response_text
+                    await response.text()
                 )
 
-                return
 
+    except Exception as e:
 
-        except Exception as e:
-
-            print(
-                "[TELEGRAM]",
-                repr(e)
-            )
-
-
-            await asyncio.sleep(
-                min(
-                    5 * attempt,
-                    30
-                )
-            )
+        print(
+            "[TELEGRAM]",
+            repr(e)
+        )
 
 
 # =========================================================
-# TELEGRAM ALARM
+# ALARM MESAJI
 # =========================================================
 
 async def send_alarm(
@@ -2306,16 +2413,130 @@ async def send_alarm(
             if response.status != 200:
 
                 print(
-                    "[ALARM TELEGRAM]",
-                    response.status,
-                    await response.text()
+                    "[ALARM]",
+                    response.status
                 )
 
 
     except Exception as e:
 
         print(
-            "[ALARM TELEGRAM]",
+            "[ALARM]",
+            repr(e)
+        )
+
+
+# =========================================================
+# SENİN ÖZEL SOHBETİNE YENİ ÜYE BİLDİRİMİ
+# =========================================================
+
+async def notify_new_vip(
+    user,
+    expires_at
+):
+
+    global http_session
+
+
+    if not http_session:
+
+        return
+
+
+    if not ADMIN_CHAT_ID:
+
+        print(
+            "[VIP] ADMIN_CHAT_ID ayarlı değil."
+        )
+
+        return
+
+
+    username = (
+        f"@{user.username}"
+        if user.username
+        else
+        "Kullanıcı adı yok"
+    )
+
+
+    date_text = time.strftime(
+        "%d.%m.%Y %H:%M",
+        time.localtime(
+            expires_at
+        )
+    )
+
+
+    text = (
+
+        "🆕 YENİ VIP ÜYE\n\n"
+
+        f"👤 İsim: "
+        f"{user.first_name or '-'}\n"
+
+        f"🔹 Kullanıcı adı: "
+        f"{username}\n"
+
+        f"🆔 Telegram ID: "
+        f"{user.id}\n\n"
+
+        "✅ VIP erişimi verildi\n"
+
+        f"📅 Bitiş: "
+        f"{date_text}\n\n"
+
+        "🌐 Mini App erişimi aktif."
+
+    )
+
+
+    url = (
+        "https://api.telegram.org/"
+        f"bot{BOT_TOKEN}/sendMessage"
+    )
+
+
+    try:
+
+        async with http_session.post(
+
+            url,
+
+            json={
+
+                "chat_id":
+                    ADMIN_CHAT_ID,
+
+                "text":
+                    text,
+
+                "disable_web_page_preview":
+                    True
+
+            }
+
+        ) as response:
+
+            if response.status != 200:
+
+                print(
+                    "[ADMIN BİLDİRİM]",
+                    response.status,
+                    await response.text()
+                )
+
+            else:
+
+                print(
+                    "[VIP] Admin bildirimi gönderildi."
+                )
+
+
+    except Exception as e:
+
+        print(
+            "[ADMIN BİLDİRİM]",
             repr(e)
         )
 
@@ -2362,7 +2583,294 @@ async def sender():
 
 
 # =========================================================
-# TELEGRAM BOT
+# /ID
+# =========================================================
+
+async def bot_id(
+    update,
+    context
+):
+
+    user = update.effective_user
+
+
+    if not user:
+
+        return
+
+
+    await update.message.reply_text(
+
+        "🆔 Telegram bilgileriniz:\n\n"
+
+        f"ID: `{user.id}`\n"
+
+        f"Username: "
+        f"@{user.username}"
+        if user.username
+        else
+        f"ID: `{user.id}`",
+
+        parse_mode="Markdown"
+    )
+
+
+# =========================================================
+# /DAVET
+# =========================================================
+
+async def bot_davet(
+    update,
+    context
+):
+
+    user = update.effective_user
+
+
+    if not user:
+
+        return
+
+
+    if not ADMIN_USER_ID:
+
+        await update.message.reply_text(
+
+            "⚠️ ADMIN_USER_ID ayarlanmamış."
+
+        )
+
+        return
+
+
+    if user.id != ADMIN_USER_ID:
+
+        await update.message.reply_text(
+
+            "⛔ Bu komut sadece yöneticinin kullanımına açıktır."
+
+        )
+
+        return
+
+
+    token = create_invite_token()
+
+
+    link = make_invite_link(
+        token
+    )
+
+
+    await update.message.reply_text(
+
+        "🎟️ YENİ VIP DAVET LİNKİ\n\n"
+
+        f"⏰ Geçerlilik: "
+        f"{INVITE_EXPIRE_MINUTES} dakika\n"
+
+        "👤 Kullanım: "
+        "1 kişi\n\n"
+
+        "👇 Bu linki müşteriye gönder:\n\n"
+
+        f"{link}",
+
+        disable_web_page_preview=True
+
+    )
+
+
+    print(
+        "[DAVET] Yeni davet üretildi."
+    )
+
+
+# =========================================================
+# /UYELER
+# =========================================================
+
+async def bot_uyeler(
+    update,
+    context
+):
+
+    user = update.effective_user
+
+
+    if not user:
+
+        return
+
+
+    if user.id != ADMIN_USER_ID:
+
+        await update.message.reply_text(
+            "⛔ Yetkiniz yok."
+        )
+
+        return
+
+
+    rows = db.execute("""
+    SELECT *
+    FROM vip_users
+    ORDER BY verified_at DESC
+    LIMIT 50
+    """).fetchall()
+
+
+    if not rows:
+
+        await update.message.reply_text(
+
+            "📭 Henüz VIP üye yok."
+
+        )
+
+        return
+
+
+    text = (
+        "👑 VIP ÜYELER\n\n"
+    )
+
+
+    now = int(
+        time.time()
+    )
+
+
+    for i, row in enumerate(
+        rows,
+        1
+    ):
+
+        remaining = (
+
+            safe_int(
+                row["expires_at"]
+            )
+            -
+            now
+
+        )
+
+
+        days = max(
+            0,
+            remaining
+            //
+            86400
+        )
+
+
+        username = (
+
+            "@"
+            +
+            row["username"]
+
+            if row["username"]
+
+            else
+
+            "-"
+        )
+
+
+        text += (
+
+            f"{i}. "
+            f"{row['first_name'] or '-'} "
+            f"{username}\n"
+
+            f"🆔 {row['telegram_id']}\n"
+
+            f"⏳ {days} gün\n\n"
+
+        )
+
+
+    await update.message.reply_text(
+        text
+    )
+
+
+# =========================================================
+# /SILVIP
+# =========================================================
+
+async def bot_silvip(
+    update,
+    context
+):
+
+    user = update.effective_user
+
+
+    if not user:
+
+        return
+
+
+    if user.id != ADMIN_USER_ID:
+
+        await update.message.reply_text(
+            "⛔ Yetkiniz yok."
+        )
+
+        return
+
+
+    if not context.args:
+
+        await update.message.reply_text(
+
+            "Kullanım:\n"
+            "/silvip TELEGRAM_ID"
+
+        )
+
+        return
+
+
+    telegram_id = safe_int(
+        context.args[0]
+    )
+
+
+    if not telegram_id:
+
+        await update.message.reply_text(
+            "❌ Geçersiz Telegram ID."
+        )
+
+        return
+
+
+    db.execute("""
+    DELETE FROM vip_users
+    WHERE telegram_id=?
+    """, (
+        telegram_id,
+    ))
+
+
+    db.commit()
+
+
+    await update.message.reply_text(
+
+        "✅ VIP üyelik kaldırıldı.\n\n"
+
+        f"🆔 {telegram_id}"
+
+    )
+
+
+# =========================================================
+# /START
 # =========================================================
 
 async def bot_start(
@@ -2381,22 +2889,26 @@ async def bot_start(
     args = context.args
 
 
-    # -----------------------------------------------------
-    # VIP TOKEN
-    # -----------------------------------------------------
+    # =====================================================
+    # DAVET LİNKİ
+    # =====================================================
 
     if (
+
         args
+
         and
+
         args[0].startswith(
-            "vip_"
+            "invite_"
         )
+
     ):
 
-        token = args[0][4:]
+        token = args[0][7:]
 
 
-        ok = verify_token_for_user(
+        ok, message = use_invite_token(
 
             token,
 
@@ -2413,16 +2925,31 @@ async def bot_start(
 
             await update.message.reply_text(
 
-                "❌ Doğrulama başarısız.\n\n"
+                "❌ ERİŞİM VERİLEMEDİ\n\n"
 
-                "Bağlantı geçersiz, süresi dolmuş "
-                "veya başka bir Telegram hesabına "
-                "ait olabilir."
+                f"{message}\n\n"
+
+                "Yeni bir davet bağlantısı "
+                "almanız gerekiyor."
 
             )
 
             return
 
+
+        vip = get_vip_user(
+            user.id
+        )
+
+
+        expires_at = safe_int(
+            vip["expires_at"]
+        )
+
+
+        # -------------------------------------------------
+        # KULLANICIYA BAŞARI
+        # -------------------------------------------------
 
         keyboard = [[
 
@@ -2442,9 +2969,9 @@ async def bot_start(
         await update.message.reply_text(
 
             f"✅ Doğrulama Başarılı, "
-            f"{user.first_name}!\n\n"
+            f"{user.first_name or 'VIP Üye'}!\n\n"
 
-            "VIP radar erişiminiz aktif.\n\n"
+            "👑 VIP erişiminiz aktif.\n"
 
             "👇 Radarı açmak için butona basın:",
 
@@ -2456,18 +2983,60 @@ async def bot_start(
         )
 
 
+        # -------------------------------------------------
+        # SANA BİLDİR
+        # -------------------------------------------------
+
+        await notify_new_vip(
+
+            user,
+
+            expires_at
+
+        )
+
+
         print(
-            "[VIP] DOĞRULANDI:",
-            user.id
+            "[VIP] YENİ ÜYE:",
+            user.id,
+            user.username
         )
 
 
         return
 
 
-    # -----------------------------------------------------
+    # =====================================================
+    # ESKİ vip_onayli LİNKLERİ KAPALI
+    # =====================================================
+
+    if (
+
+        args
+
+        and
+
+        args[0]
+        ==
+        "vip_onayli"
+
+    ):
+
+        await update.message.reply_text(
+
+            "⛔ Bu doğrulama bağlantısı artık geçerli değil.\n\n"
+
+            "VIP erişimi yalnızca özel davet "
+            "bağlantısıyla verilmektedir."
+
+        )
+
+        return
+
+
+    # =====================================================
     # ZATEN VIP
-    # -----------------------------------------------------
+    # =====================================================
 
     if is_vip(
         user.id
@@ -2490,10 +3059,12 @@ async def bot_start(
 
         await update.message.reply_text(
 
-            f"✅ VIP erişiminiz aktif, "
-            f"{user.first_name}!\n\n"
+            f"👑 Hoş geldin "
+            f"{user.first_name or 'VIP Üye'}!\n\n"
 
-            "Canlı radar ekranını açabilirsiniz.",
+            "VIP erişiminiz aktif.\n"
+
+            "👇 Radarı açabilirsiniz:",
 
             reply_markup=
                 InlineKeyboardMarkup(
@@ -2506,303 +3077,25 @@ async def bot_start(
         return
 
 
-    # -----------------------------------------------------
-    # YENİ KULLANICI
-    # -----------------------------------------------------
-
-    token = create_verify_token(
-        user.id
-    )
-
-
-    verify_link = (
-        f"{VERIFY_URL}?token={token}"
-    )
-
-
-    keyboard = [[
-
-        InlineKeyboardButton(
-
-            "🔒 SİTEDEN DOĞRULAMA YAP",
-
-            url=verify_link
-
-        )
-
-    ]]
-
+    # =====================================================
+    # NORMAL / YETKİSİZ
+    # =====================================================
 
     await update.message.reply_text(
 
-        "⚠️ ERİŞİM ENGELLENDİ!\n\n"
+        "🔒 ERİŞİM KISITLI\n\n"
 
-        "VIP Radarı kullanabilmek için "
-        "önce doğrulama yapmanız gerekiyor.\n\n"
+        "Bu bot sadece davetli VIP üyeler "
+        "için kullanılabilir.\n\n"
 
-        "👇 Aşağıdaki butona basın:",
-
-        reply_markup=
-            InlineKeyboardMarkup(
-                keyboard
-            )
+        "Geçerli bir VIP davet bağlantınız "
+        "yoksa radar açılmaz."
 
     )
 
 
 # =========================================================
-# VERIFY HTML
-# =========================================================
-
-VERIFY_HTML = r"""
-<!DOCTYPE html>
-
-<html lang="tr">
-
-<head>
-
-<meta charset="UTF-8">
-
-<meta
-name="viewport"
-content="width=device-width,initial-scale=1"
->
-
-<title>VIP Doğrulama</title>
-
-<style>
-
-* {
-    box-sizing: border-box;
-}
-
-html,
-body {
-
-    margin: 0;
-    padding: 0;
-
-    min-height: 100%;
-
-}
-
-body {
-
-    min-height: 100vh;
-
-    display: flex;
-
-    align-items: center;
-
-    justify-content: center;
-
-    padding: 20px;
-
-    background:
-        radial-gradient(
-            circle at top,
-            #28134d,
-            #090b12 50%,
-            #050609
-        );
-
-    color: white;
-
-    font-family:
-        Arial,
-        Helvetica,
-        sans-serif;
-}
-
-.box {
-
-    width: 100%;
-
-    max-width: 470px;
-
-    padding: 32px 24px;
-
-    text-align: center;
-
-    background: #111522;
-
-    border:
-        2px solid
-        #8b45ff;
-
-    border-radius: 25px;
-
-    box-shadow:
-        0 0 45px
-        rgba(139,69,255,.35);
-}
-
-.lock {
-
-    font-size: 60px;
-
-    margin-bottom: 12px;
-}
-
-h1 {
-
-    margin: 0 0 14px;
-
-    color: #c084fc;
-
-    font-size: 28px;
-
-    font-weight: 1000;
-}
-
-p {
-
-    color: #cbd5e1;
-
-    font-size: 16px;
-
-    line-height: 1.6;
-
-    margin-bottom: 25px;
-}
-
-.button {
-
-    display: block;
-
-    width: 100%;
-
-    padding: 17px;
-
-    border-radius: 15px;
-
-    background:
-        linear-gradient(
-            135deg,
-            #7c3aed,
-            #a855f7
-        );
-
-    color: white;
-
-    text-decoration: none;
-
-    font-size: 17px;
-
-    font-weight: 1000;
-}
-
-.note {
-
-    margin-top: 18px;
-
-    color: #64748b;
-
-    font-size: 13px;
-}
-
-.error {
-
-    color: #ff6b7d;
-
-    font-weight: 1000;
-}
-
-</style>
-
-</head>
-
-<body>
-
-<div class="box">
-
-    <div class="lock">
-        🔐
-    </div>
-
-    <h1>
-        VIP DOĞRULAMA
-    </h1>
-
-    <p>
-        Ödül Avcısı VIP radarına erişmek
-        için Telegram hesabınızı
-        doğrulamanız gerekiyor.
-    </p>
-
-    <div id="content">
-        Doğrulama hazırlanıyor...
-    </div>
-
-</div>
-
-
-<script>
-
-const params =
-    new URLSearchParams(
-        window.location.search
-    );
-
-const token =
-    params.get("token");
-
-const content =
-    document.getElementById(
-        "content"
-    );
-
-
-if (!token) {
-
-    content.innerHTML = `
-
-        <div class="error">
-            ❌ Geçersiz doğrulama bağlantısı.
-        </div>
-
-    `;
-
-} else {
-
-    const botUrl =
-
-        "https://t.me/YeniBirAirdropBot"
-        +
-        "?start=vip_"
-        +
-        encodeURIComponent(
-            token
-        );
-
-
-    content.innerHTML = `
-
-        <a
-            class="button"
-            href="${botUrl}"
-        >
-            🚀 TELEGRAM'DA DOĞRULA
-        </a>
-
-        <div class="note">
-            Butona bastıktan sonra
-            Telegram hesabınız doğrulanacaktır.
-        </div>
-
-    `;
-}
-
-</script>
-
-</body>
-
-</html>
-"""
-
-
-# =========================================================
-# MINI APP
+# MINI APP HTML
 # =========================================================
 
 MINI_APP_HTML = r"""
@@ -2833,27 +3126,21 @@ src="https://telegram.org/js/telegram-web-app.js"
 <style>
 
 * {
-
     box-sizing: border-box;
-
-    -webkit-tap-highlight-color:
-        transparent;
+    -webkit-tap-highlight-color: transparent;
 }
 
 html,
 body {
 
     margin: 0;
-
     padding: 0;
 
     width: 100%;
-
     min-height: 100%;
 
     background: #05070b;
-
-    color: #ffffff;
+    color: white;
 
     font-family:
         Arial,
@@ -2864,19 +3151,12 @@ body {
 body {
 
     padding: 7px;
-
     overflow-x: hidden;
 }
-
-
-/* =====================================================
-   BAŞLIK
-   ===================================================== */
 
 .head {
 
     width: 100%;
-
     text-align: center;
 
     padding:
@@ -2888,7 +3168,6 @@ body {
 .title {
 
     font-size: 36px;
-
     line-height: 1;
 
     font-weight: 1000;
@@ -2903,8 +3182,7 @@ body {
             #ffffff
         );
 
-    -webkit-background-clip:
-        text;
+    -webkit-background-clip: text;
 
     -webkit-text-fill-color:
         transparent;
@@ -2965,11 +3243,6 @@ body {
     align-items: start;
 }
 
-
-/* =====================================================
-   PANEL
-   ===================================================== */
-
 .panel {
 
     width: 100%;
@@ -2993,11 +3266,6 @@ body {
 
     overflow: hidden;
 }
-
-
-/* =====================================================
-   PANEL BAŞLIĞI
-   ===================================================== */
 
 .section-title {
 
@@ -3054,11 +3322,6 @@ body {
     font-weight: 1000;
 }
 
-
-/* =====================================================
-   LİSTE
-   ===================================================== */
-
 .list {
 
     width: 100%;
@@ -3069,11 +3332,6 @@ body {
 
     gap: 7px;
 }
-
-
-/* =====================================================
-   KART
-   ===================================================== */
 
 .card {
 
@@ -3116,11 +3374,6 @@ body {
         5px solid
         #ffd400;
 }
-
-
-/* =====================================================
-   YENİ KAYIT ANİMASYONU
-   ===================================================== */
 
 .card.new-item {
 
@@ -3172,11 +3425,6 @@ body {
     }
 }
 
-
-/* =====================================================
-   YENİ İŞARETİ
-   ===================================================== */
-
 .new-badge {
 
     position: absolute;
@@ -3225,23 +3473,19 @@ body {
     100% {
 
         opacity: 1;
-
-        transform:
-            scale(1);
+        transform: scale(1);
     }
 
     50% {
 
         opacity: .65;
-
-        transform:
-            scale(1.08);
+        transform: scale(1.08);
     }
 }
 
 
 /* =====================================================
-   YÜKSEK COIN
+   ALEV
    ===================================================== */
 
 .card.hot {
@@ -3289,21 +3533,14 @@ body {
     }
 }
 
-
-/* =====================================================
-   ALEV ÇİZGİSİ
-   ===================================================== */
-
 .fire-line {
 
     position: absolute;
 
     left: 0;
-
     top: 0;
 
     width: 100%;
-
     height: 2px;
 
     background:
@@ -3338,7 +3575,7 @@ body {
 
 
 /* =====================================================
-   KULLANICI
+   İSİM
    ===================================================== */
 
 .user-row {
@@ -3352,12 +3589,6 @@ body {
 
     gap: 3px;
 }
-
-
-/*
-   BURADA ARTIK GOODY / CHEST BADGE YOK.
-   İSMİN YANINDA SADECE YENİ ROZETİ GÖRÜNÜR.
-*/
 
 .user {
 
@@ -3431,11 +3662,6 @@ body {
     white-space: nowrap;
 }
 
-
-/* =====================================================
-   ALEV
-   ===================================================== */
-
 .hot .coin-value {
 
     color: #ff9d00;
@@ -3480,7 +3706,7 @@ body {
 
 
 /* =====================================================
-   BİLGİLER
+   BİLGİ
    ===================================================== */
 
 .info-grid {
@@ -3586,11 +3812,6 @@ body {
     font-weight: 1000;
 }
 
-
-/* =====================================================
-   BOŞ
-   ===================================================== */
-
 .empty {
 
     width: 100%;
@@ -3609,11 +3830,6 @@ body {
 
     font-weight: 900;
 }
-
-
-/* =====================================================
-   HATA
-   ===================================================== */
 
 .error {
 
@@ -3763,10 +3979,6 @@ body {
 <body>
 
 
-<!-- =====================================================
-     BAŞLIK
-     ===================================================== -->
-
 <div class="head">
 
     <div class="title">
@@ -3787,93 +3999,75 @@ body {
 </div>
 
 
-<!-- =====================================================
-     İKİ SÜTUN
-     ===================================================== -->
-
 <div class="sections">
 
 
-    <!-- =================================================
-         GOODY BAG
-         ================================================= -->
+<section class="panel">
 
-    <section class="panel">
+    <div class="section-title">
 
-        <div class="section-title">
+        <span class="section-name">
+            🟪 GOODY BAG
+        </span>
 
-            <span class="section-name">
-                🟪 GOODY BAG
-            </span>
-
-            <span
-                id="goodyCount"
-                class="count"
-            >
-                0
-            </span>
-
-        </div>
-
-
-        <div
-            id="goodyList"
-            class="list"
+        <span
+            id="goodyCount"
+            class="count"
         >
+            0
+        </span>
 
-            <div class="empty">
-                Goody Bag bekleniyor...
-            </div>
+    </div>
 
+    <div
+        id="goodyList"
+        class="list"
+    >
+
+        <div class="empty">
+            Goody Bag bekleniyor...
         </div>
 
-    </section>
+    </div>
+
+</section>
 
 
-    <!-- =================================================
-         HAZİNE
-         ================================================= -->
+<section class="panel">
 
-    <section class="panel">
+    <div class="section-title">
 
-        <div class="section-title">
+        <span class="section-name">
+            🟨 HAZİNE
+        </span>
 
-            <span class="section-name">
-                🟨 HAZİNE
-            </span>
-
-            <span
-                id="chestCount"
-                class="count"
-            >
-                0
-            </span>
-
-        </div>
-
-
-        <div
-            id="chestList"
-            class="list"
+        <span
+            id="chestCount"
+            class="count"
         >
+            0
+        </span>
 
-            <div class="empty">
-                Hazine bekleniyor...
-            </div>
+    </div>
 
+    <div
+        id="chestList"
+        class="list"
+    >
+
+        <div class="empty">
+            Hazine bekleniyor...
         </div>
 
-    </section>
+    </div>
+
+</section>
 
 
 </div>
 
 
 <script>
-
-/* =====================================================
-   TELEGRAM
-   ===================================================== */
 
 const tg =
     window.Telegram.WebApp;
@@ -3883,10 +4077,6 @@ tg.ready();
 
 tg.expand();
 
-
-/* =====================================================
-   ELEMENTLER
-   ===================================================== */
 
 const goodyList =
     document.getElementById(
@@ -3914,32 +4104,16 @@ const statusEl =
     );
 
 
-/* =====================================================
-   İLK YÜKLEME
-   ===================================================== */
-
 let firstLoad = true;
 
-
-/* =====================================================
-   DAHA ÖNCE GÖRÜLENLER
-   ===================================================== */
 
 const knownItems =
     new Set();
 
 
-/* =====================================================
-   YENİLER
-   ===================================================== */
-
 const freshItems =
     new Map();
 
-
-/* =====================================================
-   HTML ESCAPE
-   ===================================================== */
 
 function esc(value) {
 
@@ -3974,10 +4148,6 @@ function esc(value) {
 }
 
 
-/* =====================================================
-   KAYIT KEY
-   ===================================================== */
-
 function itemKey(d) {
 
     return [
@@ -3997,10 +4167,6 @@ function itemKey(d) {
     ].join("|");
 }
 
-
-/* =====================================================
-   YENİ KAYIT
-   ===================================================== */
 
 function isNewItem(d) {
 
@@ -4072,10 +4238,6 @@ function isNewItem(d) {
 }
 
 
-/* =====================================================
-   SICAK COIN
-   ===================================================== */
-
 function isHot(d) {
 
     return Number(
@@ -4083,10 +4245,6 @@ function isHot(d) {
     ) >= 100;
 }
 
-
-/* =====================================================
-   KART
-   ===================================================== */
 
 function card(d) {
 
@@ -4155,8 +4313,6 @@ function card(d) {
             }
 
 
-            <!-- KULLANICI -->
-
             <div class="user-row">
 
                 <div class="user">
@@ -4170,8 +4326,6 @@ function card(d) {
 
             </div>
 
-
-            <!-- COIN -->
 
             <div class="coin-box">
 
@@ -4208,8 +4362,6 @@ function card(d) {
 
             </div>
 
-
-            <!-- BİLGİLER -->
 
             <div class="info-grid">
 
@@ -4277,8 +4429,6 @@ function card(d) {
             </div>
 
 
-            <!-- CANLI -->
-
             ${
                 d.live
                 ? `
@@ -4302,10 +4452,6 @@ function card(d) {
     `;
 }
 
-
-/* =====================================================
-   LİSTEYİ ÇİZ
-   ===================================================== */
 
 function renderList(
     list,
@@ -4355,10 +4501,6 @@ function renderList(
         .join("");
 }
 
-
-/* =====================================================
-   RADAR VERİSİ
-   ===================================================== */
 
 async function loadRadar() {
 
@@ -4441,11 +4583,6 @@ async function loadRadar() {
             || [];
 
 
-        /*
-           İlk açılıştaki kayıtlar
-           YENİ olmayacak.
-        */
-
         if (firstLoad) {
 
             goodies.forEach(
@@ -4505,23 +4642,12 @@ async function loadRadar() {
 }
 
 
-/* =====================================================
-   İLK
-   ===================================================== */
-
 loadRadar();
 
 
-/* =====================================================
-   3 SANİYE
-   ===================================================== */
-
 setInterval(
-
     loadRadar,
-
     3000
-
 );
 
 </script>
@@ -4533,10 +4659,10 @@ setInterval(
 
 
 # =========================================================
-# PUBLIC RADAR
+# VERIFY SAYFASI
 # =========================================================
 
-RADAR_HTML = r"""
+VERIFY_HTML = r"""
 <!DOCTYPE html>
 
 <html lang="tr">
@@ -4550,7 +4676,7 @@ name="viewport"
 content="width=device-width,initial-scale=1"
 >
 
-<title>ÖDÜL AVCISI</title>
+<title>VIP Davet</title>
 
 <style>
 
@@ -4558,21 +4684,29 @@ content="width=device-width,initial-scale=1"
     box-sizing: border-box;
 }
 
-html,
 body {
 
     margin: 0;
-    padding: 0;
 
-    background: #07090d;
+    min-height: 100vh;
+
+    display: flex;
+
+    align-items: center;
+
+    justify-content: center;
+
+    padding: 20px;
+
+    background:
+        radial-gradient(
+            circle at top,
+            #28134d,
+            #080a10 55%,
+            #050609
+        );
 
     color: white;
-
-}
-
-body {
-
-    padding: 10px;
 
     font-family:
         Arial,
@@ -4580,310 +4714,79 @@ body {
         sans-serif;
 }
 
-.head {
+.box {
+
+    width: 100%;
+
+    max-width: 460px;
+
+    padding: 32px 24px;
 
     text-align: center;
 
-    padding:
-        15px
-        5px
-        25px;
-}
-
-.title {
-
-    font-size: 58px;
-
-    font-weight: 1000;
-}
-
-.sub {
-
-    margin-top: 12px;
-
-    font-size: 21px;
-
-    font-weight: 1000;
-}
-
-.status {
-
-    display: inline-block;
-
-    margin-top: 14px;
-
-    padding:
-        12px
-        18px;
-
-    border-radius: 15px;
-
-    background: #102719;
-
-    color: #55ff99;
-
-    font-size: 16px;
-
-    font-weight: 1000;
-}
-
-.grid {
-
-    display: grid;
-
-    grid-template-columns:
-        1fr 1fr;
-
-    gap: 18px;
-
-    max-width: 1800px;
-
-    margin:
-        0
-        auto;
-}
-
-.panel {
-
-    background: #0d1118;
+    background: #111522;
 
     border:
         2px solid
-        #202938;
+        #8b45ff;
 
-    border-radius: 18px;
+    border-radius: 25px;
 
-    padding: 15px;
+    box-shadow:
+        0 0 45px
+        rgba(139,69,255,.35);
 }
 
-.pnrow {
+.icon {
 
-    display: flex;
-
-    align-items: center;
-
-    justify-content:
-        space-between;
-
-    padding:
-        5px
-        5px
-        16px;
+    font-size: 58px;
 }
 
-.pn {
+h1 {
 
-    font-size: 29px;
+    color: #c084fc;
+
+    font-size: 28px;
 
     font-weight: 1000;
 }
 
-.cnt {
+p {
 
-    padding:
-        8px
-        14px;
+    color: #cbd5e1;
 
-    border-radius: 12px;
-
-    background: #18202c;
-
-    font-size: 18px;
-
-    font-weight: 1000;
+    line-height: 1.6;
 }
 
-.card {
-
-    background: #111720;
-
-    border:
-        1px solid
-        #26303e;
-
-    border-radius: 16px;
-
-    padding: 17px;
-
-    margin-bottom: 12px;
-}
-
-.g .card {
-
-    border-left:
-        8px solid
-        #9b5cff;
-}
-
-.c .card {
-
-    border-left:
-        8px solid
-        #ffd400;
-}
-
-.ur {
-
-    display: flex;
-
-    justify-content:
-        space-between;
-
-    gap: 10px;
-
-    margin-bottom: 13px;
-}
-
-.user {
-
-    font-size: 21px;
-
-    font-weight: 1000;
-
-    overflow-wrap:
-        anywhere;
-}
-
-.rank {
-
-    margin-top: 3px;
-
-    font-size: 13px;
-
-    opacity: .7;
-}
-
-.ig {
-
-    display: grid;
-
-    grid-template-columns:
-        1fr 1fr;
-
-    gap: 9px;
-}
-
-.info {
-
-    background: #0a0e14;
-
-    border:
-        1px solid
-        #202a38;
-
-    border-radius: 12px;
-
-    padding: 12px;
-
-    font-size: 11px;
-
-    font-weight: 900;
-}
-
-.info b {
+.button {
 
     display: block;
 
-    margin-top: 5px;
+    padding: 17px;
 
-    font-size: 20px;
+    border-radius: 15px;
 
-    font-weight: 1000;
+    background:
+        linear-gradient(
+            135deg,
+            #7c3aed,
+            #a855f7
+        );
 
-    overflow-wrap:
-        anywhere;
-}
-
-.go {
-
-    margin-top: 12px;
-
-    padding: 15px;
-
-    border-radius: 12px;
-
-    background: #151c27;
-
-    font-size: 14px;
-
-    font-weight: 1000;
-
-    overflow-wrap:
-        anywhere;
-}
-
-.go a {
-
-    color: #8ec5ff;
+    color: white;
 
     text-decoration: none;
+
+    font-weight: 1000;
+
+    font-size: 17px;
 }
 
-.empty {
+.error {
 
-    text-align: center;
+    color: #ff6578;
 
-    padding:
-        30px
-        10px;
-
-    font-size: 15px;
-
-    font-weight: 900;
-
-    opacity: .65;
-}
-
-@media(max-width:700px) {
-
-    body {
-        padding: 8px;
-    }
-
-    .title {
-        font-size: 48px;
-    }
-
-    .sub {
-        font-size: 18px;
-    }
-
-    .status {
-        font-size: 14px;
-    }
-
-    .grid {
-
-        grid-template-columns:
-            1fr;
-
-        gap: 18px;
-    }
-
-    .panel {
-        padding: 13px;
-    }
-
-    .pn {
-        font-size: 25px;
-    }
-
-    .user {
-        font-size: 21px;
-    }
-
-    .info {
-        padding: 12px;
-        font-size: 10px;
-    }
-
-    .info b {
-        font-size: 20px;
-    }
-
-    .go {
-        font-size: 14px;
-    }
+    font-weight: 1000;
 }
 
 </style>
@@ -4892,427 +4795,87 @@ body {
 
 <body>
 
-<div class="head">
+<div class="box">
 
-    <div class="title">
-        🏆 ÖDÜL AVCISI
+    <div class="icon">
+        👑
     </div>
 
-    <div class="sub">
-        🟪 GOODY BAG • 🟨 HAZİNE SANDIĞI
+    <h1>
+        VIP DAVET
+    </h1>
+
+    <p>
+        VIP radar erişiminiz için
+        aşağıdaki butona basarak
+        Telegram'a geçin.
+    </p>
+
+    <div id="area">
+        Hazırlanıyor...
     </div>
-
-    <div
-        id="status"
-        class="status"
-    >
-        🟡 RADAR BAĞLANIYOR...
-    </div>
-
-</div>
-
-
-<div class="grid">
-
-
-<section class="panel g">
-
-    <div class="pnrow">
-
-        <div class="pn">
-            🟪 GOODY BAG
-        </div>
-
-        <div
-            id="goodyCount"
-            class="cnt"
-        >
-            0
-        </div>
-
-    </div>
-
-    <div id="goodyList">
-
-        <div class="empty">
-            Goody Bag bekleniyor...
-        </div>
-
-    </div>
-
-</section>
-
-
-<section class="panel c">
-
-    <div class="pnrow">
-
-        <div class="pn">
-            🟨 HAZİNE SANDIĞI
-        </div>
-
-        <div
-            id="chestCount"
-            class="cnt"
-        >
-            0
-        </div>
-
-    </div>
-
-    <div id="chestList">
-
-        <div class="empty">
-            Hazine bekleniyor...
-        </div>
-
-    </div>
-
-</section>
-
 
 </div>
 
 
 <script>
 
-const goodyList =
+const params =
+    new URLSearchParams(
+        location.search
+    );
+
+const token =
+    params.get(
+        "token"
+    );
+
+
+const area =
     document.getElementById(
-        "goodyList"
-    );
-
-const chestList =
-    document.getElementById(
-        "chestList"
-    );
-
-const goodyCount =
-    document.getElementById(
-        "goodyCount"
-    );
-
-const chestCount =
-    document.getElementById(
-        "chestCount"
-    );
-
-const statusEl =
-    document.getElementById(
-        "status"
+        "area"
     );
 
 
-function esc(value) {
+if (!token) {
 
-    return String(
-        value ?? ""
-    )
+    area.innerHTML = `
 
-    .replaceAll(
-        "&",
-        "&amp;"
-    )
+        <div class="error">
 
-    .replaceAll(
-        "<",
-        "&lt;"
-    )
-
-    .replaceAll(
-        ">",
-        "&gt;"
-    )
-
-    .replaceAll(
-        '"',
-        "&quot;"
-    )
-
-    .replaceAll(
-        "'",
-        "&#039;"
-    );
-}
-
-
-function card(d) {
-
-    const isGoody =
-        d.type === "GOODY BAG";
-
-
-    return `
-
-        <div class="card">
-
-            <div class="ur">
-
-                <div>
-
-                    <div class="user">
-
-                        👤
-                        ${esc(
-                            d.username
-                        )}
-
-                    </div>
-
-                    <div class="rank">
-
-                        ${
-                            isGoody
-                            ? "GOODY BAG"
-                            : "HAZİNE SANDIĞI"
-                        }
-
-                    </div>
-
-                </div>
-
-            </div>
-
-
-            <div class="ig">
-
-                <div class="info">
-
-                    🪙 COIN
-
-                    <b>
-                        ${esc(
-                            d.coins
-                        )}
-                    </b>
-
-                </div>
-
-
-                <div class="info">
-
-                    👥 KİŞİ
-
-                    <b>
-                        ${esc(
-                            d.people
-                        )}
-                    </b>
-
-                </div>
-
-
-                <div class="info">
-
-                    🙋 KATILAN
-
-                    <b>
-                        ${esc(
-                            d.joined
-                        )}
-                    </b>
-
-                </div>
-
-
-                <div class="info">
-
-                    📈 ORAN
-
-                    <b>
-                        ${esc(
-                            d.rate
-                        )}
-                    </b>
-
-                </div>
-
-
-                <div class="info">
-
-                    👀 İZLENME
-
-                    <b>
-                        ${esc(
-                            d.view
-                        )}
-                    </b>
-
-                </div>
-
-
-                <div class="info">
-
-                    🏠 ODA
-
-                    <b>
-                        ${esc(
-                            d.room
-                        )}
-                    </b>
-
-                </div>
-
-            </div>
-
-
-            ${
-                d.live
-                ? `
-                    <div class="go">
-
-                        🔴 CANLI YAYIN
-
-                        <br><br>
-
-                        <a
-                            href="${esc(
-                                d.live
-                            )}"
-                            target="_blank"
-                            rel="noopener"
-                        >
-
-                            ${esc(
-                                d.live
-                            )}
-
-                        </a>
-
-                    </div>
-                `
-                : ""
-            }
+            ❌ Geçersiz davet bağlantısı.
 
         </div>
 
     `;
+
+} else {
+
+    const url =
+
+        "https://t.me/YeniBirAirdropBot"
+        +
+        "?start=invite_"
+        +
+        encodeURIComponent(
+            token
+        );
+
+
+    area.innerHTML = `
+
+        <a
+            class="button"
+            href="${url}"
+        >
+
+            🚀 TELEGRAM'DA DEVAM ET
+
+        </a>
+
+    `;
+
 }
-
-
-function render(
-    list,
-    element,
-    countElement
-) {
-
-    const sorted =
-        [...list].sort(
-
-            (a, b) =>
-
-                Number(
-                    b.detected_at || 0
-                )
-                -
-                Number(
-                    a.detected_at || 0
-                )
-
-        );
-
-
-    countElement.textContent =
-        sorted.length;
-
-
-    if (!sorted.length) {
-
-        element.innerHTML = `
-
-            <div class="empty">
-                Kayıt bekleniyor...
-            </div>
-
-        `;
-
-        return;
-    }
-
-
-    element.innerHTML =
-        sorted
-        .map(card)
-        .join("");
-}
-
-
-async function refresh() {
-
-    try {
-
-        const response =
-            await fetch(
-                "/api/all",
-                {
-                    cache:
-                        "no-store"
-                }
-            );
-
-
-        if (!response.ok) {
-
-            throw new Error(
-                "HTTP "
-                +
-                response.status
-            );
-        }
-
-
-        const data =
-            await response.json();
-
-
-        render(
-
-            data.goody_bags
-            || [],
-
-            goodyList,
-
-            goodyCount
-
-        );
-
-
-        render(
-
-            data.chests
-            || [],
-
-            chestList,
-
-            chestCount
-
-        );
-
-
-        statusEl.textContent =
-            "🟢 RADAR AKTİF • CANLI VERİ";
-
-
-    } catch (error) {
-
-        console.error(
-            error
-        );
-
-
-        statusEl.textContent =
-            "🔴 RADAR BAĞLANTI HATASI";
-
-    }
-}
-
-
-refresh();
-
-
-setInterval(
-    refresh,
-    3000
-);
 
 </script>
 
@@ -5323,7 +4886,7 @@ setInterval(
 
 
 # =========================================================
-# HTTP SAYFALARI
+# HTTP
 # =========================================================
 
 async def radar_page(
@@ -5402,7 +4965,7 @@ async def api_miniapp_data(
                     "error",
 
                 "message":
-                    "Telegram kullanıcı doğrulaması başarısız."
+                    "Telegram doğrulaması başarısız."
             },
 
             status=401
@@ -5428,7 +4991,7 @@ async def api_miniapp_data(
                     "error",
 
                 "message":
-                    "Bu radar sadece VIP üyeler içindir."
+                    "VIP erişiminiz yok."
             },
 
             status=403
@@ -5863,7 +5426,6 @@ async def telegram_connection_watch():
                             repr(e)
                         )
 
-
                 else:
 
                     print(
@@ -5901,29 +5463,29 @@ async def main():
 
 
     print(
-        "🪙 COIN ALARM:",
-        COIN_ALARM_LIMIT
+        "🔐 DAVET TABANLI VIP SİSTEMİ AKTİF"
     )
 
 
     print(
-        "👥 KİŞİ ALARM:",
-        PEOPLE_ALARM_LIMIT
-    )
-
-
-    print(
-        "🔐 VIP SİSTEMİ AKTİF"
-    )
-
-
-    print(
-        "📱 TELEGRAM MINI APP AKTİF"
+        "📱 MINI APP AKTİF"
     )
 
 
     print(
         "🔥 YÜKSEK COIN EFEKTİ AKTİF"
+    )
+
+
+    print(
+        "👑 ADMIN USER ID:",
+        ADMIN_USER_ID
+    )
+
+
+    print(
+        "👑 ADMIN CHAT ID:",
+        ADMIN_CHAT_ID
     )
 
 
@@ -5963,7 +5525,7 @@ async def main():
 
 
             print(
-                "[TELEGRAM] Telethon bağlandı."
+                "[TELETHON] Bağlandı."
             )
 
 
@@ -6021,6 +5583,46 @@ async def main():
     )
 
 
+    bot_application.add_handler(
+
+        CommandHandler(
+            "davet",
+            bot_davet
+        )
+
+    )
+
+
+    bot_application.add_handler(
+
+        CommandHandler(
+            "uyeler",
+            bot_uyeler
+        )
+
+    )
+
+
+    bot_application.add_handler(
+
+        CommandHandler(
+            "silvip",
+            bot_silvip
+        )
+
+    )
+
+
+    bot_application.add_handler(
+
+        CommandHandler(
+            "id",
+            bot_id
+        )
+
+    )
+
+
     await bot_application.initialize()
 
 
@@ -6041,6 +5643,26 @@ async def main():
     )
 
 
+    print(
+        "[BOT] /davet hazır."
+    )
+
+
+    print(
+        "[BOT] /uyeler hazır."
+    )
+
+
+    print(
+        "[BOT] /silvip hazır."
+    )
+
+
+    print(
+        "[BOT] /id hazır."
+    )
+
+
     # =====================================================
     # TASKLER
     # =====================================================
@@ -6056,12 +5678,7 @@ async def main():
 
 
     print(
-        "[HAZIR] GOODY BAG"
-    )
-
-
-    print(
-        "[HAZIR] HAZİNE SANDIĞI"
+        "[HAZIR] RADAR"
     )
 
 
@@ -6076,7 +5693,17 @@ async def main():
 
 
     print(
-        "[HAZIR] MINI APP:",
+        "[HAZIR] DAVET SİSTEMİ"
+    )
+
+
+    print(
+        "[HAZIR] ÜYE BİLDİRİMİ"
+    )
+
+
+    print(
+        "[MINI APP]",
         MINI_APP_URL
     )
 
@@ -6087,11 +5714,6 @@ async def main():
 
 
     finally:
-
-        print(
-            "[KAPANIŞ]"
-        )
-
 
         try:
 
