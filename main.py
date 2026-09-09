@@ -7,6 +7,7 @@
 # 429 KORUMASI
 # PRIORITY QUEUE HATASI DÜZELTİLDİ
 # BÜYÜK YAZI MOBİL ARAYÜZ
+# VIP SİLME + OTOMATİK BİLDİRİM
 # ============================================================
 
 import os
@@ -142,12 +143,7 @@ last_telegram_send = 0.0
 
 telegram_retry_until = 0.0
 
-# ============================================================
-# ÖNEMLİ:
-# PriorityQueue içinde aynı priority değerinde dict
-# karşılaştırılmasın diye benzersiz sıra numarası kullanıyoruz.
-# ============================================================
-
+# Aynı priority değerinde dict karşılaştırılmasını önler.
 queue_counter = 0
 
 
@@ -1814,16 +1810,6 @@ async def send_alarm(data):
 
 # ============================================================
 # TELEGRAM QUEUE
-#
-# ESKİ HATA:
-# (priority, dict)
-#
-# Aynı priority olunca Python dict karşılaştırıyordu.
-#
-# YENİ:
-# (priority, sıra_no, dict)
-#
-# Sıra_no her zaman farklı olduğu için dict karşılaştırılmaz.
 # ============================================================
 
 async def telegram_sender():
@@ -1883,6 +1869,51 @@ async def send_admin(text):
                 True,
         }
     )
+
+    return ok
+
+
+# ============================================================
+# VIP KULLANICISINA SİLME BİLDİRİMİ
+# ============================================================
+
+async def notify_vip_removed(user_id):
+
+    text = (
+        "❌ VIP ERİŞİMİ SONLANDIRILDI\n\n"
+        "Yönetici tarafından VIP erişimin kapatıldı.\n"
+        "Artık Ödül Avcısı VIP radarına "
+        "erişemezsin."
+    )
+
+    ok, result = await telegram_api(
+        "sendMessage",
+        {
+            "chat_id":
+                user_id,
+
+            "text":
+                text,
+
+            "disable_web_page_preview":
+                True,
+        }
+    )
+
+    if ok:
+
+        print(
+            "[VIP] Kullanıcıya erişim kapatma bildirimi gönderildi:",
+            user_id
+        )
+
+    else:
+
+        print(
+            "[VIP] Kullanıcıya bildirim gönderilemedi:",
+            user_id,
+            result
+        )
 
     return ok
 
@@ -3437,10 +3468,6 @@ function renderLatest(){
     const key =
         itemKey(item);
 
-    const changed =
-        latestKey !== null &&
-        key !== latestKey;
-
     latestKey =
         key;
 
@@ -4410,10 +4437,6 @@ async def start_cmd(
 
         value = args[0]
 
-        # ====================================================
-        # DÜZELTİLDİ
-        # ====================================================
-
         if value.startswith(
             "invite_"
         ):
@@ -4604,6 +4627,7 @@ async def silvip_cmd(
 
         return
 
+    # Sadece admin kullanabilir.
     if user.id != ADMIN_USER_ID:
 
         await update.message.reply_text(
@@ -4612,42 +4636,115 @@ async def silvip_cmd(
 
         return
 
+
+    # ID verilmemişse kullanım göster.
     if not context.args:
 
         await update.message.reply_text(
+
+            "❌ Kullanıcı ID gerekli.\n\n"
+
             "Kullanım:\n"
             "/silvip 123456789"
+
         )
 
         return
 
+
+    # İlk argümanı Telegram ID olarak al.
     user_id = safe_int(
         context.args[0]
     )
 
+
     if not user_id:
 
         await update.message.reply_text(
-            "❌ Geçersiz kullanıcı ID."
+
+            "❌ Geçersiz kullanıcı ID.\n\n"
+            "Örnek:\n"
+            "/silvip 123456789"
+
         )
 
         return
 
+
+    # Önce kullanıcı gerçekten VIP mi kontrol et.
+    vip = get_vip(
+        user_id
+    )
+
+
+    if not vip:
+
+        await update.message.reply_text(
+
+            "❌ Bu kullanıcı aktif VIP değil.\n\n"
+            f"🆔 {user_id}"
+
+        )
+
+        return
+
+
+    # Kullanıcının VIP erişimini sil.
     removed = remove_vip(
         user_id
     )
 
-    if removed:
+
+    if not removed:
 
         await update.message.reply_text(
-            "✅ VIP erişim silindi."
+
+            "❌ VIP silme işlemi başarısız.\n\n"
+            f"🆔 {user_id}"
+
+        )
+
+        return
+
+
+    # Kullanıcıya bildirim gönder.
+    notified = await notify_vip_removed(
+        user_id
+    )
+
+
+    # Admin'e sonucu bildir.
+    if notified:
+
+        await update.message.reply_text(
+
+            "✅ VIP erişimi silindi.\n\n"
+            f"🆔 Kullanıcı ID: {user_id}\n"
+            "📨 Kullanıcıya bildirim gönderildi."
+
         )
 
     else:
 
         await update.message.reply_text(
-            "❌ Bu kullanıcı VIP değil."
+
+            "✅ VIP erişimi silindi.\n\n"
+            f"🆔 Kullanıcı ID: {user_id}\n"
+            "⚠️ Kullanıcıya bildirim gönderilemedi."
+
         )
+
+
+    # Admin logu.
+    await send_admin(
+
+        "🛑 VIP ERİŞİMİ SONLANDIRILDI\n\n"
+        f"🆔 Kullanıcı: {user_id}\n"
+        f"👤 İşlemi yapan: {user.id}\n"
+        f"📨 Bildirim: "
+        f"{'Gönderildi' if notified else 'Gönderilemedi'}"
+
+    )
 
 
 # ============================================================
@@ -4715,20 +4812,10 @@ async def message_listener(event):
 
         if add_to_radar(data):
 
-            # =================================================
-            # DÜZELTME:
-            #
-            # ESKİ:
-            # await telegram_queue.put(
-            #     (0, data)
-            # )
-            #
-            # YENİ:
-            # (priority, sequence, data)
-            # =================================================
-
             queue_counter += 1
 
+            # Alarm ve normal mesajlar
+            # aynı worker üzerinden güvenli şekilde gönderilir.
             priority = 0
 
             await telegram_queue.put(
@@ -4922,6 +5009,10 @@ async def main():
 
     print(
         "[HAZIR] Telegram Queue aktif."
+    )
+
+    print(
+        "[HAZIR] VIP silme + bildirim aktif."
     )
 
 
