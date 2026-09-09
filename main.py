@@ -14,7 +14,7 @@ from telethon import TelegramClient, events, Button
 from telethon.sessions import StringSession, MemorySession
 
 # =========================================================
-# AYARLAR
+# AYARLAR VE ÇEVRE DEĞİŞKENLERİ
 # =========================================================
 
 API_ID = int(os.environ.get("API_ID", "0"))
@@ -22,6 +22,7 @@ API_HASH = os.environ.get("API_HASH", "")
 STRING_SESSION = os.environ.get("STRING_SESSION", "")
 BOT_TOKEN = os.environ.get("BOT_TOKEN", "")
 
+SITE_URL = "https://sites.google.com/view/godybagvechesture/ana-sayfa"
 TARGET_CHAT_ID = -1004421946217
 
 SOURCE_CHATS = [
@@ -33,23 +34,15 @@ SOURCE_CHATS = [
 ]
 
 PORT = int(os.environ.get("PORT", "10000"))
-
-DB_PATH = os.environ.get(
-    "DATABASE_PATH",
-    "radar.db"
-)
-
+DB_PATH = os.environ.get("DATABASE_PATH", "radar.db")
 MAX_HISTORY = 500
 
-# =========================================================
-# 🚨 ALARM AYARLARI
-# =========================================================
-
+# 🚨 ALARM LİMİTLERİ
 COIN_ALARM_LIMIT = 100
 PEOPLE_ALARM_LIMIT = 5
 
 # =========================================================
-# RAM
+# RAM & BELLEK YÖNETİMİ
 # =========================================================
 
 LIVE_GOODY_BAGS = {}
@@ -62,14 +55,10 @@ telegram_queue = asyncio.Queue()
 http_session = None
 
 # =========================================================
-# SQLITE
+# VERİTABANI (SQLITE)
 # =========================================================
 
-db = sqlite3.connect(
-    DB_PATH,
-    check_same_thread=False
-)
-
+db = sqlite3.connect(DB_PATH, check_same_thread=False)
 db.row_factory = sqlite3.Row
 
 db.execute("""
@@ -92,10 +81,7 @@ CREATE TABLE IF NOT EXISTS radar_history (
 )
 """)
 
-db.execute("""
-CREATE INDEX IF NOT EXISTS idx_radar_detected
-ON radar_history(detected_at)
-""")
+db.execute("CREATE INDEX IF NOT EXISTS idx_radar_detected ON radar_history(detected_at)")
 
 db.execute("""
 CREATE TABLE IF NOT EXISTS alarm_history (
@@ -118,24 +104,16 @@ CREATE TABLE IF NOT EXISTS verified_users (
 db.commit()
 
 # =========================================================
-# YARDIMCI
+# YARDIMCI VE İŞLEME FONKSİYONLARI
 # =========================================================
 
 def safe_int(v, d=0):
-    try:
-        return int(float(v))
-    except:
-        return d
+    try: return int(float(v))
+    except: return d
 
 def safe_float(v, d=0):
-    try:
-        return float(v)
-    except:
-        return d
-
-# =========================================================
-# SQLITE KAYIT
-# =========================================================
+    try: return float(v)
+    except: return d
 
 def db_save(d, event_key):
     try:
@@ -154,12 +132,7 @@ def db_save(d, event_key):
 
 def db_exists(event_key):
     try:
-        row = db.execute(
-            """
-            SELECT 1 FROM radar_history WHERE event_key=? LIMIT 1
-            """,
-            (event_key,)
-        ).fetchone()
+        row = db.execute("SELECT 1 FROM radar_history WHERE event_key=? LIMIT 1", (event_key,)).fetchone()
         return row is not None
     except Exception as e:
         print("[SQLITE KONTROL HATASI]", repr(e))
@@ -177,9 +150,7 @@ def db_stats():
 
 def db_load_recent():
     try:
-        rows = db.execute("""
-            SELECT * FROM radar_history ORDER BY detected_at DESC LIMIT ?
-        """, (MAX_HISTORY,)).fetchall()
+        rows = db.execute("SELECT * FROM radar_history ORDER BY detected_at DESC LIMIT ?", (MAX_HISTORY,)).fetchall()
         for row in reversed(rows):
             d = {
                 "type": row["event_type"],
@@ -205,7 +176,7 @@ def db_load_recent():
         print("[SQLITE YÜKLEME HATASI]", repr(e))
 
 # =========================================================
-# TOKEN & PARSING (Aynı Bırakıldı)
+# PARSING VE AYRIŞTIRMA
 # =========================================================
 
 def token_from_event(e):
@@ -220,23 +191,13 @@ def token_from_event(e):
     ]
     for p in patterns:
         m1 = re.search(p, t, re.I)
-        if m1:
-            return unquote(m1.group(1))
+        if m1: return unquote(m1.group(1))
     try:
         for ent in m.entities or []:
             u = getattr(ent, "url", None)
             if u:
                 m1 = re.search(r't\.php\?token=([^&\s]+)', u, re.I)
-                if m1:
-                    return unquote(m1.group(1))
-    except: pass
-    try:
-        for ent, _ in m.get_entities_text():
-            u = getattr(ent, "url", None)
-            if u:
-                m1 = re.search(r't\.php\?token=([^&\s]+)', u, re.I)
-                if m1:
-                    return unquote(m1.group(1))
+                if m1: return unquote(m1.group(1))
     except: pass
     return None
 
@@ -436,7 +397,7 @@ def get_alarms(d):
     return alarms
 
 # =========================================================
-# TELEGRAM GÖNDERİCİ
+# TELEGRAM BİLDİRİM GÖNDERİCİSİ
 # =========================================================
 
 async def send_tg(d):
@@ -505,7 +466,7 @@ async def sender():
             telegram_queue.task_done()
 
 # =========================================================
-# WEB SİTESİ VE DOĞRULAMA (Html aynı bırakıldı, boyut nedeniyle kırpıldı - Sende var)
+# WEB SUNUCUSU (AIOHTTP)
 # =========================================================
 
 RADAR_HTML = r"""<!DOCTYPE html>
@@ -514,7 +475,6 @@ RADAR_HTML = r"""<!DOCTYPE html>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>🏆 ÖDÜL AVCISI RADAR</title>
-<!-- Önceki gönderdiğim tasarımla tamamen aynı kalacak -->
 <style>
 * { box-sizing:border-box; }
 body { margin:0; padding:12px; background:#05060c; color:#fff; font-family:Arial,sans-serif; }
@@ -637,9 +597,8 @@ body { margin:0; padding:12px; background:#05060c; color:#fff; font-family:Arial
       <div class="panel c">
         <div class="pnrow">
           <div class="pn">🟨 HAZİNE SANDIĞI</div>
-          <div id="cc" class="cnt">0</div>
+          <div id="cs"></div>
         </div>
-        <div id="cs"></div>
       </div>
     </div>
   </div>
@@ -686,7 +645,7 @@ function list(a, id, cid, icon, type){
   const e = document.getElementById(id);
   const n = document.getElementById(cid);
   const arr = five(a);
-  n.textContent = arr.length;
+  if(n) n.textContent = arr.length;
   if(!arr.length){ e.innerHTML = '<div class="empty">⚡ Henüz veri yok.</div>'; return; }
   const seen = type==="G" ? seenG : seenC;
   const ns = type==="G" ? newG : newC;
@@ -761,7 +720,7 @@ async def verify_page(request):
     if user_id:
         try:
             uid = int(user_id)
-            db.execute("INSERT OR REPLACE INTO verified_users (user_id, name, verified_at) VALUES (?, ?, ?)", (uid, "JIMIN", int(time.time())))
+            db.execute("INSERT OR REPLACE INTO verified_users (user_id, name, verified_at) VALUES (?, ?, ?)", (uid, "Kullanıcı", int(time.time())))
             db.commit()
         except Exception as e:
             print("[VERIFY HATA]", repr(e))
@@ -775,7 +734,8 @@ async def verify_page(request):
 
 @web.middleware
 async def cors(request, handler):
-    if request.method == "OPTIONS": return web.Response(status=204, headers={"Access-Control-Allow-Origin": "*", "Access-Control-Allow-Methods": "GET, OPTIONS", "Access-Control-Allow-Headers": "*"})
+    if request.method == "OPTIONS": 
+        return web.Response(status=204, headers={"Access-Control-Allow-Origin": "*", "Access-Control-Allow-Methods": "GET, OPTIONS", "Access-Control-Allow-Headers": "*"})
     response = await handler(request)
     response.headers["Access-Control-Allow-Origin"] = "*"
     return response
@@ -799,7 +759,7 @@ async def start_http():
     print("[HTTP] Sunucu başladı:", PORT)
 
 # =========================================================
-# LISTENER & BOT COMMANDS
+# TELEGRAM BİLEŞENLERİ VE DİNLENEN OLAYLAR
 # =========================================================
 
 async def listener(event):
@@ -825,24 +785,39 @@ async def bot_start_handler(event):
     try:
         if not event.is_private: return
         user_id = event.sender_id
+        sender = await event.get_sender()
+        first_name = getattr(sender, 'first_name', 'Kullanıcı') or 'Kullanıcı'
         
-        # Render'daki web uygulamanın linki
-        base_url = os.environ.get("WEB_URL", f"http://localhost:{PORT}") 
-        
+        base_url = os.environ.get("WEB_URL", f"http://localhost:{PORT}")
         row = db.execute("SELECT name FROM verified_users WHERE user_id = ?", (user_id,)).fetchone()
         
         if row:
-            name = row["name"] or "JIMIN"
-            msg = f"✅ **Doğrulama Başarılı, {name}!**\n\nSiteden üyeliğiniz onaylandı. VIP Canlı Radar ekranına erişmek için aşağıdaki butona tıklayabilirsiniz."
-            await event.respond(msg, buttons=[Button.url("🌐 VIP RADARI AÇ", base_url)])
+            msg = (
+                f"👋 **Merhaba {first_name}!**\n\n"
+                "✅ **Doğrulama Başarılı!**\n"
+                "VIP Canlı Radar ekranına erişmek için aşağıdaki butonları kullanabilirsiniz."
+            )
+            buttons = [
+                [Button.url("🚀 VIP RADARI AÇ", base_url)],
+                [Button.url("🌐 SİTEYE GİT", SITE_URL)]
+            ]
         else:
-            msg = "⚠️ **Erişim Engellendi!**\n\nBu bota doğrudan erişim izni bulunmamaktadır.\nVIP Radarı kullanabilmek için önce web sitemiz üzerinden doğrulama yapmalısınız."
-            await event.respond(msg, buttons=[Button.url("🔒 SİTEDEN DOĞRULAMA YAP", f"{base_url}/verify?id={user_id}")])
+            msg = (
+                f"👋 **Merhaba {first_name}!**\n\n"
+                "🔒 VIP Radar sistemine erişim sağlamak için önce web sitemiz üzerinden doğrulama yapmalısınız.\n"
+                "Aşağıdaki butona tıklayarak sitemize gidin ve VIP Radarı başlatın."
+            )
+            buttons = [
+                [Button.url("🚀 SİTEDEN DOĞRULA VE AÇ", SITE_URL)],
+                [Button.url("🔒 DOĞRULAMA SAYFASI", f"{base_url}/verify?id={user_id}")]
+            ]
+            
+        await event.respond(msg, buttons=buttons, parse_mode="md")
     except Exception as e:
         print("[BOT START HATA]", repr(e))
 
 # =========================================================
-# MAIN (ÇİFT MOTOR YAPISI EKLENDİ)
+# ANA ÇALIŞTIRICI (MAIN)
 # =========================================================
 
 async def main():
@@ -852,27 +827,24 @@ async def main():
     http_session = aiohttp.ClientSession()
     await start_http()
     
-    # 1. MOTOR: Veri Çekme Motoru (Userbot)
+    # Userbot (Grup Mesajı Dinleyici)
     user_client = TelegramClient(StringSession(STRING_SESSION), API_ID, API_HASH)
     
-    # 2. MOTOR: Bot Komut Motoru (Bot Token)
+    # Bot (/start Komut Yönetimi)
     bot_client = TelegramClient(MemorySession(), API_ID, API_HASH)
     
-    # Userbot bağlantısını başlatıyoruz
     await user_client.start()
     print("[TELEGRAM] Userbot (Veri Çekici) bağlandı.")
     user_client.add_event_handler(listener, events.NewMessage(chats=SOURCE_CHATS))
     
-    # Bot bağlantısını başlatıyoruz
     if BOT_TOKEN:
         await bot_client.start(bot_token=BOT_TOKEN)
         print("[TELEGRAM] Bot (/start komutları için) bağlandı.")
         bot_client.add_event_handler(bot_start_handler, events.NewMessage(pattern=r'(?i)^/start', incoming=True))
     
     asyncio.create_task(sender())
-    print("[HAZIR] Sistem çift motorla aktif!")
+    print("[HAZIR] Sistem aktif!")
     
-    # Her ikisini de çalışır durumda tutuyoruz
     tasks = [user_client.run_until_disconnected()]
     if BOT_TOKEN:
         tasks.append(bot_client.run_until_disconnected())
