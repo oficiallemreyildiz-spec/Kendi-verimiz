@@ -1031,7 +1031,7 @@ async def start_http():
 
 
 # =========================================================
-# TELEGRAM DİNLEYİCİ & YÖNLENDİRME BOTU
+# TELEGRAM DİNLEYİCİ
 # =========================================================
 
 async def listener(event):
@@ -1067,22 +1067,6 @@ async def listener(event):
 
     except Exception as e:
         print("[DİNLEYİCİ HATASI]", repr(e))
-
-
-# Bot Yönlendirme Mantığı (/start)
-@client.on(events.NewMessage(pattern=r'^/start'))
-async def start_handler(event):
-    if event.is_private:
-        text = (
-            "👋 **Ödül Avcısı Radarına Hoş Geldiniz!**\n\n"
-            "Canlı radar verilerine ve sistem arayüzüne erişmek için aşağıdaki butona tıklayabilirsiniz."
-        )
-        await event.respond(
-            text,
-            buttons=[
-                [Button.url("🌐 Siteye Git", SITE_URL)]
-            ]
-        )
 
 
 async def telegram_connection_watch():
@@ -1127,23 +1111,15 @@ async def main():
         API_HASH
     )
 
-    while True:
-        try:
-            await client.start()
-            print("[TELEGRAM] İstemci bağlandı.")
-            break
-        except Exception as e:
-            print("[TELEGRAM] Bağlantı hatası:", repr(e))
-            await asyncio.sleep(15)
-
-    # Dinleyici ve Bot Komutları
     client.add_event_handler(listener, events.NewMessage(chats=SOURCE_CHATS))
+
+    await client.start()
+    print("[TELEGRAM] İstemci bağlandı ve dinleme başladı.")
 
     asyncio.create_task(sender())
     asyncio.create_task(telegram_connection_watch())
 
     print("[HAZIR] Goody Bag + Hazine Sandığı aktif.")
-    print("[HAZIR] Yönlendirme Botu aktif.")
 
     try:
         await client.run_until_disconnected()
