@@ -4,17 +4,20 @@
 #
 # GOODY BAG + HAZİNE SANDIĞI
 #
-# EKLENENLER:
+# SİSTEMLER:
 # - Akıllı alarm / yüksek coin + düşük kişi
-# - Aynı olayın tekrar bildirilmesini engelleme
 # - Kişisel alarm sistemi
 # - Yayıncı takip sistemi
 # - Sessize alma sistemi
 # - VIP süre uzatma
 # - VIP bilgi
 # - VIP silinince kullanıcıya bildirim
+# - VIP davet sistemi
+# - VIP otomatik yetki bilgilendirmesi
+# - Kişisel alarmın gerçekten kullanıcıya gönderilmesi
+# - Takip edilen yayıncı bildirimleri
 # - Telegram 429 koruması
-# - VIP / davet sistemi
+# - Telegram Queue
 # - Telegram Mini App
 # - Mini App initData doğrulaması
 # - Arama
@@ -66,7 +69,12 @@ API_HASH = os.environ["API_HASH"]
 STRING_SESSION = os.environ["STRING_SESSION"]
 BOT_TOKEN = os.environ["BOT_TOKEN"]
 
-PORT = int(os.environ.get("PORT", "10000"))
+PORT = int(
+    os.environ.get(
+        "PORT",
+        "10000"
+    )
+)
 
 BASE_URL = os.environ.get(
     "BASE_URL",
@@ -79,7 +87,10 @@ BOT_USERNAME = os.environ.get(
 )
 
 ADMIN_USER_ID = int(
-    os.environ.get("ADMIN_USER_ID", "0")
+    os.environ.get(
+        "ADMIN_USER_ID",
+        "0"
+    )
 )
 
 ADMIN_CHAT_ID = int(
@@ -90,7 +101,10 @@ ADMIN_CHAT_ID = int(
 )
 
 VIP_DAYS = int(
-    os.environ.get("VIP_DAYS", "30")
+    os.environ.get(
+        "VIP_DAYS",
+        "30"
+    )
 )
 
 TARGET_CHAT_ID = -1004421946217
@@ -110,16 +124,12 @@ SOURCE_CHATS = [
 
 
 # ============================================================
-# ALARM AYARLARI
+# ALARM
 # ============================================================
 
-# Genel akıllı alarm:
-# Coin bu değere eşit/yüksek
-# VE kişi bu değere eşit/düşük ise alarm.
 COIN_ALARM_LIMIT = 100
 PEOPLE_ALARM_LIMIT = 5
 
-# Aynı oda için tekrar alarm gönderme süresi.
 DUPLICATE_COOLDOWN = 60
 
 
@@ -132,10 +142,8 @@ LIVE_CHESTS = {}
 
 processed_messages = set()
 
-# Aynı olay için son Telegram bildirimi
 last_event_notification = {}
 
-# Kullanıcıya özel ayarlar RAM'de hızlı erişim için
 USER_SETTINGS_CACHE = {}
 
 
@@ -163,6 +171,7 @@ DB_FILE = "radar.db"
 
 
 def db():
+
     return sqlite3.connect(
         DB_FILE,
         timeout=30,
@@ -211,7 +220,6 @@ def init_db():
         )
     """)
 
-    # Kullanıcı ayarları
     cur.execute("""
         CREATE TABLE IF NOT EXISTS user_settings (
             user_id INTEGER PRIMARY KEY,
@@ -222,7 +230,6 @@ def init_db():
         )
     """)
 
-    # Takip edilen yayıncılar
     cur.execute("""
         CREATE TABLE IF NOT EXISTS follows (
             user_id INTEGER NOT NULL,
@@ -254,8 +261,15 @@ def add_vip(
 
     cur.execute("""
         INSERT INTO vip_users
-        (user_id, username, first_name, expires_at, created_at)
+        (
+            user_id,
+            username,
+            first_name,
+            expires_at,
+            created_at
+        )
         VALUES (?, ?, ?, ?, ?)
+
         ON CONFLICT(user_id)
         DO UPDATE SET
             username=excluded.username,
@@ -281,12 +295,19 @@ def get_vip(user_id):
     cur = conn.cursor()
 
     cur.execute("""
-        SELECT user_id, username, first_name, expires_at
+        SELECT
+            user_id,
+            username,
+            first_name,
+            expires_at
         FROM vip_users
         WHERE user_id=?
-    """, (user_id,))
+    """, (
+        user_id,
+    ))
 
     row = cur.fetchone()
+
     conn.close()
 
     if not row:
@@ -347,12 +368,16 @@ def extend_vip(user_id, days):
         SELECT expires_at
         FROM vip_users
         WHERE user_id=?
-    """, (user_id,))
+    """, (
+        user_id,
+    ))
 
     row = cur.fetchone()
 
     if not row:
+
         conn.close()
+
         return None
 
     now = int(time.time())
@@ -391,17 +416,51 @@ def list_vips():
     cur = conn.cursor()
 
     cur.execute("""
-        SELECT user_id, username, first_name, expires_at
+        SELECT
+            user_id,
+            username,
+            first_name,
+            expires_at
         FROM vip_users
         WHERE expires_at > ?
         ORDER BY expires_at ASC
-    """, (int(time.time()),))
+    """, (
+        int(time.time()),
+    ))
 
     rows = cur.fetchall()
 
     conn.close()
 
     return rows
+
+
+# ============================================================
+# VIP SÜRE
+# ============================================================
+
+def format_remaining(expires_at):
+
+    remaining = max(
+        0,
+        safe_int(expires_at) - int(time.time())
+    )
+
+    days = remaining // 86400
+
+    hours = (
+        remaining % 86400
+    ) // 3600
+
+    minutes = (
+        remaining % 3600
+    ) // 60
+
+    return (
+        f"{days} gün "
+        f"{hours} saat "
+        f"{minutes} dakika"
+    )
 
 
 # ============================================================
@@ -413,13 +472,19 @@ def create_invite():
     token = secrets.token_urlsafe(24)
 
     now = int(time.time())
+
     expires = now + 24 * 3600
 
     conn = db()
 
     conn.execute("""
         INSERT INTO invite_tokens
-        (token, created_at, expires_at, used)
+        (
+            token,
+            created_at,
+            expires_at,
+            used
+        )
         VALUES (?, ?, ?, 0)
     """, (
         token,
@@ -439,49 +504,78 @@ def use_invite(token, user):
         return False
 
     conn = db()
+
     cur = conn.cursor()
 
     cur.execute("""
-        SELECT token, expires_at, used
+        SELECT
+            token,
+            expires_at,
+            used
         FROM invite_tokens
         WHERE token=?
-    """, (token,))
+    """, (
+        token,
+    ))
 
     row = cur.fetchone()
 
     if not row:
+
         conn.close()
+
         return False
 
     if row[2]:
+
         conn.close()
+
         return False
 
     if int(row[1]) <= int(time.time()):
+
         conn.close()
+
         return False
 
     cur.execute("""
         UPDATE invite_tokens
-        SET used=1, used_by=?
-        WHERE token=? AND used=0
+        SET
+            used=1,
+            used_by=?
+        WHERE
+            token=?
+            AND used=0
     """, (
         user.id,
         token
     ))
 
     if cur.rowcount != 1:
+
         conn.rollback()
         conn.close()
+
         return False
 
     now = int(time.time())
-    expires = now + VIP_DAYS * 86400
+
+    expires = (
+        now +
+        VIP_DAYS * 86400
+    )
 
     cur.execute("""
         INSERT INTO vip_users
-        (user_id, username, first_name, expires_at, created_at)
+        (
+            user_id,
+            username,
+            first_name,
+            expires_at,
+            created_at
+        )
         VALUES (?, ?, ?, ?, ?)
+
         ON CONFLICT(user_id)
         DO UPDATE SET
             username=excluded.username,
@@ -522,6 +616,7 @@ def safe_int(value, default=0):
 def safe_float(value, default=0):
 
     try:
+
         return float(value)
 
     except Exception:
@@ -534,7 +629,9 @@ def normalize_username(username):
     if not username:
         return ""
 
-    username = str(username).strip()
+    username = str(
+        username
+    ).strip()
 
     if username.startswith("@"):
         username = username[1:]
@@ -549,9 +646,11 @@ def normalize_username(username):
 def get_user_settings(user_id):
 
     if user_id in USER_SETTINGS_CACHE:
+
         return USER_SETTINGS_CACHE[user_id]
 
     conn = db()
+
     cur = conn.cursor()
 
     cur.execute("""
@@ -562,18 +661,28 @@ def get_user_settings(user_id):
             mute_chest
         FROM user_settings
         WHERE user_id=?
-    """, (user_id,))
+    """, (
+        user_id,
+    ))
 
     row = cur.fetchone()
+
     conn.close()
 
     if row:
 
         result = {
-            "alarm_coins": safe_int(row[0]),
-            "alarm_people": safe_int(row[1]),
-            "mute_goody": bool(row[2]),
-            "mute_chest": bool(row[3]),
+            "alarm_coins":
+                safe_int(row[0]),
+
+            "alarm_people":
+                safe_int(row[1]),
+
+            "mute_goody":
+                bool(row[2]),
+
+            "mute_chest":
+                bool(row[3]),
         }
 
     else:
@@ -613,6 +722,7 @@ def save_user_settings(
             mute_chest
         )
         VALUES (?, ?, ?, ?, ?)
+
         ON CONFLICT(user_id)
         DO UPDATE SET
             alarm_coins=excluded.alarm_coins,
@@ -633,6 +743,41 @@ def save_user_settings(
     USER_SETTINGS_CACHE[user_id] = current
 
     return current
+
+
+# ============================================================
+# KİŞİSEL ALARM KULLANICILARI
+# ============================================================
+
+def get_personal_alarm_users():
+
+    now = int(time.time())
+
+    conn = db()
+
+    cur = conn.cursor()
+
+    cur.execute("""
+        SELECT
+            v.user_id,
+            s.alarm_coins,
+            s.alarm_people
+        FROM vip_users v
+        JOIN user_settings s
+            ON s.user_id = v.user_id
+        WHERE
+            v.expires_at > ?
+            AND s.alarm_coins > 0
+            AND s.alarm_people > 0
+    """, (
+        now,
+    ))
+
+    rows = cur.fetchall()
+
+    conn.close()
+
+    return rows
 
 
 # ============================================================
@@ -657,7 +802,11 @@ def add_follow(
 
     cur.execute("""
         INSERT OR IGNORE INTO follows
-        (user_id, username, created_at)
+        (
+            user_id,
+            username,
+            created_at
+        )
         VALUES (?, ?, ?)
     """, (
         user_id,
@@ -688,7 +837,9 @@ def remove_follow(
 
     cur.execute("""
         DELETE FROM follows
-        WHERE user_id=? AND username=?
+        WHERE
+            user_id=?
+            AND username=?
     """, (
         user_id,
         username
@@ -713,7 +864,9 @@ def get_follows(user_id):
         FROM follows
         WHERE user_id=?
         ORDER BY username ASC
-    """, (user_id,))
+    """, (
+        user_id,
+    ))
 
     rows = [
         row[0]
@@ -742,7 +895,9 @@ def get_followers(username):
         SELECT user_id
         FROM follows
         WHERE username=?
-    """, (username,))
+    """, (
+        username,
+    ))
 
     rows = [
         row[0]
@@ -761,13 +916,22 @@ def get_followers(username):
 def extract_token_from_event(event):
 
     try:
-        text = event.message.raw_text or ""
+
+        text = (
+            event.message.raw_text
+            or ""
+        )
+
     except Exception:
+
         return None
 
     patterns = [
+
         r'https?://[^ \n\]\)]+/t\.php\?token=([^&\s\]\)]+)',
+
         r'https?://[^ \n\]\)]+t\.php\?token=([^&\s\]\)]+)',
+
     ]
 
     for pattern in patterns:
@@ -779,13 +943,17 @@ def extract_token_from_event(event):
         )
 
         if m:
+
             return unquote(
                 m.group(1)
             )
 
     try:
 
-        for entity in event.message.entities or []:
+        for entity in (
+            event.message.entities
+            or []
+        ):
 
             url = getattr(
                 entity,
@@ -803,6 +971,7 @@ def extract_token_from_event(event):
             )
 
             if m:
+
                 return unquote(
                     m.group(1)
                 )
@@ -812,7 +981,9 @@ def extract_token_from_event(event):
 
     try:
 
-        for entity, _ in event.message.get_entities_text():
+        for entity, _ in (
+            event.message.get_entities_text()
+        ):
 
             url = getattr(
                 entity,
@@ -830,6 +1001,7 @@ def extract_token_from_event(event):
             )
 
             if m:
+
                 return unquote(
                     m.group(1)
                 )
@@ -866,10 +1038,11 @@ def decode_token(token):
             ).strip()
         )
 
-        return data if isinstance(
-            data,
-            dict
-        ) else None
+        return (
+            data
+            if isinstance(data, dict)
+            else None
+        )
 
     except Exception:
 
@@ -886,8 +1059,11 @@ def extract_p_room(text):
         return None
 
     patterns = [
+
         r'https?://live\.dichvu321\.com/t/\?p=([A-Za-z0-9_\-+/=]+)',
+
         r'https?://[^ \n]+/t/\?p=([A-Za-z0-9_\-+/=]+)',
+
     ]
 
     for pattern in patterns:
@@ -935,8 +1111,11 @@ def extract_username_from_text(text):
         return None
 
     patterns = [
+
         r'^\s*##\s*T\d+\s*[›>:]\s*([^\s\n]+)',
+
         r'^\s*T\d+\s*[›>:]\s*([^\s\n]+)',
+
     ]
 
     for pattern in patterns:
@@ -948,6 +1127,7 @@ def extract_username_from_text(text):
         )
 
         if m:
+
             return m.group(1).strip()
 
     return None
@@ -957,14 +1137,21 @@ def extract_username_from_text(text):
 # COIN
 # ============================================================
 
-def extract_coins(text, token_data=None):
+def extract_coins(
+    text,
+    token_data=None
+):
 
     if text:
 
         patterns = [
+
             r'(?:TÚI|TUI)\s*:\s*(\d+)\s*/',
+
             r'BOX\s*:\s*(\d+)\s*/',
+
             r'(\d+)\s*/\s*(\d+)',
+
         ]
 
         for pattern in patterns:
@@ -976,6 +1163,7 @@ def extract_coins(text, token_data=None):
             )
 
             if m:
+
                 return safe_int(
                     m.group(1)
                 )
@@ -1013,8 +1201,11 @@ def extract_people(text):
         return 0
 
     patterns = [
+
         r'(?:TÚI|TUI)\s*:\s*\d+\s*/\s*(\d+)',
+
         r'BOX\s*:\s*\d+\s*/\s*(\d+)',
+
     ]
 
     for pattern in patterns:
@@ -1026,6 +1217,7 @@ def extract_people(text):
         )
 
         if m:
+
             return safe_int(
                 m.group(1)
             )
@@ -1036,6 +1228,7 @@ def extract_people(text):
     )
 
     if m:
+
         return safe_int(
             m.group(2)
         )
@@ -1053,9 +1246,13 @@ def extract_joined(text):
         return 0
 
     patterns = [
+
         r'Đã\s*join\s*:\s*(\d+)',
+
         r'joined\s*:\s*(\d+)',
+
         r'join\s*:\s*(\d+)',
+
     ]
 
     for pattern in patterns:
@@ -1067,6 +1264,7 @@ def extract_joined(text):
         )
 
         if m:
+
             return safe_int(
                 m.group(1)
             )
@@ -1090,7 +1288,8 @@ def extract_viewers(text):
 
     return (
         safe_int(m.group(1))
-        if m else 0
+        if m
+        else 0
     )
 
 
@@ -1098,7 +1297,10 @@ def extract_viewers(text):
 # RATE
 # ============================================================
 
-def extract_rate(text, token_data=None):
+def extract_rate(
+    text,
+    token_data=None
+):
 
     if text:
 
@@ -1109,6 +1311,7 @@ def extract_rate(text, token_data=None):
         )
 
         if m:
+
             return safe_float(
                 m.group(1)
             )
@@ -1121,6 +1324,7 @@ def extract_rate(text, token_data=None):
         ]:
 
             if key in token_data:
+
                 return safe_float(
                     token_data.get(key)
                 )
@@ -1132,7 +1336,10 @@ def extract_rate(text, token_data=None):
 # TYPE
 # ============================================================
 
-def detect_type(text, token_data):
+def detect_type(
+    text,
+    token_data
+):
 
     upper = (
         text or ""
@@ -1142,18 +1349,21 @@ def detect_type(text, token_data):
         r'TÚI|TUI',
         upper
     ):
+
         return True
 
     if re.search(
         r'GOODY\s*BAG|REWARD\s*BAG',
         upper
     ):
+
         return True
 
     if re.search(
         r'\bBOX\b|RƯƠNG|TREO|HAZİNE',
         upper
     ):
+
         return False
 
     if "🟡" in text:
@@ -1172,6 +1382,7 @@ def detect_type(text, token_data):
             "true",
             "True"
         ]:
+
             return True
 
         if value in [
@@ -1181,6 +1392,7 @@ def detect_type(text, token_data):
             "false",
             "False"
         ]:
+
             return False
 
     return None
@@ -1220,12 +1432,15 @@ def calculate_target_time(
                 )
 
                 if value > 10_000_000_000:
+
                     return value // 1000
 
                 if value > 1_000_000_000:
+
                     return value
 
                 if 0 < value < 86400:
+
                     return now + value
 
             except Exception:
@@ -1243,10 +1458,12 @@ def calculate_target_time(
 
             duration = (
                 safe_int(m.group(1)) * 60
-                + safe_int(m.group(2))
+                +
+                safe_int(m.group(2))
             )
 
             if duration > 0:
+
                 return now + duration
 
     return now + 180
@@ -1275,15 +1492,23 @@ def get_live_link(
                 key
             )
 
-            if value and str(value).startswith(
-                ("http://", "https://")
+            if (
+                value
+                and
+                str(value).startswith(
+                    (
+                        "http://",
+                        "https://"
+                    )
+                )
             ):
+
                 return str(value)
 
     if username:
 
         return (
-            f"https://www.tiktok.com/"
+            "https://www.tiktok.com/"
             f"@{username}/live"
         )
 
@@ -1557,7 +1782,14 @@ def add_to_radar(data):
             )
         )
 
-        if int(time.time()) - old_time < 5:
+        if (
+            int(time.time())
+            -
+            old_time
+            <
+            5
+        ):
+
             return False
 
     target[room] = data
@@ -1608,7 +1840,7 @@ def add_to_radar(data):
 
 
 # ============================================================
-# TELEGRAM MESAJ KUYRUĞU
+# TELEGRAM API
 # ============================================================
 
 async def telegram_api(
@@ -1624,7 +1856,7 @@ async def telegram_api(
         return False, None
 
     url = (
-        f"https://api.telegram.org/"
+        "https://api.telegram.org/"
         f"bot{BOT_TOKEN}/{method}"
     )
 
@@ -1666,10 +1898,13 @@ async def telegram_api(
                     if response.status == 200:
 
                         try:
+
                             result = json.loads(
                                 text
                             )
+
                         except Exception:
+
                             result = None
 
                         return True, result
@@ -1699,14 +1934,15 @@ async def telegram_api(
 
                         telegram_retry_until = (
                             time.monotonic()
-                            + max(
+                            +
+                            max(
                                 1,
                                 retry_after
                             )
                         )
 
                         print(
-                            f"[TELEGRAM 429] "
+                            "[TELEGRAM 429]",
                             f"{retry_after}s bekleniyor."
                         )
 
@@ -1765,13 +2001,16 @@ async def send_telegram_message(data):
         else "🟨 HAZİNE SANDIĞI"
     )
 
-    alarm = is_smart_alarm(data)
+    alarm = is_smart_alarm(
+        data
+    )
 
     if alarm:
 
         title = (
             "🚨 AKILLI ALARM\n"
-            + title
+            +
+            title
         )
 
     text = (
@@ -1832,11 +2071,15 @@ async def send_personal_alarm(
 ):
 
     coin_limit = safe_int(
-        settings.get("alarm_coins")
+        settings.get(
+            "alarm_coins"
+        )
     )
 
     people_limit = safe_int(
-        settings.get("alarm_people")
+        settings.get(
+            "alarm_people"
+        )
     )
 
     if coin_limit <= 0:
@@ -1856,17 +2099,39 @@ async def send_personal_alarm(
     if coins < coin_limit:
         return False
 
-    if people <= 0 or people > people_limit:
+    if (
+        people <= 0
+        or
+        people > people_limit
+    ):
+
         return False
 
     text = (
         "🎯 KİŞİSEL ALARM\n\n"
-        f"👤 Kullanıcı: {data['username']}\n"
-        f"🪙 Coin: {data['coins']}\n"
-        f"👥 Kişi: {data['people']}\n"
-        f"🙋 Katılan: {data['joined']}\n"
-        f"📈 Oran: {data['rate']}\n\n"
-        "🚨 Ayarladığın alarma uyuyor!"
+
+        f"👤 Kullanıcı: "
+        f"{data['username']}\n"
+
+        f"🎁 Tür: "
+        f"{data['box_name']}\n"
+
+        f"🪙 Coin: "
+        f"{data['coins']}\n"
+
+        f"👥 Kişi: "
+        f"{data['people']}\n"
+
+        f"🙋 Katılan: "
+        f"{data['joined']}\n"
+
+        f"📈 Oran: "
+        f"{data['rate']}\n"
+
+        f"👀 İzlenme: "
+        f"{data['view']}\n"
+
+        "\n🚨 Ayarladığın alarma uyuyor!"
     )
 
     if data.get("live"):
@@ -1881,10 +2146,17 @@ async def send_personal_alarm(
     ok, _ = await telegram_api(
         "sendMessage",
         {
-            "chat_id": user_id,
-            "text": text,
-            "parse_mode": "HTML",
-            "disable_web_page_preview": True,
+            "chat_id":
+                user_id,
+
+            "text":
+                text,
+
+            "parse_mode":
+                "HTML",
+
+            "disable_web_page_preview":
+                True,
         }
     )
 
@@ -1910,6 +2182,10 @@ async def send_follow_notifications(data):
 
     for user_id in followers:
 
+        # VIP süresi bitmişse bildirim gönderme
+        if not get_vip(user_id):
+            continue
+
         settings = get_user_settings(
             user_id
         )
@@ -1926,10 +2202,18 @@ async def send_follow_notifications(data):
 
         text = (
             "👤 TAKİP ETTİĞİN YAYINCI\n\n"
+
             f"👤 @{username}\n"
+
             f"🎁 {data['box_name']}\n"
+
             f"🪙 Coin: {data['coins']}\n"
+
             f"👥 Kişi: {data['people']}\n"
+
+            f"🙋 Katılan: {data['joined']}\n"
+
+            f"📈 Oran: {data['rate']}\n"
         )
 
         if is_smart_alarm(data):
@@ -1951,10 +2235,17 @@ async def send_follow_notifications(data):
         await telegram_api(
             "sendMessage",
             {
-                "chat_id": user_id,
-                "text": text,
-                "parse_mode": "HTML",
-                "disable_web_page_preview": True,
+                "chat_id":
+                    user_id,
+
+                "text":
+                    text,
+
+                "parse_mode":
+                    "HTML",
+
+                "disable_web_page_preview":
+                    True,
             }
         )
 
@@ -1995,11 +2286,71 @@ async def notify_event(data):
             room
         ] = now
 
+    # ========================================================
+    # 1. NORMAL RADAR
+    # ========================================================
+
     await send_telegram_message(
         data
     )
 
-    # Takipçiler
+    # ========================================================
+    # 2. KİŞİSEL ALARMLAR
+    #
+    # ÖNEMLİ:
+    # Eski kodda send_personal_alarm() vardı fakat
+    # burada çağrılmıyordu.
+    #
+    # Şimdi aktif.
+    # ========================================================
+
+    try:
+
+        personal_users = (
+            get_personal_alarm_users()
+        )
+
+        for (
+            user_id,
+            alarm_coins,
+            alarm_people
+        ) in personal_users:
+
+            settings = {
+                "alarm_coins":
+                    alarm_coins,
+
+                "alarm_people":
+                    alarm_people,
+            }
+
+            try:
+
+                await send_personal_alarm(
+                    user_id,
+                    data,
+                    settings
+                )
+
+            except Exception as e:
+
+                print(
+                    "[KİŞİSEL ALARM HATASI]",
+                    user_id,
+                    repr(e)
+                )
+
+    except Exception as e:
+
+        print(
+            "[KİŞİSEL ALARM LİSTESİ HATASI]",
+            repr(e)
+        )
+
+    # ========================================================
+    # 3. TAKİPÇİLER
+    # ========================================================
+
     try:
 
         await send_follow_notifications(
@@ -2045,7 +2396,7 @@ async def telegram_sender():
 
 
 # ============================================================
-# ADMIN TELEGRAM
+# ADMIN
 # ============================================================
 
 async def send_admin(text):
@@ -2071,10 +2422,12 @@ async def send_admin(text):
 
 
 # ============================================================
-# VIP SİLİNDİ BİLDİRİMİ
+# VIP SİLİNDİ
 # ============================================================
 
-async def notify_vip_removed(user_id):
+async def notify_vip_removed(
+    user_id
+):
 
     ok, _ = await telegram_api(
         "sendMessage",
@@ -2085,6 +2438,7 @@ async def notify_vip_removed(user_id):
             "text":
                 (
                     "🔒 VIP erişimin sonlandırıldı.\n\n"
+
                     "Ödül Avcısı VIP radarına "
                     "erişimin kapatıldı."
                 ),
@@ -2136,9 +2490,12 @@ def validate_telegram_init_data(
 
         if (
             int(time.time())
-            - auth_date
-            > 86400
+            -
+            auth_date
+            >
+            86400
         ):
+
             return None
 
         data_check_string = "\n".join(
@@ -2162,6 +2519,7 @@ def validate_telegram_init_data(
             calculated_hash,
             received_hash
         ):
+
             return None
 
         user_json = data.get(
@@ -2692,7 +3050,6 @@ body{
 
 </div>
 
-
 <div class="latest-box">
 
  <div class="latest-title">
@@ -2703,14 +3060,12 @@ body{
 
 </div>
 
-
 <input
  id="search"
  class="search"
  type="text"
  placeholder="🔎 Kullanıcı ara..."
 >
-
 
 <div class="filters">
 
@@ -2740,9 +3095,7 @@ body{
 
 </div>
 
-
 <div class="radar-grid">
-
 
 <div class="panel goody">
 
@@ -2762,7 +3115,6 @@ body{
 
 </div>
 
-
 <div class="panel chest">
 
  <div class="panel-title">
@@ -2781,16 +3133,13 @@ body{
 
 </div>
 
-
 </div>
-
 
 <div class="footer">
  ⚡ ÖDÜL AVCISI • CANLI RADAR
 </div>
 
 </div>
-
 
 <script>
 
@@ -2822,18 +3171,16 @@ const newChest = new Set();
 
 let latestKey = null;
 
-
 function escapeHtml(value){
 
  return String(value ?? "")
- .replace(/&/g,"&amp;")
- .replace(/</g,"&lt;")
- .replace(/>/g,"&gt;")
- .replace(/"/g,"&quot;")
- .replace(/'/g,"&#039;");
+  .replace(/&/g,"&amp;")
+  .replace(/</g,"&lt;")
+  .replace(/>/g,"&gt;")
+  .replace(/"/g,"&quot;")
+  .replace(/'/g,"&#039;");
 
 }
-
 
 function numberValue(value){
 
@@ -2845,7 +3192,6 @@ function numberValue(value){
 
 }
 
-
 function timestamp(item){
 
  return Number(
@@ -2856,7 +3202,6 @@ function timestamp(item){
  );
 
 }
-
 
 function itemKey(item){
 
@@ -2874,7 +3219,6 @@ function itemKey(item){
 
 }
 
-
 function latestFive(items){
 
  if(!Array.isArray(items))
@@ -2888,7 +3232,6 @@ function latestFive(items){
   .slice(0,5);
 
 }
-
 
 function isAlarm(item){
 
@@ -2906,13 +3249,13 @@ function isAlarm(item){
 
 }
 
-
 function filterItems(
  items,
  type
 ){
 
- let result = latestFive(items);
+ let result =
+  latestFive(items);
 
  return result.filter(item=>{
 
@@ -2963,7 +3306,6 @@ function filterItems(
 
 }
 
-
 function detectNewItems(
  items,
  seenSet,
@@ -2997,7 +3339,6 @@ function detectNewItems(
  });
 
 }
-
 
 function renderLatest(){
 
@@ -3033,10 +3374,6 @@ function renderLatest(){
  const item = all[0];
 
  const key = itemKey(item);
-
- const changed =
-  latestKey !== null &&
-  key !== latestKey;
 
  latestKey = key;
 
@@ -3114,7 +3451,6 @@ function renderLatest(){
  `;
 
 }
-
 
 function renderItems(
  originalItems,
@@ -3217,7 +3553,6 @@ function renderItems(
 
      </div>
 
-
      <div class="info-grid">
 
       <div class="info">
@@ -3254,7 +3589,6 @@ function renderItems(
 
      </div>
 
-
      ${
       alarm
       ?
@@ -3275,7 +3609,6 @@ function renderItems(
       :
       ""
      }
-
 
      ${
       item.live
@@ -3301,7 +3634,6 @@ function renderItems(
   }).join("");
 
 }
-
 
 function renderRadar(){
 
@@ -3336,7 +3668,6 @@ function renderRadar(){
  );
 
 }
-
 
 async function loadRadar(){
 
@@ -3440,7 +3771,6 @@ async function loadRadar(){
 
 }
 
-
 document
  .getElementById("search")
  .addEventListener(
@@ -3456,7 +3786,6 @@ document
 
   }
  );
-
 
 document
  .querySelectorAll(".filter")
@@ -3483,7 +3812,6 @@ document
   );
 
  });
-
 
 setInterval(
  loadRadar,
@@ -3811,6 +4139,71 @@ def vip_keyboard():
 
 
 # ============================================================
+# VIP YETKİLERİ
+# ============================================================
+
+def vip_permissions_text(
+    vip
+):
+
+    remaining = format_remaining(
+        vip["expires_at"]
+    )
+
+    settings = get_user_settings(
+        vip["user_id"]
+    )
+
+    follows = get_follows(
+        vip["user_id"]
+    )
+
+    if settings["alarm_coins"] > 0:
+
+        alarm_text = (
+            f"🟢 {settings['alarm_coins']}+ coin / "
+            f"{settings['alarm_people']} veya daha az kişi"
+        )
+
+    else:
+
+        alarm_text = "🔴 Kişisel alarm kapalı"
+
+    return (
+
+        "👑 VIP ERİŞİMİN AKTİF\n\n"
+
+        f"⏳ Kalan süre: {remaining}\n\n"
+
+        "🌐 VIP RADAR\n"
+        "• Canlı Goody Bag radarı\n"
+        "• Canlı Hazine Sandığı radarı\n"
+        "• Arama ve filtreler\n\n"
+
+        "🎯 KİŞİSEL ALARM\n"
+        f"• {alarm_text}\n\n"
+
+        "👤 YAYINCI TAKİP\n"
+        f"• Takip edilen: {len(follows)} yayıncı\n"
+        "• Takip ettiğin yayıncı yakalanınca "
+        "özel mesaj alırsın.\n\n"
+
+        "🔕 SESSİZE ALMA\n"
+        "• Goody Bag\n"
+        "• Hazine Sandığı\n\n"
+
+        "📌 KOMUTLAR\n"
+        "/alarm\n"
+        "/takip\n"
+        "/takipler\n"
+        "/takipsil\n"
+        "/sessiz\n"
+        "/yardim"
+
+    )
+
+
+# ============================================================
 # START
 # ============================================================
 
@@ -3832,9 +4225,9 @@ async def start_cmd(
 
         await update.message.reply_text(
 
-            "✅ VIP erişimin aktif.\n\n"
-            "🏆 Ödül Avcısı radarını "
-            "açmak için aşağıdaki butona bas:",
+            vip_permissions_text(
+                vip
+            ),
 
             reply_markup=
                 vip_keyboard()
@@ -3872,12 +4265,20 @@ async def start_cmd(
 
         if success:
 
+            vip = get_vip(
+                user.id
+            )
+
             await update.message.reply_text(
 
-                "✅ VIP erişim açıldı!\n\n"
-                f"⏳ Süre: {VIP_DAYS} gün\n\n"
-                "🏆 Radarı açmak için "
-                "aşağıdaki butona bas:",
+                "🎉 HOŞ GELDİN!\n\n"
+
+                "✅ VIP erişimin açıldı.\n\n"
+
+                +
+                vip_permissions_text(
+                    vip
+                ),
 
                 reply_markup=
                     vip_keyboard()
@@ -3887,11 +4288,18 @@ async def start_cmd(
             await send_admin(
 
                 "🎟 YENİ VIP ÜYE\n\n"
+
                 f"👤 "
                 f"{user.first_name or ''}\n"
-                f"🆔 {user.id}\n"
-                f"👤 @{user.username or 'yok'}\n"
-                f"⏳ {VIP_DAYS} gün"
+
+                f"🆔 "
+                f"{user.id}\n"
+
+                f"👤 @"
+                f"{user.username or 'yok'}\n"
+
+                f"⏳ "
+                f"{VIP_DAYS} gün"
 
             )
 
@@ -3901,7 +4309,9 @@ async def start_cmd(
 
         "🔒 Bu bot davet/VIP sistemiyle "
         "çalışıyor.\n\n"
+
         "VIP erişimin yok.\n"
+
         "Yönetici tarafından gönderilen "
         "davet bağlantısıyla giriş yapabilirsin."
 
@@ -3941,9 +4351,13 @@ async def davet_cmd(
     await update.message.reply_text(
 
         "🎟 VIP DAVET LİNKİ\n\n"
+
         f"⏳ Süre: {VIP_DAYS} gün\n"
+
         "🔐 Kullanım: Tek kişi\n"
+
         "⏰ Link geçerliliği: 24 saat\n\n"
+
         f"{link}"
 
     )
@@ -3989,17 +4403,16 @@ async def uyeler_cmd(
     for row in rows:
 
         user_id = row[0]
+
         username = row[1]
+
         first_name = row[2]
+
         expires = row[3]
 
-        remaining = max(
-            0,
-            expires -
-            int(time.time())
+        remaining = format_remaining(
+            expires
         )
-
-        days = remaining // 86400
 
         name = (
             first_name
@@ -4008,9 +4421,15 @@ async def uyeler_cmd(
         )
 
         lines.append(
+
             f"👤 {name}\n"
+
             f"🆔 {user_id}\n"
-            f"📅 {days} gün kaldı\n"
+
+            f"📱 @{username or 'yok'}\n"
+
+            f"⏳ {remaining}\n"
+
         )
 
     await update.message.reply_text(
@@ -4152,32 +4571,37 @@ async def uzatvip_cmd(
 
         return
 
-    remaining = max(
-        0,
-        new_expire -
-        int(time.time())
+    remaining_text = format_remaining(
+        new_expire
     )
 
     await update.message.reply_text(
 
         "✅ VIP süresi uzatıldı.\n\n"
+
         f"🆔 {user_id}\n"
+
         f"➕ {days} gün\n"
-        f"📅 Kalan yaklaşık: "
-        f"{remaining // 86400} gün"
+
+        f"📅 Yeni kalan süre: "
+        f"{remaining_text}"
 
     )
 
     await telegram_api(
         "sendMessage",
         {
-            "chat_id": user_id,
+            "chat_id":
+                user_id,
+
             "text":
                 (
-                    "👑 VIP süren uzatıldı!\n\n"
+                    "👑 VIP SÜREN UZATILDI!\n\n"
+
                     f"➕ {days} gün eklendi.\n"
-                    f"📅 Yeni kalan süre: "
-                    f"{remaining // 86400} gün"
+
+                    f"⏳ Yeni kalan süre:\n"
+                    f"{remaining_text}"
                 )
         }
     )
@@ -4230,20 +4654,38 @@ async def vipbilgi_cmd(
 
         return
 
-    remaining = max(
-        0,
+    remaining_text = format_remaining(
         vip["expires_at"]
-        -
-        int(time.time())
+    )
+
+    settings = get_user_settings(
+        user_id
+    )
+
+    follows = get_follows(
+        user_id
     )
 
     await update.message.reply_text(
 
         "👑 VIP BİLGİ\n\n"
+
         f"🆔 {vip['user_id']}\n"
+
         f"👤 {vip['first_name'] or '-'}\n"
+
         f"📱 @{vip['username'] or 'yok'}\n"
-        f"⏳ {remaining // 86400} gün kaldı"
+
+        f"⏳ Kalan: {remaining_text}\n\n"
+
+        "🎯 Kişisel alarm:\n"
+
+        f"🪙 {settings['alarm_coins']}+\n"
+
+        f"👥 {settings['alarm_people']} veya daha az\n\n"
+
+        f"👤 Takip edilen yayıncı: "
+        f"{len(follows)}"
 
     )
 
@@ -4271,7 +4713,7 @@ async def id_cmd(
 
 
 # ============================================================
-# ALARM KOMUTU
+# ALARM
 # ============================================================
 
 async def alarm_cmd(
@@ -4303,10 +4745,14 @@ async def alarm_cmd(
             await update.message.reply_text(
 
                 "🎯 MEVCUT ALARM\n\n"
+
                 f"🪙 Coin: "
                 f"{settings['alarm_coins']}+\n"
+
                 f"👥 Kişi: "
-                f"{settings['alarm_people']} veya daha az\n\n"
+                f"{settings['alarm_people']} "
+                f"veya daha az\n\n"
+
                 "Kapatmak için:\n"
                 "/alarm kapat"
 
@@ -4317,11 +4763,14 @@ async def alarm_cmd(
             await update.message.reply_text(
 
                 "🎯 KİŞİSEL ALARM\n\n"
+
                 "Örnek:\n"
                 "/alarm 200 5\n\n"
+
                 "Anlamı:\n"
                 "🪙 200+ coin\n"
                 "👥 5 veya daha az kişi\n\n"
+
                 "Kapatmak:\n"
                 "/alarm kapat"
 
@@ -4368,8 +4817,11 @@ async def alarm_cmd(
     await update.message.reply_text(
 
         "🎯 KİŞİSEL ALARM AKTİF\n\n"
+
         f"🪙 {coins}+ coin\n"
+
         f"👥 {people} veya daha az kişi\n\n"
+
         "Uygun hazine geldiğinde "
         "sana özel bildirim gönderilecek."
 
@@ -4377,7 +4829,7 @@ async def alarm_cmd(
 
 
 # ============================================================
-# TAKİP KOMUTU
+# TAKİP
 # ============================================================
 
 async def takip_cmd(
@@ -4433,7 +4885,9 @@ async def takip_cmd(
     ):
 
         await update.message.reply_text(
-            f"✅ @{username} takip listesine eklendi."
+            f"✅ @{username} takip listesine eklendi.\n\n"
+            "Bu yayıncıdan uygun bir kayıt geldiğinde "
+            "bildirim doğrudan sana gönderilecek."
         )
 
     else:
@@ -4480,11 +4934,13 @@ async def takipler_cmd(
     await update.message.reply_text(
 
         "👤 TAKİP LİSTEN\n\n"
+
         +
         "\n".join(
             f"• @{x}"
             for x in follows
         )
+
         +
         "\n\n❌ Silmek:\n"
         "/takipsil kullanıcı"
@@ -4574,10 +5030,13 @@ async def sessiz_cmd(
         await update.message.reply_text(
 
             "🔕 SESSİZE ALMA\n\n"
+
             f"🟪 Goody: "
             f"{'KAPALI' if settings['mute_goody'] else 'AÇIK'}\n"
+
             f"🟨 Chest: "
             f"{'KAPALI' if settings['mute_chest'] else 'AÇIK'}\n\n"
+
             "Kullanım:\n"
             "/sessiz goody\n"
             "/sessiz chest\n"
@@ -4648,8 +5107,9 @@ async def yardim_cmd(
     context: ContextTypes.DEFAULT_TYPE
 ):
 
-    await update.message.reply_text(
+    user = update.effective_user
 
+    text = (
         "🏆 ÖDÜL AVCISI\n\n"
 
         "🎯 KİŞİSEL ALARM\n"
@@ -4666,9 +5126,26 @@ async def yardim_cmd(
         "/sessiz chest\n"
         "/sessiz kapat\n\n"
 
-        "🌐 Radar\n"
+        "🌐 VIP RADAR\n"
         "/start"
+    )
 
+    if user and user.id == ADMIN_USER_ID:
+
+        text += (
+
+            "\n\n👑 ADMİN\n"
+
+            "/davet\n"
+            "/uyeler\n"
+            "/vipbilgi ID\n"
+            "/uzatvip ID gün\n"
+            "/silvip ID"
+
+        )
+
+    await update.message.reply_text(
+        text
     )
 
 
@@ -4709,7 +5186,6 @@ async def message_listener(event):
 
         if add_to_radar(data):
 
-            # Alarm öncelikli
             priority = (
                 0
                 if is_smart_alarm(data)
@@ -4771,9 +5247,9 @@ async def main():
 
     await start_http_server()
 
-    # --------------------------------------------------------
+    # ========================================================
     # BOT
-    # --------------------------------------------------------
+    # ========================================================
 
     application = (
         Application.builder()
@@ -4884,9 +5360,9 @@ async def main():
         "[BOT] Telegram bot başladı."
     )
 
-    # --------------------------------------------------------
+    # ========================================================
     # TELETHON
-    # --------------------------------------------------------
+    # ========================================================
 
     client = TelegramClient(
 
@@ -4916,9 +5392,9 @@ async def main():
 
     )
 
-    # --------------------------------------------------------
+    # ========================================================
     # QUEUE
-    # --------------------------------------------------------
+    # ========================================================
 
     asyncio.create_task(
         telegram_sender()
@@ -4950,6 +5426,10 @@ async def main():
 
     print(
         "[HAZIR] VIP sistemi aktif."
+    )
+
+    print(
+        "[HAZIR] VIP otomatik yetki mesajı aktif."
     )
 
     print(
