@@ -9,31 +9,41 @@ logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s
 
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
 
-# Giriş ve Doğrulama Sayfası Linkiniz
-VERIFY_SITE_URL = "https://sites.google.com/view/gody-bag-ve-chesture-/ana-sayfa"
+# Sadece VIP Radara Doğrudan Erişim Linki
+VIP_RADAR_URL = "https://sites.google.com/view/gody-bag-ve-chesture-/vip-radar"
+SITE_URL = "https://sites.google.com/view/gody-bag-ve-chesture-/ana-sayfa"
 PORT = int(os.environ.get("PORT", "10000"))
 
 # =========================================================
-# 1. TELEGRAM BOT KOMUTLARI
+# 1. TELEGRAM BOT KOMUTLARI (Şifreli / Token Onaylı)
 # =========================================================
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user = update.effective_user
-    username_str = f"@{user.username}" if user.username else user.first_name
-    
-    keyboard = [
-        [InlineKeyboardButton("🔐 VIP ÜYELİK DOĞRULA VE GİRİŞ YAP", url=VERIFY_SITE_URL)]
-    ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    
-    await update.message.reply_text(
-        f"👋 **Selam {user.first_name}!**\n\n"
-        f"🆔 **Telegram ID:** `{user.id}`\n"
-        f"👤 **Kullanıcı Adı:** {username_str}\n\n"
-        "⚠️ **VIP Radar sistemine erişebilmek için önce üyeliğinizi doğrulamanız gerekmektedir.**\n"
-        "Aşağıdaki butona tıklayarak doğrulama adımını tamamlayabilir ve kilitsiz radara erişebilirsiniz.",
-        reply_markup=reply_markup,
-        parse_mode="Markdown"
-    )
+    args = context.args  # /start komutunun yanındaki parametreyi okur
+
+    # Eğer kullanıcı sitedeki doğrulama butonundan geldiyse (/start vip_onayli)
+    if args and args[0] == "vip_onayli":
+        keyboard = [[InlineKeyboardButton("🌐 VIP RADARI AÇ", url=VIP_RADAR_URL)]]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        await update.message.reply_text(
+            f"✅ **Doğrulama Başarılı, {user.first_name}!**\n\n"
+            "Siteden doğrulamanız onaylandı. VIP Canlı Radar ekranına erişmek için aşağıdaki butona tıklayabilirsiniz.",
+            reply_markup=reply_markup,
+            parse_mode="Markdown"
+        )
+    else:
+        # Doğrudan bota gelen veya linki izinsiz paylaşan kullanıcılar için engelleme
+        keyboard = [[InlineKeyboardButton("🔒 SİTEDEN DOĞRULAMA YAP", url=SITE_URL)]]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        await update.message.reply_text(
+            f"⚠️ **Erişim Engellendi!**\n\n"
+            "Bu bota doğrudan erişim izni bulunmamaktadır.\n"
+            "VIP Radarı kullanabilmek için önce web sitemiz üzerinden doğrulama yapmalısınız.",
+            reply_markup=reply_markup,
+            parse_mode="Markdown"
+        )
 
 async def run_telegram_bot(application):
     await application.initialize()
