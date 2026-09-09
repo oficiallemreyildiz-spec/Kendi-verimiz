@@ -25,6 +25,8 @@
 # - 2 sütun mobil görünüm
 # - Büyük yazılar
 # - ⚡ YENİ sistemi
+# - 📋 Kullanıcı adı kopyalama
+# - 👑 Admin VIP yetki raporu
 # ============================================================
 
 import os
@@ -2182,7 +2184,6 @@ async def send_follow_notifications(data):
 
     for user_id in followers:
 
-        # VIP süresi bitmişse bildirim gönderme
         if not get_vip(user_id):
             continue
 
@@ -2286,23 +2287,9 @@ async def notify_event(data):
             room
         ] = now
 
-    # ========================================================
-    # 1. NORMAL RADAR
-    # ========================================================
-
     await send_telegram_message(
         data
     )
-
-    # ========================================================
-    # 2. KİŞİSEL ALARMLAR
-    #
-    # ÖNEMLİ:
-    # Eski kodda send_personal_alarm() vardı fakat
-    # burada çağrılmıyordu.
-    #
-    # Şimdi aktif.
-    # ========================================================
 
     try:
 
@@ -2346,10 +2333,6 @@ async def notify_event(data):
             "[KİŞİSEL ALARM LİSTESİ HATASI]",
             repr(e)
         )
-
-    # ========================================================
-    # 3. TAKİPÇİLER
-    # ========================================================
 
     try:
 
@@ -2422,6 +2405,112 @@ async def send_admin(text):
 
 
 # ============================================================
+# VIP YETKİ RAPORU
+# ============================================================
+
+def build_vip_admin_report(
+    vip,
+    action="VIP AKTİF"
+):
+
+    if not vip:
+        return ""
+
+    settings = get_user_settings(
+        vip["user_id"]
+    )
+
+    follows = get_follows(
+        vip["user_id"]
+    )
+
+    alarm_coins = safe_int(
+        settings.get(
+            "alarm_coins"
+        )
+    )
+
+    alarm_people = safe_int(
+        settings.get(
+            "alarm_people"
+        )
+    )
+
+    if alarm_coins > 0:
+
+        alarm_text = (
+            f"🟢 {alarm_coins}+ coin / "
+            f"{alarm_people} veya daha az kişi"
+        )
+
+    else:
+
+        alarm_text = (
+            "🔴 Kapalı"
+        )
+
+    return (
+
+        f"👑 {action}\n"
+        "━━━━━━━━━━━━━━━━━━\n\n"
+
+        f"👤 Ad: "
+        f"{vip.get('first_name') or '-'}\n"
+
+        f"📱 Kullanıcı adı: "
+        f"@{vip.get('username') or 'yok'}\n"
+
+        f"🆔 Telegram ID: "
+        f"{vip.get('user_id')}\n\n"
+
+        f"⏳ Kalan VIP: "
+        f"{format_remaining(vip['expires_at'])}\n\n"
+
+        "🔐 YETKİLER\n"
+
+        "🌐 VIP Radar\n"
+        "• 🟪 Goody Bag radarı\n"
+        "• 🟨 Hazine Sandığı radarı\n"
+        "• 🔎 Arama\n"
+        "• 🎛 Filtreler\n\n"
+
+        "🎯 Kişisel alarm\n"
+        f"• {alarm_text}\n\n"
+
+        "👤 Yayıncı takip\n"
+        f"• {len(follows)} yayıncı takipte\n\n"
+
+        "🔕 Sessize alma\n"
+        f"• 🟪 Goody: "
+        f"{'KAPALI' if settings['mute_goody'] else 'AÇIK'}\n"
+        f"• 🟨 Chest: "
+        f"{'KAPALI' if settings['mute_chest'] else 'AÇIK'}\n\n"
+
+        f"🌐 Mini App:\n"
+        f"{BASE_URL}/miniapp"
+
+    )
+
+
+async def notify_admin_vip(
+    vip,
+    action="VIP AKTİF"
+):
+
+    report = build_vip_admin_report(
+        vip,
+        action
+    )
+
+    if not report:
+        return False
+
+    return await send_admin(
+        report
+    )
+
+
+# ============================================================
 # VIP SİLİNDİ
 # ============================================================
 
@@ -2444,7 +2533,7 @@ async def notify_vip_removed(
                 ),
 
             "disable_web_page_preview":
-                True,
+                True
         }
     )
 
@@ -2870,13 +2959,38 @@ body{
  margin-bottom:8px;
 }
 
-.user{
+.copy-user{
  min-width:0;
- font-size:14px;
- font-weight:1000;
+ max-width:78%;
  overflow:hidden;
  text-overflow:ellipsis;
  white-space:nowrap;
+ border:0;
+ background:transparent;
+ color:#fff;
+ padding:3px 5px;
+ margin:0;
+ border-radius:8px;
+ font-size:14px;
+ font-weight:1000;
+ text-align:left;
+ cursor:pointer;
+}
+
+.copy-user:active{
+ transform:scale(.97);
+ background:#242a3b;
+}
+
+.copy-user.copied{
+ color:#69ff9a;
+ background:#14251c;
+}
+
+.copy-icon{
+ margin-left:4px;
+ font-size:12px;
+ opacity:.8;
 }
 
 .new-badge{
@@ -2982,8 +3096,9 @@ body{
   padding:8px;
  }
 
- .user{
+ .copy-user{
   font-size:13px;
+  max-width:76%;
  }
 
  .info{
@@ -3008,7 +3123,7 @@ body{
   font-size:11px;
  }
 
- .user{
+ .copy-user{
   font-size:12px;
  }
 
@@ -3171,6 +3286,7 @@ const newChest = new Set();
 
 let latestKey = null;
 
+
 function escapeHtml(value){
 
  return String(value ?? "")
@@ -3182,6 +3298,7 @@ function escapeHtml(value){
 
 }
 
+
 function numberValue(value){
 
  const n = Number(value);
@@ -3191,6 +3308,7 @@ function numberValue(value){
   : 0;
 
 }
+
 
 function timestamp(item){
 
@@ -3202,6 +3320,7 @@ function timestamp(item){
  );
 
 }
+
 
 function itemKey(item){
 
@@ -3219,6 +3338,7 @@ function itemKey(item){
 
 }
 
+
 function latestFive(items){
 
  if(!Array.isArray(items))
@@ -3232,6 +3352,7 @@ function latestFive(items){
   .slice(0,5);
 
 }
+
 
 function isAlarm(item){
 
@@ -3248,6 +3369,107 @@ function isAlarm(item){
  );
 
 }
+
+
+/* =========================================================
+   KULLANICI ADI KOPYALAMA
+   @username olarak kopyalar
+   ========================================================= */
+
+async function copyUsername(username, el){
+
+ const cleanName =
+  String(username ?? "")
+   .replace(/^@+/,"")
+   .trim();
+
+ if(!cleanName)
+  return;
+
+ const value =
+  "@" + cleanName;
+
+ const oldHtml =
+  el.innerHTML;
+
+ try{
+
+  if(
+   navigator.clipboard &&
+   window.isSecureContext
+  ){
+
+   await navigator.clipboard.writeText(
+    value
+   );
+
+  }
+  else{
+
+   const textarea =
+    document.createElement("textarea");
+
+   textarea.value =
+    value;
+
+   textarea.style.position =
+    "fixed";
+
+   textarea.style.left =
+    "-9999px";
+
+   textarea.style.top =
+    "0";
+
+   textarea.style.opacity =
+    "0";
+
+   document.body.appendChild(
+    textarea
+   );
+
+   textarea.focus();
+   textarea.select();
+
+   document.execCommand(
+    "copy"
+   );
+
+   textarea.remove();
+
+  }
+
+  el.classList.add(
+   "copied"
+  );
+
+  el.innerHTML =
+   "✅ KOPYALANDI";
+
+  setTimeout(
+   ()=>{
+    el.classList.remove(
+     "copied"
+    );
+
+    el.innerHTML =
+     oldHtml;
+   },
+   1200
+  );
+
+ }
+ catch(error){
+
+  console.error(
+   "Kopyalama hatası:",
+   error
+  );
+
+ }
+
+}
+
 
 function filterItems(
  items,
@@ -3306,6 +3528,7 @@ function filterItems(
 
 }
 
+
 function detectNewItems(
  items,
  seenSet,
@@ -3339,6 +3562,7 @@ function detectNewItems(
  });
 
 }
+
 
 function renderLatest(){
 
@@ -3389,6 +3613,12 @@ function renderLatest(){
  const alarm =
   isAlarm(item);
 
+ const username =
+  String(
+   item.username ?? ""
+  )
+   .replace(/^@+/,"");
+
  container.innerHTML = `
 
   <div class="
@@ -3403,9 +3633,14 @@ function renderLatest(){
 
    <div class="latest-main">
 
-    <div class="latest-user">
-     ${escapeHtml(item.username)}
-    </div>
+    <button
+     type="button"
+     class="copy-user latest-user"
+     onclick='copyUsername(${JSON.stringify(username)}, this)'
+    >
+     ${escapeHtml(username)}
+     <span class="copy-icon">📋</span>
+    </button>
 
     <div class="latest-info">
 
@@ -3451,6 +3686,7 @@ function renderLatest(){
  `;
 
 }
+
 
 function renderItems(
  originalItems,
@@ -3502,6 +3738,12 @@ function renderItems(
    const alarm =
     isAlarm(item);
 
+   const username =
+    String(
+     item.username ?? ""
+    )
+     .replace(/^@+/,"");
+
    return `
 
     <div class="
@@ -3512,13 +3754,21 @@ function renderItems(
 
      <div class="user-row">
 
-      <div class="user">
+      <button
+       type="button"
+       class="copy-user"
+       onclick='copyUsername(${JSON.stringify(username)}, this)'
+      >
 
        ${icon}
 
-       ${escapeHtml(item.username)}
+       ${escapeHtml(username)}
 
-      </div>
+       <span class="copy-icon">
+        📋
+       </span>
+
+      </button>
 
       <div style="
        display:flex;
@@ -3635,6 +3885,7 @@ function renderItems(
 
 }
 
+
 function renderRadar(){
 
  detectNewItems(
@@ -3668,6 +3919,7 @@ function renderRadar(){
  );
 
 }
+
 
 async function loadRadar(){
 
@@ -3771,6 +4023,7 @@ async function loadRadar(){
 
 }
 
+
 document
  .getElementById("search")
  .addEventListener(
@@ -3786,6 +4039,7 @@ document
 
   }
  );
+
 
 document
  .querySelectorAll(".filter")
@@ -3812,6 +4066,7 @@ document
   );
 
  });
+
 
 setInterval(
  loadRadar,
@@ -4285,23 +4540,23 @@ async def start_cmd(
 
             )
 
-            await send_admin(
+            # =================================================
+            # ADMİNE OTOMATİK VIP YETKİ RAPORU
+            # =================================================
 
-                "🎟 YENİ VIP ÜYE\n\n"
+            try:
 
-                f"👤 "
-                f"{user.first_name or ''}\n"
+                await notify_admin_vip(
+                    vip,
+                    "🎟 YENİ VIP ÜYE"
+                )
 
-                f"🆔 "
-                f"{user.id}\n"
+            except Exception as e:
 
-                f"👤 @"
-                f"{user.username or 'yok'}\n"
-
-                f"⏳ "
-                f"{VIP_DAYS} gün"
-
-            )
+                print(
+                    "[ADMIN VIP RAPOR HATASI]",
+                    repr(e)
+                )
 
             return
 
@@ -4480,6 +4735,11 @@ async def silvip_cmd(
 
         return
 
+    # Silmeden önce bilgiyi alıyoruz
+    old_vip = get_vip(
+        user_id
+    )
+
     removed = remove_vip(
         user_id
     )
@@ -4490,18 +4750,65 @@ async def silvip_cmd(
             user_id
         )
 
+        # =====================================================
+        # ADMİNE VIP SİLİNDİ RAPORU
+        # =====================================================
+
+        try:
+
+            if old_vip:
+
+                await send_admin(
+
+                    "🔒 VIP ÜYE SİLİNDİ\n"
+                    "━━━━━━━━━━━━━━━━━━\n\n"
+
+                    f"👤 "
+                    f"{old_vip.get('first_name') or '-'}\n"
+
+                    f"📱 @"
+                    f"{old_vip.get('username') or 'yok'}\n"
+
+                    f"🆔 "
+                    f"{old_vip.get('user_id')}\n\n"
+
+                    "❌ VIP erişimi kapatıldı."
+
+                )
+
+            else:
+
+                await send_admin(
+
+                    "🔒 VIP ÜYE SİLİNDİ\n\n"
+
+                    f"🆔 {user_id}\n\n"
+
+                    "❌ VIP erişimi kapatıldı."
+
+                )
+
+        except Exception as e:
+
+            print(
+                "[ADMIN VIP SILME HATASI]",
+                repr(e)
+            )
+
         if notified:
 
             await update.message.reply_text(
                 "✅ VIP erişim silindi.\n"
-                "📩 Kullanıcıya bildirim gönderildi."
+                "📩 Kullanıcıya bildirim gönderildi.\n"
+                "👑 Admin kaydı oluşturuldu."
             )
 
         else:
 
             await update.message.reply_text(
                 "✅ VIP erişim silindi.\n"
-                "⚠️ Kullanıcıya bildirim gönderilemedi."
+                "⚠️ Kullanıcıya bildirim gönderilemedi.\n"
+                "👑 Admin kaydı oluşturuldu."
             )
 
     else:
@@ -4588,6 +4895,10 @@ async def uzatvip_cmd(
 
     )
 
+    # =========================================================
+    # KULLANICIYA BİLDİR
+    # =========================================================
+
     await telegram_api(
         "sendMessage",
         {
@@ -4605,6 +4916,30 @@ async def uzatvip_cmd(
                 )
         }
     )
+
+    # =========================================================
+    # ADMİNE OTOMATİK YETKİ RAPORU
+    # =========================================================
+
+    try:
+
+        updated_vip = get_vip(
+            user_id
+        )
+
+        if updated_vip:
+
+            await notify_admin_vip(
+                updated_vip,
+                f"➕ VIP SÜRESİ UZATILDI (+{days} GÜN)"
+            )
+
+    except Exception as e:
+
+        print(
+            "[ADMIN VIP UZATMA RAPOR HATASI]",
+            repr(e)
+        )
 
 
 # ============================================================
@@ -5433,7 +5768,15 @@ async def main():
     )
 
     print(
+        "[HAZIR] Admin VIP yetki raporu aktif."
+    )
+
+    print(
         "[HAZIR] Mini App aktif."
+    )
+
+    print(
+        "[HAZIR] Kullanıcı adı kopyalama aktif."
     )
 
     print(
