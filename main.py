@@ -42,6 +42,32 @@ DB_PATH = os.environ.get(
 
 MAX_HISTORY = 500
 
+
+# =========================================================
+# 🚨 ALARM AYARLARI
+# =========================================================
+#
+# BURAYI SEN DEĞİŞTİRECEKSİN.
+#
+# ÖRNEK:
+# COIN_ALARM_LIMIT = 500
+# -> 500 ve üstü coin alarmı
+#
+# PEOPLE_ALARM_LIMIT = 3
+# -> 3 ve altı kişi alarmı
+#
+# 0 yaparsan ilgili alarm kapanır.
+# =========================================================
+
+COIN_ALARM_LIMIT = 100
+
+PEOPLE_ALARM_LIMIT = 5
+
+
+# =========================================================
+# RAM
+# =========================================================
+
 LIVE_GOODY_BAGS = {}
 LIVE_CHESTS = {}
 
@@ -65,6 +91,7 @@ db = sqlite3.connect(
 
 db.row_factory = sqlite3.Row
 
+
 db.execute("""
 CREATE TABLE IF NOT EXISTS radar_history (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -85,20 +112,51 @@ CREATE TABLE IF NOT EXISTS radar_history (
 )
 """)
 
+
 db.execute("""
 CREATE INDEX IF NOT EXISTS idx_radar_detected
 ON radar_history(detected_at)
 """)
 
+
 db.execute("""
-CREATE INDEX IF NOT EXISTS idx_radar_type
-ON radar_history(event_type)
+CREATE TABLE IF NOT EXISTS alarm_history (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    alarm_key TEXT UNIQUE,
+    event_key TEXT,
+    alarm_type TEXT,
+    created_at INTEGER
+)
 """)
+
 
 db.commit()
 
 
+# =========================================================
+# YARDIMCI
+# =========================================================
+
+def safe_int(v, d=0):
+    try:
+        return int(float(v))
+    except:
+        return d
+
+
+def safe_float(v, d=0):
+    try:
+        return float(v)
+    except:
+        return d
+
+
+# =========================================================
+# SQLITE KAYIT
+# =========================================================
+
 def db_save(d, event_key):
+
     try:
 
         db.execute("""
@@ -186,7 +244,10 @@ def db_stats():
         ).fetchone()[0]
 
         total_coins = db.execute(
-            "SELECT COALESCE(SUM(coins),0) FROM radar_history"
+            """
+            SELECT COALESCE(SUM(coins),0)
+            FROM radar_history
+            """
         ).fetchone()[0]
 
         goody = db.execute(
@@ -246,7 +307,6 @@ def db_load_recent():
                     "Goody Bag"
                     if row["event_type"] == "GOODY BAG"
                     else "Hazine Sandığı",
-
                 "username": row["username"],
                 "coins": row["coins"],
                 "people": row["people"],
@@ -257,8 +317,10 @@ def db_load_recent():
                 "live": row["live"],
                 "target_time": row["target_time"],
                 "detected_at": row["detected_at"],
-                "source_message_id": row["source_message_id"],
-                "source_chat_id": row["source_chat_id"]
+                "source_message_id":
+                    row["source_message_id"],
+                "source_chat_id":
+                    row["source_chat_id"]
             }
 
             target = (
@@ -281,26 +343,6 @@ def db_load_recent():
             "[SQLITE YÜKLEME HATASI]",
             repr(e)
         )
-
-
-# =========================================================
-# YARDIMCI
-# =========================================================
-
-def safe_int(v, d=0):
-
-    try:
-        return int(float(v))
-    except:
-        return d
-
-
-def safe_float(v, d=0):
-
-    try:
-        return float(v)
-    except:
-        return d
 
 
 # =========================================================
@@ -612,11 +654,12 @@ def viewers(t):
         t or ""
     )
 
-    return (
-        safe_int(m.group(1))
-        if m
-        else 0
-    )
+    if m:
+        return safe_int(
+            m.group(1)
+        )
+
+    return 0
 
 
 # =========================================================
@@ -771,7 +814,6 @@ def parse(event):
     if g is None:
         return None
 
-    # USERNAME
 
     username = None
 
@@ -796,8 +838,6 @@ def parse(event):
         or "bilinmiyor"
     )
 
-
-    # ROOM
 
     room = None
 
@@ -824,8 +864,6 @@ def parse(event):
     )
 
 
-    # PEOPLE
-
     p = people(t)
 
     if not p and d:
@@ -846,8 +884,6 @@ def parse(event):
                 if p:
                     break
 
-
-    # JOINED
 
     j = joined(t)
 
@@ -870,8 +906,6 @@ def parse(event):
                     break
 
 
-    # VIEWERS
-
     v = viewers(t)
 
     if not v and d:
@@ -892,8 +926,6 @@ def parse(event):
                 if v:
                     break
 
-
-    # LIVE
 
     live = ""
 
@@ -924,6 +956,7 @@ def parse(event):
 
                 break
 
+
     live = live or (
         f"https://www.tiktok.com/share/live/{room}"
         if room
@@ -932,6 +965,7 @@ def parse(event):
 
 
     return {
+
         "type":
             "GOODY BAG"
             if g
@@ -983,7 +1017,7 @@ def parse(event):
 
 
 # =========================================================
-# DUPLICATE ANAHTARI
+# EVENT KEY
 # =========================================================
 
 def make_event_key(d):
@@ -1014,28 +1048,16 @@ def add(d):
 
     event_key = make_event_key(d)
 
-    # RAM duplicate
 
     if event_key in processed_signatures:
 
-        print(
-            "[DUPLICATE] RAM:",
-            event_key
-        )
-
         return False
 
-    # SQLITE duplicate
 
     if db_exists(event_key):
 
         processed_signatures.add(
             event_key
-        )
-
-        print(
-            "[DUPLICATE] SQLITE:",
-            d["username"]
         )
 
         return False
@@ -1047,9 +1069,6 @@ def add(d):
         else LIVE_CHESTS
     )
 
-
-    # Aynı oda çok kısa sürede tekrar gelirse
-    # spam oluşturma
 
     if room in target:
 
@@ -1064,7 +1083,6 @@ def add(d):
             - old_time
             < 5
         ):
-
             return False
 
 
@@ -1087,7 +1105,7 @@ def add(d):
         d["username"],
         "| COIN:",
         d["coins"],
-        "| PEOPLE:",
+        "| KİŞİ:",
         d["people"]
     )
 
@@ -1095,7 +1113,150 @@ def add(d):
 
 
 # =========================================================
-# TELEGRAM
+# ALARM KAYDI
+# =========================================================
+
+def alarm_exists(alarm_key):
+
+    try:
+
+        row = db.execute(
+            """
+            SELECT 1
+            FROM alarm_history
+            WHERE alarm_key=?
+            LIMIT 1
+            """,
+            (alarm_key,)
+        ).fetchone()
+
+        return row is not None
+
+    except Exception as e:
+
+        print(
+            "[ALARM CHECK]",
+            repr(e)
+        )
+
+        return False
+
+
+def save_alarm(
+    alarm_key,
+    event_key,
+    alarm_type
+):
+
+    try:
+
+        db.execute(
+            """
+            INSERT OR IGNORE INTO alarm_history
+            (
+                alarm_key,
+                event_key,
+                alarm_type,
+                created_at
+            )
+            VALUES (?, ?, ?, ?)
+            """,
+            (
+                alarm_key,
+                event_key,
+                alarm_type,
+                int(time.time())
+            )
+        )
+
+        db.commit()
+
+        return True
+
+    except Exception as e:
+
+        print(
+            "[ALARM SAVE]",
+            repr(e)
+        )
+
+        return False
+
+
+# =========================================================
+# ALARM KONTROL
+# =========================================================
+
+def get_alarms(d):
+
+    alarms = []
+
+    event_key = make_event_key(d)
+
+    coin = safe_int(
+        d.get("coins")
+    )
+
+    person = safe_int(
+        d.get("people")
+    )
+
+
+    # COIN
+
+    if (
+        COIN_ALARM_LIMIT > 0
+        and coin >= COIN_ALARM_LIMIT
+    ):
+
+        alarms.append({
+
+            "type": "COIN",
+
+            "title":
+                "🚨 COIN ALARMI",
+
+            "key":
+                (
+                    event_key
+                    + "|COIN|"
+                    + str(COIN_ALARM_LIMIT)
+                )
+        })
+
+
+    # PEOPLE
+    #
+    # 0 değerini alarm saymıyoruz.
+    # Çünkü veri okunamadığında 0 gelebilir.
+
+    if (
+        PEOPLE_ALARM_LIMIT > 0
+        and person > 0
+        and person <= PEOPLE_ALARM_LIMIT
+    ):
+
+        alarms.append({
+
+            "type": "PEOPLE",
+
+            "title":
+                "⚠️ DÜŞÜK KİŞİ ALARMI",
+
+            "key":
+                (
+                    event_key
+                    + "|PEOPLE|"
+                    + str(PEOPLE_ALARM_LIMIT)
+                )
+        })
+
+
+    return alarms
+
+
+# =========================================================
+# TELEGRAM NORMAL
 # =========================================================
 
 async def send_tg(d):
@@ -1125,9 +1286,6 @@ async def send_tg(d):
     )
 
 
-    # BUTON YOK.
-    # NORMAL TIKLANABİLİR URL.
-
     if d.get("live"):
 
         text += (
@@ -1145,21 +1303,18 @@ async def send_tg(d):
 
         try:
 
-            payload = {
-                "chat_id":
-                    TARGET_CHAT_ID,
-
-                "text":
-                    text,
-
-                "disable_web_page_preview":
-                    True
-            }
-
-
             async with http_session.post(
                 url,
-                json=payload
+                json={
+                    "chat_id":
+                        TARGET_CHAT_ID,
+
+                    "text":
+                        text,
+
+                    "disable_web_page_preview":
+                        True
+                }
             ) as response:
 
                 response_text = (
@@ -1169,11 +1324,6 @@ async def send_tg(d):
 
                 if response.status == 200:
 
-                    print(
-                        "[TELEGRAM] Gönderildi:",
-                        d["username"]
-                    )
-
                     return
 
 
@@ -1181,7 +1331,7 @@ async def send_tg(d):
 
                     try:
 
-                        retry_after = (
+                        wait_time = (
                             json.loads(
                                 response_text
                             )
@@ -1197,21 +1347,14 @@ async def send_tg(d):
 
                     except:
 
-                        retry_after = 30
-
-
-                    print(
-                        "[TELEGRAM] RATE LIMIT:",
-                        retry_after,
-                        "sn"
-                    )
+                        wait_time = 30
 
 
                     await asyncio.sleep(
                         max(
                             1,
                             safe_int(
-                                retry_after,
+                                wait_time,
                                 30
                             )
                         )
@@ -1261,15 +1404,202 @@ async def send_tg(d):
             )
 
 
+# =========================================================
+# 🚨 TELEGRAM ALARM
+# =========================================================
+
+async def send_alarm(
+    d,
+    alarm
+):
+
+    global http_session
+
+    if not http_session:
+        return
+
+
+    if alarm["type"] == "COIN":
+
+        title = "🚨 COIN ALARMI"
+
+        reason = (
+            f"🪙 COIN: {d['coins']}\n"
+            f"🎯 SENİN LİMİTİN: "
+            f"{COIN_ALARM_LIMIT}"
+        )
+
+    else:
+
+        title = "⚠️ DÜŞÜK KİŞİ ALARMI"
+
+        reason = (
+            f"👥 KİŞİ: {d['people']}\n"
+            f"🎯 SENİN LİMİTİN: "
+            f"{PEOPLE_ALARM_LIMIT}"
+        )
+
+
+    box = (
+        "🟪 GOODY BAG"
+        if d["type"] == "GOODY BAG"
+        else "🟨 HAZİNE SANDIĞI"
+    )
+
+
+    text = (
+        f"{title}\n\n"
+        f"{box}\n"
+        f"👤 Kullanıcı: {d['username']}\n"
+        f"{reason}\n"
+        f"🙋 Katılan: {d['joined']}\n"
+        f"📈 Oran: {d['rate']}\n"
+        f"👀 İzlenme: {d['view']}\n"
+        f"🏠 Oda: {d['room']}\n"
+    )
+
+
+    if d.get("live"):
+
+        text += (
+            f"\n🔴 {d['live']}"
+        )
+
+
+    url = (
+        f"https://api.telegram.org/"
+        f"bot{BOT_TOKEN}/sendMessage"
+    )
+
+
+    for attempt in range(1, 9):
+
+        try:
+
+            async with http_session.post(
+                url,
+                json={
+                    "chat_id":
+                        TARGET_CHAT_ID,
+
+                    "text":
+                        text,
+
+                    "disable_web_page_preview":
+                        True
+                }
+            ) as response:
+
+                response_text = (
+                    await response.text()
+                )
+
+
+                if response.status == 200:
+                    return
+
+
+                if response.status == 429:
+
+                    try:
+
+                        wait_time = (
+                            json.loads(
+                                response_text
+                            )
+                            .get(
+                                "parameters",
+                                {}
+                            )
+                            .get(
+                                "retry_after",
+                                30
+                            )
+                        )
+
+                    except:
+
+                        wait_time = 30
+
+
+                    await asyncio.sleep(
+                        max(
+                            1,
+                            safe_int(
+                                wait_time,
+                                30
+                            )
+                        )
+                    )
+
+                    continue
+
+
+                if response.status in [
+                    500,
+                    502,
+                    503,
+                    504
+                ]:
+
+                    await asyncio.sleep(
+                        min(
+                            5 * attempt,
+                            30
+                        )
+                    )
+
+                    continue
+
+
+                print(
+                    "[ALARM TELEGRAM HATA]",
+                    response.status,
+                    response_text
+                )
+
+                return
+
+
+        except Exception as e:
+
+            print(
+                "[ALARM TELEGRAM]",
+                repr(e)
+            )
+
+            await asyncio.sleep(
+                min(
+                    5 * attempt,
+                    30
+                )
+            )
+
+
+# =========================================================
+# QUEUE
+# =========================================================
+
 async def sender():
 
     while True:
 
-        d = await telegram_queue.get()
+        job = await telegram_queue.get()
 
         try:
 
-            await send_tg(d)
+            if job["kind"] == "normal":
+
+                await send_tg(
+                    job["data"]
+                )
+
+            elif job["kind"] == "alarm":
+
+                await send_alarm(
+                    job["data"],
+                    job["alarm"]
+                )
 
         except Exception as e:
 
@@ -1306,183 +1636,173 @@ content="width=device-width,initial-scale=1"
 <style>
 
 *{
-box-sizing:border-box
+box-sizing:border-box;
 }
 
 body{
 margin:0;
-padding:7px;
+padding:12px;
 background:#05060c;
 color:#fff;
-font-family:Arial,sans-serif
+font-family:Arial,sans-serif;
 }
 
 .wrap{
-max-width:1200px;
-margin:auto
+max-width:1600px;
+margin:auto;
 }
+
+
+/* =====================================================
+BAŞLIK
+===================================================== */
 
 .head{
 text-align:center;
-padding:7px 4px 10px
+padding:12px 5px 18px;
 }
 
 .title{
-font-size:clamp(25px,7vw,48px);
+font-size:clamp(42px,8vw,76px);
 font-weight:1000;
+line-height:1.05;
 text-shadow:
-0 0 5px #fff,
-0 0 16px #8b55ff,
-0 0 35px #5d25ff
+0 0 8px #fff,
+0 0 22px #8b55ff,
+0 0 45px #5d25ff;
 }
 
 .sub{
-font-size:11px;
-color:#aeb5c8;
-font-weight:800;
-margin-top:6px
+font-size:20px;
+color:#d6d9e5;
+font-weight:1000;
+margin-top:13px;
 }
 
 .status{
 display:inline-block;
-margin-top:7px;
-padding:5px 10px;
+margin-top:13px;
+padding:11px 19px;
 border-radius:99px;
 background:#141428;
-border:1px solid #9d5cff55;
+border:2px solid #9d5cff88;
 color:#74ff9a;
-font-size:9px;
-font-weight:900
-}
-
-.statsbar{
-display:grid;
-grid-template-columns:repeat(4,1fr);
-gap:5px;
-margin-bottom:8px
-}
-
-.statbox{
-background:#090c15ed;
-border:1px solid #293448;
-border-radius:10px;
-padding:6px;
-text-align:center
-}
-
-.stat-title{
-font-size:6px;
-color:#77849a;
-font-weight:900
-}
-
-.stat-value{
-font-size:12px;
+font-size:16px;
 font-weight:1000;
-margin-top:3px
 }
+
+
+/* =====================================================
+ANA GRID
+===================================================== */
 
 .grid{
 display:grid;
 grid-template-columns:1fr 1fr;
-gap:8px
+gap:14px;
 }
 
 .column{
-min-width:0
+min-width:0;
 }
+
+
+/* =====================================================
+EN YÜKSEK COIN
+===================================================== */
 
 .maxbox{
 background:#090c15ed;
-border-radius:13px;
-padding:7px;
-margin-bottom:8px
+border-radius:18px;
+padding:14px;
+margin-bottom:14px;
 }
 
 .maxbox.g{
-border:1px solid #9d51ff99
+border:2px solid #9d51ff99;
 }
 
 .maxbox.c{
-border:1px solid #f1c84b88
+border:2px solid #f1c84b88;
 }
 
 .max-title{
-font-size:11px;
+font-size:19px;
 font-weight:1000;
-margin-bottom:6px
+margin-bottom:11px;
 }
 
 .maxbox.g .max-title{
-color:#d5a8ff
+color:#d5a8ff;
 }
 
 .maxbox.c .max-title{
-color:#ffe37b
+color:#ffe37b;
 }
 
 .max-card{
 background:#171d2df5;
-border-radius:9px;
-padding:7px
+border-radius:13px;
+padding:13px;
 }
 
 .maxbox.g .max-card{
-border-left:3px solid #9d51ff
+border-left:6px solid #9d51ff;
 }
 
 .maxbox.c .max-card{
-border-left:3px solid #f1c84b
+border-left:6px solid #f1c84b;
 }
 
 .max-user{
 display:flex;
 justify-content:space-between;
 align-items:center;
-gap:5px;
-margin-bottom:6px
+gap:10px;
+margin-bottom:11px;
 }
 
 .max-user-name{
-font-size:9px;
+font-size:19px;
 font-weight:1000;
-word-break:break-word
+word-break:break-word;
 }
 
 .max-coin{
-font-size:12px;
+font-size:25px;
 font-weight:1000;
-white-space:nowrap
+white-space:nowrap;
 }
 
 .maxbox.g .max-coin{
-color:#d9aaff
+color:#d9aaff;
 }
 
 .maxbox.c .max-coin{
-color:#ffe16b
+color:#ffe16b;
 }
 
 .max-stats{
 display:grid;
 grid-template-columns:1fr 1fr;
-gap:3px
+gap:7px;
 }
 
 .max-stat{
 background:#ffffff09;
-border-radius:5px;
-padding:4px;
-font-size:6px;
-color:#818da1
+border-radius:8px;
+padding:9px;
+font-size:10px;
+font-weight:800;
+color:#aab2c2;
 }
 
 .max-stat b{
 display:block;
 color:#fff;
-font-size:8px;
-margin-top:1px;
-word-break:break-word
+font-size:17px;
+margin-top:3px;
+word-break:break-word;
 }
 
 .max-live{
@@ -1490,143 +1810,173 @@ display:block;
 color:#fff;
 text-decoration:none;
 background:#d71950;
-padding:6px;
-margin-top:6px;
-border-radius:6px;
+padding:11px;
+margin-top:9px;
+border-radius:9px;
 text-align:center;
-font-size:7px;
-font-weight:1000
+font-size:13px;
+font-weight:1000;
 }
 
 .max-link{
 display:block;
 color:#73a7ff;
-font-size:6px;
-margin-top:5px;
+font-size:10px;
+margin-top:8px;
 word-break:break-all;
-text-decoration:none
+text-decoration:none;
 }
+
+
+/* =====================================================
+PANELLER
+===================================================== */
 
 .panel{
 min-width:0;
 background:#090c15ed;
-border-radius:13px;
-padding:7px
+border-radius:18px;
+padding:12px;
 }
 
 .panel.g{
-border:1px solid #9d51ff99
+border:2px solid #9d51ff99;
 }
 
 .panel.c{
-border:1px solid #f1c84b88
+border:2px solid #f1c84b88;
 }
 
 .pnrow{
 display:flex;
 justify-content:space-between;
 align-items:center;
-padding:2px 2px 6px
+padding:4px 4px 10px;
 }
 
 .pn{
-font-size:11px;
-font-weight:1000
+font-size:22px;
+font-weight:1000;
 }
 
 .g .pn{
-color:#d5a8ff
+color:#d5a8ff;
 }
 
 .c .pn{
-color:#ffe37b
+color:#ffe37b;
 }
 
 .cnt{
-font-size:7px;
+font-size:14px;
 background:#ffffff12;
 border-radius:99px;
-padding:3px 5px
+padding:6px 10px;
+font-weight:1000;
 }
 
+
+/* =====================================================
+KARTLAR
+===================================================== */
+
 .card{
-margin-bottom:4px;
-background:linear-gradient(
+margin-bottom:9px;
+background:
+linear-gradient(
 145deg,
 #171d2df9,
 #0a0e17f9
 );
 border:1px solid #293448;
-border-radius:8px;
-padding:6px
+border-radius:13px;
+padding:12px;
 }
 
 .card:last-child{
-margin-bottom:0
+margin-bottom:0;
 }
 
 .g .card{
-border-left:3px solid #9d51ff
+border-left:6px solid #9d51ff;
 }
 
 .c .card{
-border-left:3px solid #f1c84b
+border-left:6px solid #f1c84b;
 }
+
+
+/* =====================================================
+KART ÜSTÜ
+===================================================== */
 
 .ur{
 display:flex;
 justify-content:space-between;
 align-items:center;
-gap:4px;
-margin-bottom:5px
+gap:8px;
+margin-bottom:10px;
 }
 
 .user{
-font-size:8px;
+font-size:17px;
 font-weight:1000;
-word-break:break-word
+word-break:break-word;
 }
 
 .rank{
-font-size:6px;
-color:#77849a
+font-size:11px;
+color:#77849a;
+font-weight:900;
 }
 
 .badge{
-padding:3px 5px;
-border-radius:5px;
-font-size:6px;
+padding:6px 9px;
+border-radius:8px;
+font-size:10px;
 font-weight:1000;
 background:#8d35ff;
-color:#fff
+color:#fff;
+white-space:nowrap;
 }
 
 .c .badge{
 background:#f4d35e;
-color:#211700
+color:#211700;
 }
+
+
+/* =====================================================
+KART BİLGİLERİ
+===================================================== */
 
 .ig{
 display:grid;
 grid-template-columns:1fr 1fr;
-gap:3px
+gap:6px;
 }
 
 .info{
 background:#ffffff09;
-border-radius:5px;
-padding:3px;
-font-size:5px;
-color:#818da1
+border-radius:8px;
+padding:8px;
+font-size:10px;
+font-weight:900;
+color:#a2abbc;
 }
 
 .info b{
 display:block;
 color:#fff;
-font-size:8px;
-margin-top:1px;
-word-break:break-word
+font-size:16px;
+margin-top:3px;
+word-break:break-word;
 }
+
+
+/* =====================================================
+CANLI
+===================================================== */
 
 .go{
 display:block;
@@ -1634,29 +1984,46 @@ text-align:center;
 color:#fff;
 text-decoration:none;
 background:#d71950;
-padding:5px;
-margin-top:5px;
-border-radius:6px;
-font-size:6px;
-font-weight:1000
+padding:11px;
+margin-top:9px;
+border-radius:9px;
+font-size:12px;
+font-weight:1000;
 }
+
+
+/* =====================================================
+BOŞ
+===================================================== */
 
 .empty{
 text-align:center;
-padding:16px;
-color:#626e82;
-font-size:7px
+padding:25px;
+color:#727d91;
+font-size:12px;
+font-weight:900;
 }
+
+
+/* =====================================================
+FOOTER
+===================================================== */
 
 .foot{
 text-align:center;
-color:#59647a;
-font-size:6px;
-padding:8px
+color:#697489;
+font-size:10px;
+font-weight:900;
+padding:15px;
 }
 
+
+/* =====================================================
+YENİ
+===================================================== */
+
 .new{
-animation:in .7s ease-out
+animation:in .7s ease-out;
 }
 
 @keyframes in{
@@ -1664,116 +2031,265 @@ animation:in .7s ease-out
 0%{
 opacity:.3;
 transform:
-translateY(-7px)
-scale(.97)
+translateY(-10px)
+scale(.97);
 }
 
 40%{
 box-shadow:
-0 0 25px #9d51ff77
+0 0 35px #9d51ff77;
 }
 
 100%{
 opacity:1;
-transform:none
+transform:none;
 }
 
 }
+
+
+/* =====================================================
+TELEFON
+===================================================== */
 
 @media(max-width:700px){
 
 body{
-padding:4px
+padding:5px;
+}
+
+.head{
+padding:8px 3px 12px;
 }
 
 .title{
-font-size:27px
+font-size:36px;
 }
 
 .sub{
-font-size:8px
+font-size:12px;
+margin-top:9px;
 }
 
 .status{
-font-size:7px
+font-size:10px;
+padding:8px 12px;
+margin-top:9px;
+border-width:1px;
 }
 
-.statsbar{
-gap:3px
-}
 
-.statbox{
-padding:5px 2px
-}
-
-.stat-title{
-font-size:5px
-}
-
-.stat-value{
-font-size:9px
-}
+/* iki sütun */
 
 .grid{
-gap:4px
+gap:5px;
 }
 
-.maxbox,
-.panel{
-padding:5px;
-border-radius:9px
+
+/* en yüksek */
+
+.maxbox{
+padding:7px;
+border-radius:11px;
+margin-bottom:6px;
 }
 
-.max-title,
-.pn{
-font-size:8px
+.max-title{
+font-size:11px;
+margin-bottom:7px;
+}
+
+.max-card{
+padding:8px;
+border-radius:9px;
+}
+
+.maxbox.g .max-card,
+.maxbox.c .max-card{
+border-left-width:4px;
+}
+
+.max-user{
+margin-bottom:7px;
+gap:5px;
 }
 
 .max-user-name{
-font-size:7px
+font-size:11px;
 }
 
 .max-coin{
-font-size:9px
+font-size:15px;
+}
+
+.max-stats{
+gap:4px;
 }
 
 .max-stat{
-font-size:4px
+padding:6px;
+font-size:6px;
 }
 
 .max-stat b{
-font-size:7px
+font-size:11px;
 }
 
-.card{
-padding:5px
-}
-
-.user{
-font-size:7px
-}
-
-.info{
-font-size:4px
-}
-
-.info b{
-font-size:7px
-}
-
-.badge{
-font-size:5px;
-padding:2px 4px
-}
-
-.go,
 .max-live{
-font-size:5px;
-padding:4px
+padding:8px;
+margin-top:6px;
+font-size:8px;
 }
 
 .max-link{
-font-size:5px
+font-size:6px;
+margin-top:5px;
+}
+
+
+/* paneller */
+
+.panel{
+padding:6px;
+border-radius:11px;
+}
+
+.pnrow{
+padding:3px 2px 7px;
+}
+
+.pn{
+font-size:12px;
+}
+
+.cnt{
+font-size:9px;
+padding:4px 6px;
+}
+
+
+/* kart */
+
+.card{
+padding:8px;
+margin-bottom:5px;
+border-radius:9px;
+}
+
+.g .card,
+.c .card{
+border-left-width:4px;
+}
+
+.ur{
+margin-bottom:7px;
+gap:5px;
+}
+
+.user{
+font-size:11px;
+}
+
+.rank{
+font-size:7px;
+}
+
+.badge{
+font-size:7px;
+padding:4px 6px;
+}
+
+.ig{
+gap:4px;
+}
+
+.info{
+padding:6px;
+font-size:6px;
+}
+
+.info b{
+font-size:11px;
+margin-top:2px;
+}
+
+.go{
+padding:8px;
+margin-top:6px;
+font-size:8px;
+}
+
+.empty{
+padding:16px;
+font-size:8px;
+}
+
+.foot{
+font-size:7px;
+padding:9px;
+}
+
+}
+
+
+/* =====================================================
+ÇOK KÜÇÜK TELEFON
+===================================================== */
+
+@media(max-width:390px){
+
+.title{
+font-size:31px;
+}
+
+.sub{
+font-size:10px;
+}
+
+.status{
+font-size:8px;
+}
+
+.max-title{
+font-size:10px;
+}
+
+.max-user-name{
+font-size:10px;
+}
+
+.max-coin{
+font-size:13px;
+}
+
+.max-stat{
+font-size:5px;
+padding:5px;
+}
+
+.max-stat b{
+font-size:10px;
+}
+
+.pn{
+font-size:10px;
+}
+
+.user{
+font-size:10px;
+}
+
+.info{
+font-size:5px;
+padding:5px;
+}
+
+.info b{
+font-size:10px;
+}
+
+.go{
+font-size:7px;
 }
 
 }
@@ -1782,9 +2298,11 @@ font-size:5px
 
 </head>
 
+
 <body>
 
 <div class="wrap">
+
 
 <div class="head">
 
@@ -1803,64 +2321,12 @@ font-size:5px
 </div>
 
 
-<div class="statsbar">
-
-<div class="statbox">
-
-<div class="stat-title">
-📡 TOPLAM KAYIT
-</div>
-
-<div id="totalRecords" class="stat-value">
-0
-</div>
-
-</div>
-
-
-<div class="statbox">
-
-<div class="stat-title">
-🪙 TOPLAM COIN
-</div>
-
-<div id="totalCoins" class="stat-value">
-0
-</div>
-
-</div>
-
-
-<div class="statbox">
-
-<div class="stat-title">
-🟪 GOODY
-</div>
-
-<div id="totalGoody" class="stat-value">
-0
-</div>
-
-</div>
-
-
-<div class="statbox">
-
-<div class="stat-title">
-🟨 CHEST
-</div>
-
-<div id="totalChest" class="stat-value">
-0
-</div>
-
-</div>
-
-</div>
-
-
 <div class="grid">
 
+
+<!-- =====================================================
+GOODY
+===================================================== -->
 
 <div class="column">
 
@@ -1896,6 +2362,10 @@ font-size:5px
 </div>
 
 
+<!-- =====================================================
+CHEST
+===================================================== -->
+
 <div class="column">
 
 <div class="maxbox c">
@@ -1929,12 +2399,14 @@ font-size:5px
 
 </div>
 
+
 </div>
 
 
 <div class="foot">
 ⚡ ÖDÜL AVCISI • KALICI RADAR • CANLI VERİ
 </div>
+
 
 </div>
 
@@ -1975,7 +2447,7 @@ x.room ??
 );
 
 
-const time=x=>
+const tm=x=>
 Number(
 x.detected_at ??
 x.created_at ??
@@ -1989,7 +2461,7 @@ Array.isArray(a)
 ?
 [...a]
 .sort(
-(a,b)=>time(b)-time(a)
+(a,b)=>tm(b)-tm(a)
 )
 .slice(0,5)
 :
@@ -1998,9 +2470,12 @@ Array.isArray(a)
 
 function renderMaxCoin(a,id,type){
 
-const e=document.getElementById(id);
+const e=
+document.getElementById(id);
 
-const arr=five(a);
+const arr=
+five(a);
+
 
 if(!arr.length){
 
@@ -2008,7 +2483,6 @@ e.innerHTML=
 '<div class="empty">⚡ Henüz veri yok.</div>';
 
 return;
-
 }
 
 
@@ -2024,8 +2498,10 @@ Number(a.coins||0)
 
 const icon=
 type==="G"
-?"🟪"
-:"🟨";
+?
+"🟪"
+:
+"🟨";
 
 
 e.innerHTML=`
@@ -2115,15 +2591,25 @@ ${esc(max.live)}
 }
 
 
-function list(a,id,cid,icon,type){
+function list(
+a,
+id,
+cid,
+icon,
+type
+){
 
-const e=document.getElementById(id);
+const e=
+document.getElementById(id);
 
-const n=document.getElementById(cid);
+const n=
+document.getElementById(cid);
 
-const arr=five(a);
+const arr=
+five(a);
 
-n.textContent=arr.length;
+n.textContent=
+arr.length;
 
 
 if(!arr.length){
@@ -2132,7 +2618,6 @@ e.innerHTML=
 '<div class="empty">⚡ Henüz veri yok.</div>';
 
 return;
-
 }
 
 
@@ -2154,18 +2639,17 @@ newC;
 
 arr.forEach(x=>{
 
-const k=key(x);
+const k=
+key(x);
 
 if(first){
 
 seen.add(k);
 
 }
-
 else if(!seen.has(k)){
 
 seen.add(k);
-
 ns.add(k);
 
 }
@@ -2177,9 +2661,12 @@ e.innerHTML=
 
 arr.map((x,i)=>{
 
-const k=key(x);
+const k=
+key(x);
 
-const fresh=ns.has(k);
+const fresh=
+ns.has(k);
+
 
 return `
 
@@ -2248,7 +2735,7 @@ href="${esc(x.live)}"
 target="_blank"
 rel="noopener"
 >
-🔴 CANLIYA GİT
+🔴 TIKTOK CANLI YAYIN
 </a>
 
 `
@@ -2273,11 +2760,13 @@ data.goody_bags,
 "G"
 );
 
+
 renderMaxCoin(
 data.chests,
 "chestMax",
 "C"
 );
+
 
 list(
 data.goody_bags,
@@ -2286,6 +2775,7 @@ data.goody_bags,
 "🟪",
 "G"
 );
+
 
 list(
 data.chests,
@@ -2302,21 +2792,21 @@ async function load(){
 
 try{
 
-const r=await fetch(
+const r=
+await fetch(
 "/api/all?t="+Date.now(),
 {
 cache:"no-store"
 }
 );
 
-if(!r.ok){
 
+if(!r.ok)
 throw Error(r.status);
 
-}
 
-
-const d=await r.json();
+const d=
+await r.json();
 
 
 data={
@@ -2333,39 +2823,9 @@ Array.isArray(d.chests)
 ?
 d.chests
 :
-[],
-
-stats:
-d.stats || {}
+[]
 
 };
-
-
-const stats=data.stats;
-
-
-document.getElementById(
-"totalRecords"
-).textContent=
-stats.total ?? 0;
-
-
-document.getElementById(
-"totalCoins"
-).textContent=
-stats.total_coins ?? 0;
-
-
-document.getElementById(
-"totalGoody"
-).textContent=
-stats.goody ?? 0;
-
-
-document.getElementById(
-"totalChest"
-).textContent=
-stats.chest ?? 0;
 
 
 const s=
@@ -2392,8 +2852,7 @@ document.getElementById(
 "status"
 );
 
-s.className=
-"status error";
+s.className="status";
 
 s.textContent=
 "🔴 VERİ BAĞLANTISI HATASI";
@@ -2471,6 +2930,10 @@ async def cors(request, handler):
     return response
 
 
+# =========================================================
+# API
+# =========================================================
+
 async def api_all(request):
 
     stats = db_stats()
@@ -2535,13 +2998,19 @@ async def api_status(request):
             stats["total_coins"],
 
         "server_time":
-            int(time.time())
+            int(time.time()),
+
+        "coin_alarm":
+            COIN_ALARM_LIMIT,
+
+        "people_alarm":
+            PEOPLE_ALARM_LIMIT
 
     })
 
 
 # =========================================================
-# HTTP SERVER
+# HTTP BAŞLAT
 # =========================================================
 
 async def start_http():
@@ -2605,13 +3074,11 @@ async def start_http():
     await runner.setup()
 
 
-    site = web.TCPSite(
+    await web.TCPSite(
         runner,
         "0.0.0.0",
         PORT
-    )
-
-    await site.start()
+    ).start()
 
 
     print(
@@ -2621,7 +3088,7 @@ async def start_http():
 
 
 # =========================================================
-# TELEGRAM LISTENER
+# LISTENER
 # =========================================================
 
 async def listener(event):
@@ -2662,11 +3129,68 @@ async def listener(event):
         )
 
 
-        if add(d):
+        if not add(d):
+            return
 
-            await telegram_queue.put(
+
+        # NORMAL BİLDİRİM
+
+        await telegram_queue.put({
+
+            "kind":
+                "normal",
+
+            "data":
                 d
-            )
+
+        })
+
+
+        # ALARMLAR
+
+        alarms = get_alarms(d)
+
+        event_key = make_event_key(d)
+
+
+        for alarm in alarms:
+
+            if alarm_exists(
+                alarm["key"]
+            ):
+                continue
+
+
+            if save_alarm(
+                alarm["key"],
+                event_key,
+                alarm["type"]
+            ):
+
+                print(
+                    "[ALARM]",
+                    alarm["title"],
+                    "|",
+                    d["username"],
+                    "| COIN:",
+                    d["coins"],
+                    "| KİŞİ:",
+                    d["people"]
+                )
+
+
+                await telegram_queue.put({
+
+                    "kind":
+                        "alarm",
+
+                    "data":
+                        d,
+
+                    "alarm":
+                        alarm
+
+                })
 
 
     except Exception as e:
@@ -2678,7 +3202,7 @@ async def listener(event):
 
 
 # =========================================================
-# TELEGRAM BAĞLANTI KONTROLÜ
+# TELEGRAM WATCHDOG
 # =========================================================
 
 async def telegram_connection_watch():
@@ -2691,9 +3215,7 @@ async def telegram_connection_watch():
 
             if client:
 
-                connected = client.is_connected()
-
-                if not connected:
+                if not client.is_connected():
 
                     print(
                         "[TELEGRAM] Bağlantı koptu."
@@ -2703,13 +3225,16 @@ async def telegram_connection_watch():
 
                         await client.connect()
 
+                        print(
+                            "[TELEGRAM] Yeniden bağlandı."
+                        )
+
                     except Exception as e:
 
                         print(
                             "[TELEGRAM] Yeniden bağlanma hatası:",
                             repr(e)
                         )
-
 
                 else:
 
@@ -2730,7 +3255,7 @@ async def telegram_connection_watch():
 
 
 # =========================================================
-# ANA PROGRAM
+# MAIN
 # =========================================================
 
 async def main():
@@ -2743,21 +3268,25 @@ async def main():
         "🏆 ÖDÜL AVCISI BAŞLIYOR"
     )
 
+    print(
+        "🪙 COIN ALARM LİMİTİ:",
+        COIN_ALARM_LIMIT
+    )
 
-    # SQLITE GEÇMİŞİNİ YÜKLE
+    print(
+        "👥 KİŞİ ALARM LİMİTİ:",
+        PEOPLE_ALARM_LIMIT
+    )
+
 
     db_load_recent()
 
-
-    # HTTP
 
     http_session = aiohttp.ClientSession()
 
 
     await start_http()
 
-
-    # TELEGRAM
 
     client = TelegramClient(
         StringSession(
@@ -2767,8 +3296,6 @@ async def main():
         API_HASH
     )
 
-
-    # İlk bağlantı
 
     while True:
 
@@ -2785,18 +3312,12 @@ async def main():
         except Exception as e:
 
             print(
-                "[TELEGRAM] İlk bağlantı başarısız:",
+                "[TELEGRAM] Bağlantı hatası:",
                 repr(e)
-            )
-
-            print(
-                "[TELEGRAM] 15 saniye sonra tekrar denenecek."
             )
 
             await asyncio.sleep(15)
 
-
-    # EVENT
 
     client.add_event_handler(
         listener,
@@ -2806,14 +3327,10 @@ async def main():
     )
 
 
-    # TELEGRAM SENDER
-
     asyncio.create_task(
         sender()
     )
 
-
-    # BAĞLANTI WATCHDOG
 
     asyncio.create_task(
         telegram_connection_watch()
@@ -2825,34 +3342,25 @@ async def main():
     )
 
     print(
-        "[HAZIR] SQLite kalıcı geçmiş aktif."
+        "[HAZIR] Büyük yazılı mobil arayüz aktif."
     )
 
     print(
-        "[HAZIR] Güçlü duplicate koruması aktif."
+        "[HAZIR] Coin alarmı aktif."
     )
 
     print(
-        "[HAZIR] Telegram otomatik reconnect aktif."
+        "[HAZIR] Düşük kişi alarmı aktif."
     )
 
     print(
-        "[HAZIR] Son 5 kayıt gösteriliyor."
-    )
-
-    print(
-        "[HAZIR] En yüksek coin ayrı ayrı hesaplanıyor."
-    )
-
-    print(
-        "[HAZIR] Telegram linkleri butonsuz normal link."
+        "[HAZIR] Telegram normal tıklanabilir link aktif."
     )
 
 
     try:
 
         await client.run_until_disconnected()
-
 
     finally:
 
@@ -2870,7 +3378,7 @@ async def main():
 
 
 # =========================================================
-# START
+# BAŞLAT
 # =========================================================
 
 if __name__ == "__main__":
