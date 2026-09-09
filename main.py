@@ -1,20 +1,15 @@
 import os
-import re
-import json
-import base64
-import asyncio
-import time
 import sqlite3
-from urllib.parse import unquote
-
+import asyncio
 from aiohttp import web
-from telethon import TelegramClient, events, Button
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
+from telethon import TelegramClient, events
 from telethon.sessions import StringSession
 
 # =========================================================
 # AYARLAR
 # =========================================================
-
 API_ID = int(os.environ["API_ID"])
 API_HASH = os.environ["API_HASH"]
 STRING_SESSION = os.environ["STRING_SESSION"]
@@ -31,411 +26,127 @@ SOURCE_CHATS = [
 ]
 PORT = int(os.environ.get("PORT", "10000"))
 DB_PATH = os.environ.get("DATABASE_PATH", "radar.db")
-MAX_HISTORY = 500
-
-COIN_ALARM_LIMIT = 100
-PEOPLE_ALARM_LIMIT = 5
-
-LIVE_GOODY_BAGS = {}
-LIVE_CHESTS = {}
-processed_messages = set()
-processed_signatures = set()
-telegram_queue = asyncio.Queue()
 
 # =========================================================
-# İSTEMCİLER (ÇİFT MOTOR)
+# SQLITE VERİTABANI (ÜYELİK VE RADAR)
 # =========================================================
-user_client = TelegramClient(StringSession(STRING_SESSION), API_ID, API_HASH)
-bot_client = TelegramClient('bot_session', API_ID, API_HASH)
-
-# =========================================================
-# SQLITE VERİTABANI
-# =========================================================
-
 db = sqlite3.connect(DB_PATH, check_same_thread=False)
 db.row_factory = sqlite3.Row
 
 db.execute("""
-CREATE TABLE IF NOT EXISTS radar_history (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    event_key TEXT UNIQUE,
-    event_type TEXT NOT NULL,
+CREATE TABLE IF NOT EXISTS users (
+    user_id INTEGER PRIMARY KEY,
     username TEXT,
-    coins INTEGER DEFAULT 0,
-    people INTEGER DEFAULT 0,
-    joined INTEGER DEFAULT 0,
-    rate REAL DEFAULT 0,
-    viewers INTEGER DEFAULT 0,
-    room TEXT,
-    live TEXT,
-    target_time INTEGER DEFAULT 0,
-    detected_at INTEGER DEFAULT 0,
-    source_message_id INTEGER DEFAULT 0,
-    source_chat_id INTEGER DEFAULT 0
-)
-""")
-
-db.execute("CREATE INDEX IF NOT EXISTS idx_radar_detected ON radar_history(detected_at)")
-
-db.execute("""
-CREATE TABLE IF NOT EXISTS alarm_history (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    alarm_key TEXT UNIQUE,
-    event_key TEXT,
-    alarm_type TEXT,
-    created_at INTEGER
+    joined_at INTEGER
 )
 """)
 db.commit()
 
-# =========================================================
-# YARDIMCI FONKSİYONLAR VE PARSER
-# =========================================================
-
-def safe_int(v, d=0):
-    try: return int(float(v))
-    except: return d
-
-def safe_float(v, d=0):
-    try: return float(v)
-    except: return d
-
-def db_save(d, event_key):
+def register_user(user_id, username):
     try:
-        db.execute("""
-        INSERT OR IGNORE INTO radar_history
-        (event_key, event_type, username, coins, people, joined, rate, viewers, room, live, target_time, detected_at, source_message_id, source_chat_id)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """, (
-            event_key, d["type"], d["username"], safe_int(d["coins"]), safe_int(d["people"]), safe_int(d["joined"]), safe_float(d["rate"]), safe_int(d["view"]), str(d["room"]), d.get("live", ""), safe_int(d["target_time"]), safe_int(d["detected_at"]), safe_int(d.get("source_message_id")), safe_int(d.get("source_chat_id"))
-        ))
+        db.execute("INSERT OR REPLACE INTO users (user_id, username, joined_at) VALUES (?, ?, ?)", 
+                   (user_id, username or "Bilinmiyor", int(asyncio.get_event_loop().time())))
         db.commit()
-        return True
-    except: return False
-
-def db_exists(event_key):
-    try:
-        return db.execute("SELECT 1 FROM radar_history WHERE event_key=? LIMIT 1", (event_key,)).fetchone() is not None
-    except: return False
-
-def db_load_recent():
-    try:
-        rows = db.execute("SELECT * FROM radar_history ORDER BY detected_at DESC LIMIT ?", (MAX_HISTORY,)).fetchall()
-        for row in reversed(rows):
-            d = {
-                "type": row["event_type"],
-                "box_name": "Goody Bag" if row["event_type"] == "GOODY BAG" else "Hazine Sandığı",
-                "username": row["username"], "coins": row["coins"], "people": row["people"],
-                "joined": row["joined"], "rate": row["rate"], "view": row["viewers"],
-                "room": row["room"], "live": row["live"], "target_time": row["target_time"],
-                "detected_at": row["detected_at"], "source_message_id": row["source_message_id"],
-                "source_chat_id": row["source_chat_id"]
-            }
-            target = LIVE_GOODY_BAGS if d["type"] == "GOODY BAG" else LIVE_CHESTS
-            if d["room"]: target[d["room"]] = d
     except: pass
 
-def token_from_event(e):
-    try: t = e.message.raw_text or ""
-    except: return None
-    for p in [r'https?://[^ \n\]\)]+/t\.php\?token=([^&\s\]\)]+)', r'https?://[^ \n\]\)]+t\.php\?token=([^&\s\]\)]+)']:
-        m1 = re.search(p, t, re.I)
-        if m1: return unquote(m1.group(1))
-    return None
-
-def decode_token(tok):
-    if not tok: return None
+def check_user_exists(user_id):
     try:
-        s = unquote(str(tok)).strip()
-        return json.loads(base64.urlsafe_b64decode(s + "=" * (-len(s) % 4)).decode("utf-8", errors="ignore"))
-    except: return None
+        res = db.execute("SELECT 1 FROM users WHERE user_id=?", (user_id,)).fetchone()
+        return res is not None
+    except: return False
 
-def room_from_text(t):
-    for p in [r'https?://live\.dichvu321\.com/t/\?p=([A-Za-z0-9_\-+/=]+)', r'https?://[^ \n]+/t/\?p=([A-Za-z0-9_\-+/=]+)']:
-        m = re.search(p, t or "", re.I)
-        if m:
-            try:
-                room = base64.urlsafe_b64decode(m.group(1) + "=" * (-len(m.group(1)) % 4)).decode("utf-8", errors="ignore").strip()
-                if room.isdigit(): return room
-            except: pass
-    return None
-
-def username_from_text(t):
-    for p in [r'^\s*##\s*T\d+\s*[›>:]\s*([^\s\n]+)', r'^\s*T\d+\s*[›>:]\s*([^\s\n]+)']:
-        m = re.search(p, t or "", re.M)
-        if m: return m.group(1).strip()
-    return None
-
-def coins(t, d=None):
-    for p in [r'(?:TÚI|TUI)\s*:\s*(\d+)\s*/', r'BOX\s*:\s*(\d+)\s*/', r'(\d+)\s*/\s*(\d+)']:
-        m = re.search(p, t or "", re.I)
-        if m: return safe_int(m.group(1))
-    if d:
-        for k in ["coins", "coin", "gem", "diamond", "amount"]:
-            if k in d: return safe_int(d[k])
-    return 0
-
-def people(t):
-    for p in [r'(?:TÚI|TUI)\s*:\s*\d+\s*/\s*(\d+)', r'BOX\s*:\s*\d+\s*/\s*(\d+)', r'(\d+)\s*/\s*(\d+)']:
-        m = re.search(p, t or "", re.I)
-        if m: return safe_int(m.group(1) if "TÚI" in p or "TUI" in p or "BOX" in p else m.group(2))
-    return 0
-
-def is_goody(t, d):
-    u = (t or "").upper()
-    if re.search(r'TÚI|TUI|GOODY\s*BAG|REWARD\s*BAG', u): return True
-    if re.search(r'\bBOX\b|RƯƠNG|TREO|HAZİNE', u) or "🟡" in t: return False
-    if d:
-        if d.get("is_goody_bag") in [True, 1, "1", "true", "True"]: return True
-        if d.get("is_goody_bag") in [False, 0, "0", "false", "False"]: return False
-    return None
-
-def parse(event):
-    t = event.message.raw_text or ""
-    d = decode_token(token_from_event(event))
-    g = is_goody(t, d)
-    if g is None: return None
-
-    username = None
-    for k in ["username", "user", "unique_id", "uniqueId"]:
-        if d and d.get(k):
-            username = str(d[k])
-            break
-    username = username or username_from_text(t) or "bilinmiyor"
-
-    room = None
-    for k in ["room", "room_id", "roomid", "roomId", "roomID"]:
-        if d and d.get(k):
-            room = str(d[k])
-            break
-    room = room or room_from_text(t) or "msg:" + str(event.message.id)
-
-    p = people(t)
-    if not p and d: p = safe_int(d.get("people") or d.get("person") or d.get("count") or 0)
+# =========================================================
+# TELEGRAM BOT (python-telegram-bot - /start komutu için)
+# =========================================================
+async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = update.effective_user
+    register_user(user.id, user.username)
     
-    live = ""
-    if d and d.get("openitok") and str(d["openitok"]).startswith("http"): live = str(d["openitok"])
-    live = live or (f"https://www.tiktok.com/share/live/{room}" if room else f"https://www.tiktok.com/@{username}/live")
+    keyboard = [[InlineKeyboardButton("🌐 RADARI VE LİNKLERİ AÇ", url=SITE_URL)]]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    await update.message.reply_text(
+        f"👋 **Hoş Geldin, {user.first_name} (@{user.username or 'Kayıtsiz'})!**\n\n"
+        "✅ Üyeliğin başarıyla onaylandı ve sisteme kaydedildi.\n"
+        "Canlı radar verilerine ve airdrop odalarına erişmek için aşağıdaki butona tıklayabilirsin.",
+        reply_markup=reply_markup,
+        parse_mode="Markdown"
+    )
 
-    return {
-        "type": "GOODY BAG" if g else "CHEST", "box_name": "Goody Bag" if g else "Hazine Sandığı",
-        "username": username, "coins": coins(t, d), "people": p,
-        "joined": safe_int(d.get("joined") if d else 0), "rate": safe_float(d.get("rate") if d else 0),
-        "view": safe_int(d.get("view") if d else 0), "room": room, "live": live,
-        "target_time": int(time.time()) + 180, "detected_at": int(time.time()),
-        "source_message_id": event.message.id, "source_chat_id": safe_int(event.chat_id)
-    }
-
-def make_event_key(d):
-    return "|".join([d["type"], str(d.get("room", "")), str(d.get("username", "")).lower(), str(d.get("coins", 0)), str(d.get("people", 0)), str(d.get("source_message_id", 0))])
-
-def add(d):
-    if not d or not d.get("room"): return False
-    event_key = make_event_key(d)
-    if event_key in processed_signatures or db_exists(event_key):
-        processed_signatures.add(event_key)
-        return False
-    target = LIVE_GOODY_BAGS if d["type"] == "GOODY BAG" else LIVE_CHESTS
-    if d["room"] in target and int(time.time()) - safe_int(target[d["room"]].get("detected_at")) < 5: return False
-    db_save(d, event_key)
-    processed_signatures.add(event_key)
-    target[d["room"]] = d
-    return True
-
-def get_alarms(d):
-    alarms = []
-    if COIN_ALARM_LIMIT > 0 and safe_int(d.get("coins")) >= COIN_ALARM_LIMIT:
-        alarms.append({"type": "COIN", "title": "🚨 COIN ALARMI", "key": f"{make_event_key(d)}|COIN|{COIN_ALARM_LIMIT}"})
-    if PEOPLE_ALARM_LIMIT > 0 and 0 < safe_int(d.get("people")) <= PEOPLE_ALARM_LIMIT:
-        alarms.append({"type": "PEOPLE", "title": "⚠️ DÜŞÜK KİŞİ ALARMI", "key": f"{make_event_key(d)}|PEOPLE|{PEOPLE_ALARM_LIMIT}"})
-    return alarms
-
-def alarm_exists(alarm_key):
-    try: return db.execute("SELECT 1 FROM alarm_history WHERE alarm_key=? LIMIT 1", (alarm_key,)).fetchone() is not None
-    except: return False
-
-def save_alarm(alarm_key, event_key, alarm_type):
-    try:
-        db.execute("INSERT OR IGNORE INTO alarm_history (alarm_key, event_key, alarm_type, created_at) VALUES (?, ?, ?, ?)", (alarm_key, event_key, alarm_type, int(time.time())))
-        db.commit()
-        return True
-    except: return False
+async def run_telegram_bot():
+    application = ApplicationBuilder().token(BOT_TOKEN).build()
+    application.add_handler(CommandHandler("start", start_command))
+    await application.initialize()
+    await application.start()
+    await application.updater.start_polling()
 
 # =========================================================
-# TELEGRAM GÖNDERİCİ
+# TELETHON KANALLARINI DİNLEYEN MOTOR
 # =========================================================
+user_client = TelegramClient(StringSession(STRING_SESSION), API_ID, API_HASH)
 
-async def sender():
-    while True:
-        job = await telegram_queue.get()
+async def run_telethon_listener():
+    await user_client.start()
+    
+    @user_client.on(events.NewMessage(chats=SOURCE_CHATS))
+    async def listener(event):
         try:
-            d = job["data"]
-            if job["kind"] == "normal":
-                box = "🟪 GOODY BAG" if d["type"] == "GOODY BAG" else "🟨 HAZİNE SANDIĞI"
-                text = (
-                    f"**{box}**\n\n"
-                    f"👤 Kullanıcı: `{d['username']}`\n"
-                    f"🪙 Coin: **{d['coins']}**\n"
-                    f"👥 Kişi: {d['people']}\n"
-                    f"🏠 Oda: `{d['room']}`"
+            text = event.message.raw_text or ""
+            if "t.php?token=" in text or "GOODY" in text.upper():
+                await user_client.send_message(
+                    TARGET_CHAT_ID,
+                    f"🔔 **Yeni Airdrop Tespit Edildi!**\n\n{text}",
+                    buttons=[[dict(text="🌐 RADARI AÇ", url=SITE_URL)]]
                 )
-            elif job["kind"] == "alarm":
-                alarm = job["alarm"]
-                title = "🚨 COIN ALARMI" if alarm["type"] == "COIN" else "⚠️ DÜŞÜK KİŞİ ALARMI"
-                box = "🟪 GOODY BAG" if d["type"] == "GOODY BAG" else "🟨 HAZİNE SANDIĞI"
-                text = (
-                    f"**{title}**\n\n"
-                    f"{box}\n"
-                    f"👤 Kullanıcı: `{d['username']}`\n"
-                    f"🪙 Coin: **{d['coins']}**\n"
-                    f"👥 Kişi: {d['people']}\n"
-                    f"🏠 Oda: `{d['room']}`"
-                )
-            
-            await bot_client.send_message(
-                TARGET_CHAT_ID,
-                text,
-                buttons=[[Button.url("🌐 RADARI AÇ", SITE_URL)]],
-                link_preview=False
-            )
         except Exception as e:
-            print("[SENDER HATA]", repr(e))
-        finally:
-            telegram_queue.task_done()
+            print("[LİSTENER HATA]", repr(e))
+
+    await user_client.run_until_disconnected()
 
 # =========================================================
-# HTML + ÜYE GİRİŞ PANELİ (LOCKED INTERFACE)
+# WEB SUNUCUSU (Aiohttp)
 # =========================================================
-
-RADAR_HTML = """
-<!doctype html>
-<html lang="tr">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>🏆 ÖDÜL AVCISI</title>
-<style>
-body{margin:0;padding:0;background:#05060c;color:#fff;font-family:Arial,sans-serif;height:100vh;display:flex;justify-content:center;align-items:center;}
-.wrap{width:100%;max-width:500px;padding:20px;box-sizing:border-box;}
-.card{background:#121324;border:1px solid #7c3aed;padding:30px;border-radius:15px;text-align:center;box-shadow:0 0 25px rgba(124,58,237,0.3);}
-.title{font-size:24px;font-weight:bold;margin-bottom:10px;color:#fff;}
-.sub{color:#a78bfa;font-size:14px;margin-bottom:25px;}
-input{width:100%;padding:14px;margin-bottom:15px;background:#05060c;border:1px solid #4c1d95;color:#fff;border-radius:8px;box-sizing:border-box;outline:none;font-size:16px;}
-button{width:100%;padding:14px;background:linear-gradient(135deg,#7c3aed,#4c1d95);color:#fff;border:none;border-radius:8px;font-weight:bold;cursor:pointer;font-size:16px;transition:0.3s;}
-button:hover{opacity:0.9;}
-#main-content{display:none;text-align:center;}
-</style>
-</head>
-<body>
-
-<div class="wrap">
-    <!-- GİRİŞ / ÜYE OL PANELİ -->
-    <div id="auth-modal" class="card">
-        <div style="font-size:40px;margin-bottom:10px;">🔒</div>
-        <div class="title">VIP ÜYE ALANI</div>
-        <div class="sub">TikTok Canlı Radar verilerine tam erişim sağlamak için Telegram kullanıcı adınızla giriş yapın.</div>
-        <input type="text" id="username-input" placeholder="Telegram Kullanıcı Adı (Örn: @KullaniciAdi)">
-        <button onclick="handleLogin()">🚀 Kilidi Aç / VIP Ol</button>
-    </div>
-
-    <!-- ASIL İÇERİK (Giriş Yapılınca Açılır) -->
-    <div id="main-content" class="card" style="border-color:#10b981;">
-        <div style="font-size:40px;margin-bottom:10px;">🟢</div>
-        <div class="title" style="color:#10b981;">RADAR AKTİF</div>
-        <div class="sub" id="welcome-msg">Sisteme başarıyla bağlandınız!</div>
-        <button style="background:#10b981;" onclick="location.reload()">Verileri Yenile</button>
-    </div>
-</div>
-
-<script>
-window.onload = function() {
-    const savedUser = localStorage.getItem("vip_username");
-    if (savedUser) {
-        document.getElementById("auth-modal").style.display = "none";
-        document.getElementById("main-content").style.display = "block";
-        document.getElementById("welcome-msg").innerText = "Hoş geldin, " + savedUser + "! Canlı akış izleniyor.";
-    }
-};
-
-function handleLogin() {
-    const username = document.getElementById("username-input").value.trim();
-    if (username === "") {
-        alert("Lütfen Telegram kullanıcı adınızı girin!");
-        return;
-    }
-    localStorage.setItem("vip_username", username);
-    document.getElementById("auth-modal").style.display = "none";
-    document.getElementById("main-content").style.display = "block";
-    document.getElementById("welcome-msg").innerText = "Hoş geldin, " + username + "! Canlı akış izleniyor.";
-}
-</script>
-
-</body>
-</html>
-"""
-
 async def radar_page(request):
-    return web.Response(text=RADAR_HTML, content_type="text/html", charset="utf-8")
+    html = """
+    <!doctype html>
+    <html lang="tr">
+    <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width,initial-scale=1">
+    <title>Ödül Avcısı Radar</title>
+    <style>
+    body{margin:0;padding:0;background:#05060c;color:#fff;font-family:Arial,sans-serif;display:flex;justify-content:center;align-items:center;height:100vh;}
+    .card{background:#121324;border:1px solid #7c3aed;padding:30px;border-radius:15px;text-align:center;max-width:400px;width:90%;box-shadow:0 0 20px rgba(124,58,237,0.4);}
+    a{display:block;width:100%;padding:14px;background:linear-gradient(135deg,#7c3aed,#4c1d95);color:#fff;text-decoration:none;border-radius:8px;font-weight:bold;margin-top:20px;box-sizing:border-box;}
+    </style>
+    </head>
+    <body>
+    <div class="card">
+        <h2>🚀 Ödül Avcısı Sistem</h2>
+        <p style="color:#a78bfa;font-size:14px;">Canlı yayın bildirimlerini alabilmek ve botu aktif etmek için önce Telegram botumuzdan kayıt olmalısın.</p>
+        <a href="https://t.me/AirdropGameReferansBot" target="_blank">🤖 Botu Aç ve Kayıt Ol</a>
+    </div>
+    </body>
+    </html>
+    """
+    return web.Response(text=html, content_type="text/html", charset="utf-8")
 
 async def start_http():
     app = web.Application()
     app.router.add_get("/", radar_page)
-    app.router.add_get("/radar", radar_page)
     runner = web.AppRunner(app)
     await runner.setup()
     await web.TCPSite(runner, "0.0.0.0", PORT).start()
-    print("[HTTP] Sunucu başladı:", PORT)
+    print(f"[HTTP] Sunucu {PORT} portunda aktif.")
 
 # =========================================================
-# ANA ÇALIŞTIRMA MANTIĞI
+# ANA ÇALIŞTIRMA
 # =========================================================
-
 async def main():
-    print("🏆 ÖDÜL AVCISI BAŞLIYOR (ÇİFT MOTORLU SİSTEM + ÜYE PANELİ)")
-    db_load_recent()
     await start_http()
-
-    await user_client.start()
-    await bot_client.start(bot_token=BOT_TOKEN)
-    print("[TELEGRAM] Dinleyici ve Bot başarıyla bağlandı!")
-
-    @user_client.on(events.NewMessage(chats=SOURCE_CHATS))
-    async def user_listener(event):
-        try:
-            key = (event.chat_id, event.message.id)
-            if key in processed_messages: return
-            processed_messages.add(key)
-            if len(processed_messages) > 50000: processed_messages.clear()
-
-            d = parse(event)
-            if not d: return
-
-            d["source_chat_id"] = safe_int(event.chat_id)
-            if not add(d): return
-
-            await telegram_queue.put({"kind": "normal", "data": d})
-
-            alarms = get_alarms(d)
-            event_key = make_event_key(d)
-            for alarm in alarms:
-                if not alarm_exists(alarm["key"]) and save_alarm(alarm["key"], event_key, alarm["type"]):
-                    await telegram_queue.put({"kind": "alarm", "data": d, "alarm": alarm})
-        except Exception as e:
-            print("[USER LİSTENER HATA]", repr(e))
-
-    @bot_client.on(events.NewMessage(pattern=r'^/start'))
-    async def bot_listener(event):
-        await event.respond(
-            "👋 **Ödül Avcısı Radarına Hoş Geldiniz!**\n\n"
-            "Canlı radar verilerine ve sistem arayüzüne erişmek için aşağıdaki butona tıklayabilirsiniz.",
-            buttons=[[Button.url("🌐 RADARI AÇ", SITE_URL)]]
-        )
-
-    asyncio.create_task(sender())
-
     await asyncio.gather(
-        user_client.run_until_disconnected(),
-        bot_client.run_until_disconnected()
+        run_telegram_bot(),
+        run_telethon_listener()
     )
 
 if __name__ == "__main__":
