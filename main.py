@@ -1031,10 +1031,26 @@ async def start_http():
 
 
 # =========================================================
-# TELEGRAM DİNLEYİCİ
+# TELEGRAM DİNLEYİCİ VE START HANDLER
 # =========================================================
 
+async def start_handler(event):
+    """Bota özelden /start atıldığında yanıt verir."""
+    try:
+        if event.is_private:
+            await event.respond(
+                "👋 **Ödül Avcısı Radarına Hoş Geldiniz!**\n\n"
+                "Canlı radar verilerine ve sistem arayüzüne erişmek için aşağıdaki butona tıklayabilirsiniz.",
+                buttons=[
+                    [Button.url("🌐 RADARI AÇ", SITE_URL)]
+                ]
+            )
+    except Exception as e:
+        print("[START HANDLER HATASI]", repr(e))
+
+
 async def listener(event):
+    """Kaynak kanallardan gelen mesajları dinler."""
     try:
         key = (event.chat_id, event.message.id)
         if key in processed_messages:
@@ -1111,6 +1127,10 @@ async def main():
         API_HASH
     )
 
+    # 1. /start Komut Dinleyicisi
+    client.add_event_handler(start_handler, events.NewMessage(pattern=r'^/start'))
+
+    # 2. Kaynak Kanal Dinleyicisi
     client.add_event_handler(listener, events.NewMessage(chats=SOURCE_CHATS))
 
     await client.start()
