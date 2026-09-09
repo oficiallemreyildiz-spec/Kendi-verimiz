@@ -1070,14 +1070,19 @@ async def listener(event):
 
 
 # Bot Yönlendirme Mantığı (/start)
+@client.on(events.NewMessage(pattern=r'^/start'))
 async def start_handler(event):
     if event.is_private:
         text = (
             "👋 **Ödül Avcısı Radarına Hoş Geldiniz!**\n\n"
             "Canlı radar verilerine ve sistem arayüzüne erişmek için aşağıdaki butona tıklayabilirsiniz."
         )
-        buttons = [[Button.url("🌐 Siteye Git", SITE_URL)]]
-        await event.respond(text, buttons=buttons)
+        await event.respond(
+            text,
+            buttons=[
+                [Button.url("🌐 Siteye Git", SITE_URL)]
+            ]
+        )
 
 
 async def telegram_connection_watch():
@@ -1133,7 +1138,6 @@ async def main():
 
     # Dinleyici ve Bot Komutları
     client.add_event_handler(listener, events.NewMessage(chats=SOURCE_CHATS))
-    client.add_event_handler(start_handler, events.NewMessage(pattern='/start'))
 
     asyncio.create_task(sender())
     asyncio.create_task(telegram_connection_watch())
