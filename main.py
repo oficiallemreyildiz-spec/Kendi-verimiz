@@ -2855,6 +2855,76 @@ async def daily_vip_report_loop():
 # MINI APP AUTH
 # ============================================================
 
+MINI_APP_SESSION_COOKIE = "odul_avcisi_vip_session"
+MINI_APP_SESSION_DAYS = 30
+
+
+def make_miniapp_session(user_id):
+
+    user_id = safe_int(user_id)
+
+    if not user_id:
+        return ""
+
+    expires = int(
+        time.time()
+        + MINI_APP_SESSION_DAYS * 86400
+    )
+
+    payload = f"{user_id}.{expires}"
+
+    signature = hmac.new(
+        BOT_TOKEN.encode("utf-8"),
+        payload.encode("utf-8"),
+        hashlib.sha256
+    ).hexdigest()
+
+    return f"{payload}.{signature}"
+
+
+def validate_miniapp_session(value):
+
+    if not value:
+        return None
+
+    try:
+
+        parts = str(value).split(".")
+
+        if len(parts) != 3:
+            return None
+
+        user_id = safe_int(parts[0])
+        expires = safe_int(parts[1])
+        received_signature = str(parts[2])
+
+        if not user_id or not expires:
+            return None
+
+        if expires <= int(time.time()):
+            return None
+
+        payload = f"{user_id}.{expires}"
+
+        expected_signature = hmac.new(
+            BOT_TOKEN.encode("utf-8"),
+            payload.encode("utf-8"),
+            hashlib.sha256
+        ).hexdigest()
+
+        if not hmac.compare_digest(
+            expected_signature,
+            received_signature
+        ):
+            return None
+
+        return user_id
+
+    except Exception:
+
+        return None
+
+
 def validate_telegram_init_data(
     init_data
 ):
@@ -4234,8 +4304,11 @@ async function loadRadar(){
 
  try{
 
+  // Mini App her zaman VIP oturum endpoint'ini kullanır.
+  // İlk açılışta initData gönderilir; TikTok'tan geri dönünce
+  // initData gelmezse sunucu imzalı VIP oturum çerezini kullanır.
   let url =
-   "/api/all?t="
+   "/api/miniapp-data?t="
    + Date.now();
 
   const headers = {};
@@ -4244,10 +4317,6 @@ async function loadRadar(){
    tg &&
    tg.initData
   ){
-
-   url =
-    "/api/miniapp-data?t="
-    + Date.now();
 
    headers[
     "X-Telegram-Init-Data"
@@ -4569,11 +4638,36 @@ async def api_miniapp_data(request):
         ""
     )
 
+    # İlk açılışta Telegram initData ile doğrula.
+    # TikTok'a gidip Mini App'e geri dönüldüğünde initData
+    # bazı WebView durumlarında tekrar gelmeyebilir.
+    # Bu durumda daha önce imzalanmış VIP oturum çerezini kullan.
     user = validate_telegram_init_data(
         init_data
     )
 
-    if not user:
+    session_user_id = validate_miniapp_session(
+        request.cookies.get(
+            MINI_APP_SESSION_COOKIE,
+            ""
+        )
+    )
+
+    if user:
+
+        user_id = safe_int(
+            user.get("id")
+        )
+
+    elif session_user_id:
+
+        user_id = session_user_id
+        user = {
+            "id": user_id,
+            "username": ""
+        }
+
+    else:
 
         return web.json_response(
             {
@@ -4584,17 +4678,13 @@ async def api_miniapp_data(request):
             status=401
         )
 
-    user_id = safe_int(
-        user.get("id")
-    )
-
     vip = get_vip(
         user_id
     )
 
     if not vip:
 
-        return web.json_response(
+        response = web.json_response(
             {
                 "ok": False,
                 "error":
@@ -4603,7 +4693,16 @@ async def api_miniapp_data(request):
             status=401
         )
 
-    return web.json_response({
+        response.del_cookie(
+            MINI_APP_SESSION_COOKIE,
+            path="/"
+        )
+
+        return response
+
+    # Geçerli Telegram doğrulaması geldiğinde oturumu yenile.
+    # Böylece TikTok'a gidip geri dönüldüğünde VIP erişimi korunur.
+    response = web.json_response({
 
         "ok":
             True,
@@ -4640,6 +4739,18 @@ async def api_miniapp_data(request):
             int(time.time()),
 
     })
+
+    response.set_cookie(
+        MINI_APP_SESSION_COOKIE,
+        make_miniapp_session(user_id),
+        max_age=MINI_APP_SESSION_DAYS * 86400,
+        httponly=True,
+        secure=True,
+        samesite="Lax",
+        path="/"
+    )
+
+    return response
 
 
 # ============================================================
