@@ -6,7 +6,9 @@
 #
 # CANLI LİNK DÜZELTİLDİ:
 # - Token içindeki eski/stale URL kullanılmaz
-# - Canlı bağlantı doğrudan @username/live olur
+# - openitok/live/live_url/url öncelikli canlı bağlantı kullanılır
+# - room varsa share/live yedeği kullanılır
+# - son çare @username/live kullanılır
 # - Telegram + Mini App aynı live linkini kullanır
 #
 # EK SİSTEMLER:
@@ -1592,15 +1594,14 @@ def calculate_target_time(
 # LIVE LINK
 #
 # ÖNEMLİ:
-# Token içindeki "openitok", "live", "live_url", "url"
-# alanları artık kullanılmıyor.
-#
-# Çünkü bu alanlar eski/yanlış yayına ait olabilir.
+# Çalışan kaynak kodun link düzeni kullanılır.
 #
 # Öncelik:
-#     @username -> TikTok canlı sayfası
+#     openitok -> live -> live_url -> url
+#     -> room/share/live -> @username/live
 #
-# Böylece Telegram ve Mini App aynı doğru linki kullanır.
+# Böylece token gerçek canlı bağlantısı veriyorsa o bağlantı korunur.
+# Telegram ve Mini App aynı live alanını kullanır.
 # ============================================================
 
 def canonical_tiktok_username(username):
@@ -1635,22 +1636,59 @@ def get_live_link(
     room=None,
     token_data=None
 ):
+    """
+    TikTok canlı bağlantısını çalışan kaynak kodun mantığıyla üretir.
+
+    Öncelik sırası:
+    1) token_data içindeki openitok
+    2) token_data içindeki live
+    3) token_data içindeki live_url
+    4) token_data içindeki url
+    5) room üzerinden TikTok share/live bağlantısı
+    6) son çare @username/live
+
+    Böylece kaynak token gerçek bir canlı URL veriyorsa aynen kullanılır;
+    token URL vermiyorsa room, en son da kullanıcı adı kullanılır.
+    """
+
+    if token_data:
+
+        for key in [
+            "openitok",
+            "live",
+            "live_url",
+            "url"
+        ]:
+            value = token_data.get(key)
+
+            if value:
+                value = str(value).strip()
+
+                if value.startswith((
+                    "http://",
+                    "https://"
+                )):
+                    return value
+
+    room = str(room or "").strip()
+
+    if room and not room.startswith("msg:"):
+        return (
+            "https://www.tiktok.com/"
+            f"share/live/{room}"
+        )
 
     username = canonical_tiktok_username(
         username
     )
 
-    if not username:
-        return ""
+    if username:
+        return (
+            "https://www.tiktok.com/"
+            f"@{username}/live"
+        )
 
-    # TEK ve KESİN canlı link formatı:
-    # https://www.tiktok.com/@KULLANICI/live
-    #
-    # room/token/openitok/live_url/url kullanılmaz.
-    return (
-        "https://www.tiktok.com/"
-        f"@{username}/live"
-    )
+    return ""
 
 
 # ============================================================
@@ -1680,14 +1718,12 @@ def parse_source_message(event):
     if is_goody is None:
         return None
 
-    # Kaynak mesaj başlığındaki yayıncı adı asıl kaynaktır.
-    # Token içindeki username eski/yanlış yayına ait olabileceği için
-    # sadece kaynak mesajdan username bulunamazsa yedek olarak kullanılır.
-    username = extract_username_from_text(
-        text
-    )
+    # Çalışan kaynak kodundaki sırayı kullan:
+    # token içindeki kullanıcı bilgisi önce,
+    # kaynak mesaj başlığı en son yedek.
+    username = None
 
-    if not username and token_data:
+    if token_data:
 
         for key in [
             "username",
@@ -1696,16 +1732,17 @@ def parse_source_message(event):
             "uniqueId"
         ]:
 
-            if token_data.get(key):
+            value = token_data.get(key)
 
+            if value and not isinstance(value, (dict, list)):
                 username = str(
-                    token_data[key]
+                    value
                 ).strip().lstrip("@").strip()
-
                 break
 
     username = (
         username
+        or extract_username_from_text(text)
         or "bilinmiyor"
     )
 
@@ -4372,25 +4409,24 @@ async def cors_middleware(
 
 def normalize_radar_item_links(items):
     """
-    Radar verisindeki live alanını her cevapta username'den yeniden üretir.
-    Böylece eski/stale token linki RAM'e veya geçmiş veriye sızsa bile
-    Mini App'e yanlış link gönderilmez.
+    Radar verisindeki live alanını bozmadan korur.
+    Eski kayıtta live yoksa kullanıcı adından son çare link üretir.
     """
     result = []
 
     for item in items:
         data = dict(item)
 
-        username = data.get(
-            "username",
-            ""
-        )
+        existing_live = str(
+            data.get("live") or ""
+        ).strip()
 
-        data["live"] = get_live_link(
-            username,
-            data.get("room"),
-            None
-        )
+        if not existing_live:
+            data["live"] = get_live_link(
+                data.get("username", ""),
+                data.get("room"),
+                None
+            )
 
         result.append(data)
 
@@ -6256,7 +6292,7 @@ async def main():
     )
 
     print(
-        "[HAZIR] Canlı link sistemi: @username/live aktif."
+        "[HAZIR] Canlı link sistemi: openitok/live/live_url/url -> room -> @username/live aktif."
     )
 
     try:
