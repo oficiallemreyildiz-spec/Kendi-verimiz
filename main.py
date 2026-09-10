@@ -147,6 +147,7 @@ LIVE_GOODY_BAGS = {}
 LIVE_CHESTS = {}
 
 processed_messages = set()
+processed_event_keys = set()
 last_event_notification = {}
 USER_SETTINGS_CACHE = {}
 
@@ -1857,6 +1858,32 @@ def parse_source_message(event):
 
     now = int(time.time())
 
+    target_time = calculate_target_time(
+        text,
+        token_data
+    )
+
+    # Aynı TikTok olayı farklı kaynak Telegram mesajlarından
+    # tekrar gelirse tek bir kimlik altında birleştir.
+    if token:
+        event_key = (
+            "token:"
+            + hashlib.sha256(
+                str(token).encode("utf-8", "ignore")
+            ).hexdigest()[:32]
+        )
+    else:
+        event_key = (
+            "fallback:"
+            + "|".join([
+                str(room),
+                "GOODY BAG" if is_goody else "CHEST",
+                str(coins),
+                str(people),
+                str(target_time),
+            ])
+        )
+
     return {
         "type":
             "GOODY BAG"
@@ -1897,10 +1924,10 @@ def parse_source_message(event):
             ),
 
         "target_time":
-            calculate_target_time(
-                text,
-                token_data
-            ),
+            target_time,
+
+        "event_key":
+            event_key,
 
         "detected_at":
             now,
@@ -1947,6 +1974,31 @@ def alarm_reason(data):
 # ============================================================
 
 def add_to_radar(data):
+
+    # Aynı TikTok olayı farklı kaynaklardan tekrar gelirse
+    # radar/Telegram zincirine ikinci kez sokma.
+    event_key = str(
+        data.get("event_key") or ""
+    ).strip()
+
+    if event_key:
+
+        if event_key in processed_event_keys:
+            print(
+                "[RADAR TEKRAR ENGELLENDİ]",
+                event_key
+            )
+            return False
+
+        processed_event_keys.add(
+            event_key
+        )
+
+        if len(processed_event_keys) > 50000:
+            processed_event_keys.clear()
+            processed_event_keys.add(
+                event_key
+            )
 
     target = (
         LIVE_GOODY_BAGS
@@ -2429,12 +2481,19 @@ async def notify_event(data):
         data.get("room", "")
     )
 
+    # Aynı olay farklı kaynak mesaj ID'leriyle gelse bile
+    # event_key sayesinde yalnızca bir kez bildirim gönderilir.
+    event_key = str(
+        data.get("event_key")
+        or room
+    )
+
     now = time.time()
 
-    if room:
+    if event_key:
 
         previous = last_event_notification.get(
-            room,
+            event_key,
             0
         )
 
@@ -2446,12 +2505,15 @@ async def notify_event(data):
 
             print(
                 "[TEKRAR ENGELLENDİ]",
-                room
+                event_key
             )
 
             return
 
-        last_event_notification[room] = now
+        last_event_notification[event_key] = now
+
+        if len(last_event_notification) > 50000:
+            last_event_notification.clear()
 
     await send_telegram_message(
         data
@@ -3178,11 +3240,14 @@ body{
 @keyframes newCard{
 
  0%{
-  opacity:.35;
-  transform:translateY(-7px);
+  opacity:1;
+  transform:translateY(0);
+  box-shadow:0 0 0 rgba(160,80,255,0);
  }
 
  50%{
+  opacity:1;
+  transform:translateY(0);
   box-shadow:0 0 24px rgba(160,80,255,.38);
  }
 
@@ -3193,7 +3258,6 @@ body{
  }
 
 }
-
 .user-row{
  display:flex;
  align-items:center;
@@ -3566,6 +3630,7 @@ function timestamp(item){
 function itemKey(item){
 
  return String(
+  item.event_key ??
   item.source_message_id ??
   item.room ??
   (
