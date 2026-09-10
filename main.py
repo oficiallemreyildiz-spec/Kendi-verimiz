@@ -4,29 +4,24 @@
 #
 # GOODY BAG + HAZİNE SANDIĞI
 #
-# SİSTEMLER:
-# - Akıllı alarm / yüksek coin + düşük kişi
-# - Kişisel alarm sistemi
-# - Yayıncı takip sistemi
-# - Sessize alma sistemi
-# - VIP süre uzatma
-# - VIP bilgi
-# - VIP silinince kullanıcıya bildirim
-# - VIP davet sistemi
-# - VIP otomatik yetki bilgilendirmesi
-# - Kişisel alarmın gerçekten kullanıcıya gönderilmesi
-# - Takip edilen yayıncı bildirimleri
-# - Telegram 429 koruması
+# EK SİSTEMLER:
+# - /davet 7
+# - /davet 20 gün
+# - VIP otomatik süre sonlandırma
+# - VIP süresi bitince otomatik bildirim
+# - /uyeler içinde SİL butonu
+# - Her gün 09:00 Türkiye saati VIP raporu
+# - Günlük raporda sadece kalan VIP süresi
+# - VIP otomatik yetki raporu
+# - Kişisel alarm
+# - Yayıncı takip
+# - Sessize alma
 # - Telegram Queue
-# - Telegram Mini App
-# - Mini App initData doğrulaması
-# - Arama
-# - Filtreler
-# - 2 sütun mobil görünüm
-# - Büyük yazılar
-# - ⚡ YENİ sistemi
-# - 📋 Kullanıcı adı kopyalama
-# - 👑 Admin VIP yetki raporu
+# - 429 koruması
+# - Mini App
+# - Mini App initData doğrulama
+# - Arama / filtre
+# - Kullanıcı adı kopyalama
 # ============================================================
 
 import os
@@ -40,7 +35,9 @@ import secrets
 import hashlib
 import hmac
 
+from datetime import datetime, timedelta
 from urllib.parse import unquote, parse_qsl
+from zoneinfo import ZoneInfo
 
 import aiohttp
 from aiohttp import web
@@ -58,6 +55,7 @@ from telegram import (
 from telegram.ext import (
     Application,
     CommandHandler,
+    CallbackQueryHandler,
     ContextTypes,
 )
 
@@ -97,6 +95,7 @@ ADMIN_CHAT_ID = int(
     )
 )
 
+# /davet yazıldığında kullanılacak varsayılan süre
 VIP_DAYS = int(
     os.environ.get(
         "VIP_DAYS",
@@ -105,6 +104,13 @@ VIP_DAYS = int(
 )
 
 TARGET_CHAT_ID = -1004421946217
+
+# Türkiye saati
+TURKEY_TZ = ZoneInfo("Europe/Istanbul")
+
+# Günlük VIP rapor saati
+VIP_REPORT_HOUR = 9
+VIP_REPORT_MINUTE = 0
 
 
 # ============================================================
@@ -140,13 +146,6 @@ processed_messages = set()
 last_event_notification = {}
 USER_SETTINGS_CACHE = {}
 
-
-# ============================================================
-# GLOBAL
-# ============================================================
-
-http_session = None
-
 telegram_queue = asyncio.PriorityQueue()
 telegram_send_lock = asyncio.Lock()
 
@@ -154,6 +153,8 @@ last_telegram_send = 0.0
 telegram_retry_until = 0.0
 
 queue_counter = 0
+
+http_session = None
 
 
 # ============================================================
@@ -192,9 +193,29 @@ def init_db():
             created_at INTEGER NOT NULL,
             expires_at INTEGER NOT NULL,
             used INTEGER DEFAULT 0,
-            used_by INTEGER DEFAULT NULL
+            used_by INTEGER DEFAULT NULL,
+            duration_days INTEGER DEFAULT 30
         )
     """)
+
+    # Eski radar.db kullanılıyorsa duration_days sütununu ekle
+    cur.execute(
+        "PRAGMA table_info(invite_tokens)"
+    )
+
+    columns = [
+        row[1]
+        for row in cur.fetchall()
+    ]
+
+    if "duration_days" not in columns:
+        try:
+            cur.execute("""
+                ALTER TABLE invite_tokens
+                ADD COLUMN duration_days INTEGER DEFAULT 30
+            """)
+        except Exception:
+            pass
 
     cur.execute("""
         CREATE TABLE IF NOT EXISTS radar_history (
@@ -236,18 +257,69 @@ def init_db():
 
 
 # ============================================================
+# YARDIMCI
+# ============================================================
+
+def safe_int(value, default=0):
+
+    try:
+
+        if value is None:
+            return default
+
+        return int(float(value))
+
+    except Exception:
+
+        return default
+
+
+def safe_float(value, default=0):
+
+    try:
+        return float(value)
+    except Exception:
+        return default
+
+
+def normalize_username(username):
+
+    if not username:
+        return ""
+
+    username = str(username).strip()
+
+    if username.startswith("@"):
+        username = username[1:]
+
+    return username.lower()
+
+
+# ============================================================
 # VIP
 # ============================================================
 
-def add_vip(user_id, username="", first_name=""):
+def add_vip(
+    user_id,
+    username="",
+    first_name="",
+    days=None
+):
+
+    if days is None:
+        days = VIP_DAYS
+
+    days = safe_int(days)
+
+    if days <= 0:
+        days = VIP_DAYS
 
     now = int(time.time())
-    expires = now + VIP_DAYS * 86400
+    expires = now + days * 86400
 
     conn = db()
-    cur = conn.cursor()
 
-    cur.execute("""
+    conn.execute("""
         INSERT INTO vip_users
         (
             user_id,
@@ -293,23 +365,15 @@ def get_vip(user_id):
     """, (user_id,))
 
     row = cur.fetchone()
+
     conn.close()
 
     if not row:
         return None
 
+    # Süresi geçmişse VIP olarak kabul edilmez.
+    # Silme işlemini background cleanup yapar.
     if int(row[3]) <= int(time.time()):
-
-        conn = db()
-
-        conn.execute(
-            "DELETE FROM vip_users WHERE user_id=?",
-            (user_id,)
-        )
-
-        conn.commit()
-        conn.close()
-
         return None
 
     return {
@@ -363,9 +427,16 @@ def extend_vip(user_id, days):
     now = int(time.time())
     old_expire = int(row[0])
 
-    base = max(now, old_expire)
+    base = max(
+        now,
+        old_expire
+    )
 
-    new_expire = base + days * 86400
+    new_expire = (
+        base
+        +
+        days * 86400
+    )
 
     cur.execute("""
         UPDATE vip_users
@@ -396,9 +467,12 @@ def list_vips():
         FROM vip_users
         WHERE expires_at > ?
         ORDER BY expires_at ASC
-    """, (int(time.time()),))
+    """, (
+        int(time.time()),
+    ))
 
     rows = cur.fetchall()
+
     conn.close()
 
     return rows
@@ -412,12 +486,19 @@ def format_remaining(expires_at):
 
     remaining = max(
         0,
-        safe_int(expires_at) - int(time.time())
+        safe_int(expires_at)
+        -
+        int(time.time())
     )
 
     days = remaining // 86400
-    hours = (remaining % 86400) // 3600
-    minutes = (remaining % 3600) // 60
+    hours = (
+        remaining % 86400
+    ) // 3600
+
+    minutes = (
+        remaining % 3600
+    ) // 60
 
     return (
         f"{days} gün "
@@ -426,15 +507,177 @@ def format_remaining(expires_at):
     )
 
 
+def format_remaining_days(expires_at):
+
+    remaining = max(
+        0,
+        safe_int(expires_at)
+        -
+        int(time.time())
+    )
+
+    days = remaining // 86400
+
+    return f"{days} gün"
+
+
+# ============================================================
+# VIP SÜRESİ BİTENLER
+# ============================================================
+
+async def notify_vip_removed(user_id):
+
+    ok, _ = await telegram_api(
+        "sendMessage",
+        {
+            "chat_id":
+                user_id,
+
+            "text":
+                (
+                    "🔒 VIP ERİŞİMİN SONA ERDİ.\n\n"
+                    "⏰ VIP süren doldu.\n"
+                    "❌ Ödül Avcısı VIP radarına "
+                    "erişimin otomatik olarak kapatıldı."
+                ),
+
+            "disable_web_page_preview":
+                True
+        }
+    )
+
+    return ok
+
+
+def get_expired_vips():
+
+    now = int(time.time())
+
+    conn = db()
+    cur = conn.cursor()
+
+    cur.execute("""
+        SELECT
+            user_id,
+            username,
+            first_name,
+            expires_at
+        FROM vip_users
+        WHERE expires_at <= ?
+        ORDER BY expires_at ASC
+    """, (now,))
+
+    rows = cur.fetchall()
+
+    conn.close()
+
+    return rows
+
+
+async def cleanup_expired_vips():
+
+    expired = get_expired_vips()
+
+    if not expired:
+        return
+
+    for row in expired:
+
+        user_id = row[0]
+
+        try:
+
+            removed = remove_vip(
+                user_id
+            )
+
+            if removed:
+
+                print(
+                    "[VIP SÜRESİ BİTTİ]",
+                    user_id
+                )
+
+                try:
+
+                    await notify_vip_removed(
+                        user_id
+                    )
+
+                except Exception as e:
+
+                    print(
+                        "[VIP BİTİŞ BİLDİRİM HATASI]",
+                        user_id,
+                        repr(e)
+                    )
+
+                try:
+
+                    await send_admin(
+                        "⏰ VIP SÜRESİ BİTTİ\n"
+                        "━━━━━━━━━━━━━━━━━━\n\n"
+                        f"👤 {row[2] or '-'}\n"
+                        f"📱 @{row[1] or 'yok'}\n"
+                        f"🆔 {user_id}\n\n"
+                        "❌ VIP erişimi otomatik olarak "
+                        "kapatıldı."
+                    )
+
+                except Exception as e:
+
+                    print(
+                        "[ADMIN VIP BİTİŞ HATASI]",
+                        repr(e)
+                    )
+
+        except Exception as e:
+
+            print(
+                "[VIP TEMİZLEME HATASI]",
+                user_id,
+                repr(e)
+            )
+
+
+async def vip_expiry_loop():
+
+    while True:
+
+        try:
+
+            await cleanup_expired_vips()
+
+        except Exception as e:
+
+            print(
+                "[VIP EXPIRY LOOP HATASI]",
+                repr(e)
+            )
+
+        # Her dakika kontrol
+        await asyncio.sleep(60)
+
+
 # ============================================================
 # DAVET
 # ============================================================
 
-def create_invite():
+def create_invite(days=None):
+
+    if days is None:
+        days = VIP_DAYS
+
+    days = safe_int(days)
+
+    if days <= 0:
+        days = VIP_DAYS
 
     token = secrets.token_urlsafe(24)
 
     now = int(time.time())
+
+    # Davet linkinin kendisi 24 saat geçerli
     expires = now + 24 * 3600
 
     conn = db()
@@ -445,19 +688,21 @@ def create_invite():
             token,
             created_at,
             expires_at,
-            used
+            used,
+            duration_days
         )
-        VALUES (?, ?, ?, 0)
+        VALUES (?, ?, ?, 0, ?)
     """, (
         token,
         now,
-        expires
+        expires,
+        days
     ))
 
     conn.commit()
     conn.close()
 
-    return token
+    return token, days
 
 
 def use_invite(token, user):
@@ -472,7 +717,8 @@ def use_invite(token, user):
         SELECT
             token,
             expires_at,
-            used
+            used,
+            duration_days
         FROM invite_tokens
         WHERE token=?
     """, (token,))
@@ -490,6 +736,14 @@ def use_invite(token, user):
     if int(row[1]) <= int(time.time()):
         conn.close()
         return False
+
+    duration_days = safe_int(
+        row[3],
+        VIP_DAYS
+    )
+
+    if duration_days <= 0:
+        duration_days = VIP_DAYS
 
     cur.execute("""
         UPDATE invite_tokens
@@ -512,7 +766,12 @@ def use_invite(token, user):
         return False
 
     now = int(time.time())
-    expires = now + VIP_DAYS * 86400
+
+    expires = (
+        now
+        +
+        duration_days * 86400
+    )
 
     cur.execute("""
         INSERT INTO vip_users
@@ -541,47 +800,7 @@ def use_invite(token, user):
     conn.commit()
     conn.close()
 
-    return True
-
-
-# ============================================================
-# YARDIMCI
-# ============================================================
-
-def safe_int(value, default=0):
-
-    try:
-
-        if value is None:
-            return default
-
-        return int(float(value))
-
-    except Exception:
-
-        return default
-
-
-def safe_float(value, default=0):
-
-    try:
-        return float(value)
-
-    except Exception:
-        return default
-
-
-def normalize_username(username):
-
-    if not username:
-        return ""
-
-    username = str(username).strip()
-
-    if username.startswith("@"):
-        username = username[1:]
-
-    return username.lower()
+    return True, duration_days
 
 
 # ============================================================
@@ -607,15 +826,23 @@ def get_user_settings(user_id):
     """, (user_id,))
 
     row = cur.fetchone()
+
     conn.close()
 
     if row:
 
         result = {
-            "alarm_coins": safe_int(row[0]),
-            "alarm_people": safe_int(row[1]),
-            "mute_goody": bool(row[2]),
-            "mute_chest": bool(row[3]),
+            "alarm_coins":
+                safe_int(row[0]),
+
+            "alarm_people":
+                safe_int(row[1]),
+
+            "mute_goody":
+                bool(row[2]),
+
+            "mute_chest":
+                bool(row[3]),
         }
 
     else:
@@ -632,9 +859,15 @@ def get_user_settings(user_id):
     return result
 
 
-def save_user_settings(user_id, **kwargs):
+def save_user_settings(
+    user_id,
+    **kwargs
+):
 
-    current = get_user_settings(user_id)
+    current = get_user_settings(
+        user_id
+    )
+
     current.update(kwargs)
 
     conn = db()
@@ -672,10 +905,6 @@ def save_user_settings(user_id, **kwargs):
     return current
 
 
-# ============================================================
-# KİŞİSEL ALARM KULLANICILARI
-# ============================================================
-
 def get_personal_alarm_users():
 
     now = int(time.time())
@@ -698,6 +927,7 @@ def get_personal_alarm_users():
     """, (now,))
 
     rows = cur.fetchall()
+
     conn.close()
 
     return rows
@@ -709,12 +939,15 @@ def get_personal_alarm_users():
 
 def add_follow(user_id, username):
 
-    username = normalize_username(username)
+    username = normalize_username(
+        username
+    )
 
     if not username:
         return False
 
     conn = db()
+
     cur = conn.cursor()
 
     cur.execute("""
@@ -741,9 +974,12 @@ def add_follow(user_id, username):
 
 def remove_follow(user_id, username):
 
-    username = normalize_username(username)
+    username = normalize_username(
+        username
+    )
 
     conn = db()
+
     cur = conn.cursor()
 
     cur.execute("""
@@ -788,7 +1024,9 @@ def get_follows(user_id):
 
 def get_followers(username):
 
-    username = normalize_username(username)
+    username = normalize_username(
+        username
+    )
 
     if not username:
         return []
@@ -819,11 +1057,8 @@ def get_followers(username):
 def extract_token_from_event(event):
 
     try:
-
         text = event.message.raw_text or ""
-
     except Exception:
-
         return None
 
     patterns = [
@@ -840,11 +1075,16 @@ def extract_token_from_event(event):
         )
 
         if m:
-            return unquote(m.group(1))
+            return unquote(
+                m.group(1)
+            )
 
     try:
 
-        for entity in event.message.entities or []:
+        for entity in (
+            event.message.entities
+            or []
+        ):
 
             url = getattr(
                 entity,
@@ -862,14 +1102,18 @@ def extract_token_from_event(event):
             )
 
             if m:
-                return unquote(m.group(1))
+                return unquote(
+                    m.group(1)
+                )
 
     except Exception:
         pass
 
     try:
 
-        for entity, _ in event.message.get_entities_text():
+        for entity, _ in (
+            event.message.get_entities_text()
+        ):
 
             url = getattr(
                 entity,
@@ -887,7 +1131,9 @@ def extract_token_from_event(event):
             )
 
             if m:
-                return unquote(m.group(1))
+                return unquote(
+                    m.group(1)
+                )
 
     except Exception:
         pass
@@ -906,7 +1152,9 @@ def decode_token(token):
             str(token)
         ).strip()
 
-        padding = "=" * (-len(token) % 4)
+        padding = "=" * (
+            -len(token) % 4
+        )
 
         decoded = base64.urlsafe_b64decode(
             token + padding
@@ -958,7 +1206,10 @@ def extract_p_room(text):
         try:
 
             encoded = m.group(1)
-            padding = "=" * (-len(encoded) % 4)
+
+            padding = "=" * (
+                -len(encoded) % 4
+            )
 
             room = base64.urlsafe_b64decode(
                 encoded + padding
@@ -1008,7 +1259,10 @@ def extract_username_from_text(text):
 # COIN
 # ============================================================
 
-def extract_coins(text, token_data=None):
+def extract_coins(
+    text,
+    token_data=None
+):
 
     if text:
 
@@ -1027,7 +1281,9 @@ def extract_coins(text, token_data=None):
             )
 
             if m:
-                return safe_int(m.group(1))
+                return safe_int(
+                    m.group(1)
+                )
 
     if token_data:
 
@@ -1075,7 +1331,9 @@ def extract_people(text):
         )
 
         if m:
-            return safe_int(m.group(1))
+            return safe_int(
+                m.group(1)
+            )
 
     m = re.search(
         r'(\d+)\s*/\s*(\d+)',
@@ -1083,7 +1341,9 @@ def extract_people(text):
     )
 
     if m:
-        return safe_int(m.group(2))
+        return safe_int(
+            m.group(2)
+        )
 
     return 0
 
@@ -1112,7 +1372,9 @@ def extract_joined(text):
         )
 
         if m:
-            return safe_int(m.group(1))
+            return safe_int(
+                m.group(1)
+            )
 
     return 0
 
@@ -1131,14 +1393,21 @@ def extract_viewers(text):
         text
     )
 
-    return safe_int(m.group(1)) if m else 0
+    return (
+        safe_int(m.group(1))
+        if m
+        else 0
+    )
 
 
 # ============================================================
 # RATE
 # ============================================================
 
-def extract_rate(text, token_data=None):
+def extract_rate(
+    text,
+    token_data=None
+):
 
     if text:
 
@@ -1149,7 +1418,9 @@ def extract_rate(text, token_data=None):
         )
 
         if m:
-            return safe_float(m.group(1))
+            return safe_float(
+                m.group(1)
+            )
 
     if token_data:
 
@@ -1171,9 +1442,14 @@ def extract_rate(text, token_data=None):
 # TYPE
 # ============================================================
 
-def detect_type(text, token_data):
+def detect_type(
+    text,
+    token_data
+):
 
-    upper = (text or "").upper()
+    upper = (
+        text or ""
+    ).upper()
 
     if re.search(
         r'TÚI|TUI',
@@ -1227,7 +1503,10 @@ def detect_type(text, token_data):
 # TARGET TIME
 # ============================================================
 
-def calculate_target_time(text, token_data=None):
+def calculate_target_time(
+    text,
+    token_data=None
+):
 
     now = int(time.time())
 
@@ -1240,14 +1519,18 @@ def calculate_target_time(text, token_data=None):
             "endTime"
         ]:
 
-            value = token_data.get(key)
+            value = token_data.get(
+                key
+            )
 
             if value is None:
                 continue
 
             try:
 
-                value = int(float(value))
+                value = int(
+                    float(value)
+                )
 
                 if value > 10_000_000_000:
                     return value // 1000
@@ -1255,7 +1538,13 @@ def calculate_target_time(text, token_data=None):
                 if value > 1_000_000_000:
                     return value
 
-                if 0 < value < 86400:
+                if (
+                    0
+                    <
+                    value
+                    <
+                    86400
+                ):
                     return now + value
 
             except Exception:
@@ -1272,7 +1561,9 @@ def calculate_target_time(text, token_data=None):
         if m:
 
             duration = (
-                safe_int(m.group(1)) * 60
+                safe_int(m.group(1))
+                *
+                60
                 +
                 safe_int(m.group(2))
             )
@@ -1302,7 +1593,9 @@ def get_live_link(
             "url"
         ]:
 
-            value = token_data.get(key)
+            value = token_data.get(
+                key
+            )
 
             if (
                 value
@@ -1332,11 +1625,18 @@ def get_live_link(
 
 def parse_source_message(event):
 
-    text = event.message.raw_text or ""
+    text = (
+        event.message.raw_text
+        or ""
+    )
 
-    token = extract_token_from_event(event)
+    token = extract_token_from_event(
+        event
+    )
 
-    token_data = decode_token(token)
+    token_data = decode_token(
+        token
+    )
 
     is_goody = detect_type(
         text,
@@ -1367,7 +1667,9 @@ def parse_source_message(event):
 
     username = (
         username
-        or extract_username_from_text(text)
+        or extract_username_from_text(
+            text
+        )
         or "bilinmiyor"
     )
 
@@ -1402,7 +1704,9 @@ def parse_source_message(event):
         token_data
     )
 
-    people = extract_people(text)
+    people = extract_people(
+        text
+    )
 
     if not people and token_data:
 
@@ -1422,7 +1726,9 @@ def parse_source_message(event):
                 if people:
                     break
 
-    joined = extract_joined(text)
+    joined = extract_joined(
+        text
+    )
 
     if not joined and token_data:
 
@@ -1447,7 +1753,9 @@ def parse_source_message(event):
         token_data
     )
 
-    viewers = extract_viewers(text)
+    viewers = extract_viewers(
+        text
+    )
 
     if not viewers and token_data:
 
@@ -1687,12 +1995,16 @@ async def telegram_api(
 
                     text = await response.text()
 
-                    last_telegram_send = time.monotonic()
+                    last_telegram_send = (
+                        time.monotonic()
+                    )
 
                     if response.status == 200:
 
                         try:
-                            result = json.loads(text)
+                            result = json.loads(
+                                text
+                            )
                         except Exception:
                             result = None
 
@@ -1702,7 +2014,9 @@ async def telegram_api(
 
                         try:
 
-                            result = json.loads(text)
+                            result = json.loads(
+                                text
+                            )
 
                             retry_after = safe_int(
                                 result.get(
@@ -1777,7 +2091,7 @@ async def telegram_api(
 
 
 # ============================================================
-# NORMAL RADAR MESAJI
+# NORMAL RADAR
 # ============================================================
 
 async def send_telegram_message(data):
@@ -1788,7 +2102,9 @@ async def send_telegram_message(data):
         else "🟨 HAZİNE SANDIĞI"
     )
 
-    alarm = is_smart_alarm(data)
+    alarm = is_smart_alarm(
+        data
+    )
 
     if alarm:
 
@@ -1856,15 +2172,11 @@ async def send_personal_alarm(
 ):
 
     coin_limit = safe_int(
-        settings.get(
-            "alarm_coins"
-        )
+        settings.get("alarm_coins")
     )
 
     people_limit = safe_int(
-        settings.get(
-            "alarm_people"
-        )
+        settings.get("alarm_people")
     )
 
     if coin_limit <= 0:
@@ -1893,28 +2205,20 @@ async def send_personal_alarm(
 
     text = (
         "🎯 KİŞİSEL ALARM\n\n"
-
         f"👤 Kullanıcı: "
         f"{data['username']}\n"
-
         f"🎁 Tür: "
         f"{data['box_name']}\n"
-
         f"🪙 Coin: "
         f"{data['coins']}\n"
-
         f"👥 Kişi: "
         f"{data['people']}\n"
-
         f"🙋 Katılan: "
         f"{data['joined']}\n"
-
         f"📈 Oran: "
         f"{data['rate']}\n"
-
         f"👀 İzlenme: "
         f"{data['view']}\n"
-
         "\n🚨 Ayarladığın alarma uyuyor!"
     )
 
@@ -1960,38 +2264,40 @@ async def send_follow_notifications(data):
     if not username:
         return
 
-    followers = get_followers(username)
+    followers = get_followers(
+        username
+    )
 
     for user_id in followers:
 
         if not get_vip(user_id):
             continue
 
-        settings = get_user_settings(user_id)
+        settings = get_user_settings(
+            user_id
+        )
 
-        if data["type"] == "GOODY BAG":
+        if (
+            data["type"] == "GOODY BAG"
+            and
+            settings["mute_goody"]
+        ):
+            continue
 
-            if settings["mute_goody"]:
-                continue
-
-        if data["type"] == "CHEST":
-
-            if settings["mute_chest"]:
-                continue
+        if (
+            data["type"] == "CHEST"
+            and
+            settings["mute_chest"]
+        ):
+            continue
 
         text = (
             "👤 TAKİP ETTİĞİN YAYINCI\n\n"
-
             f"👤 @{username}\n"
-
             f"🎁 {data['box_name']}\n"
-
             f"🪙 Coin: {data['coins']}\n"
-
             f"👥 Kişi: {data['people']}\n"
-
             f"🙋 Katılan: {data['joined']}\n"
-
             f"📈 Oran: {data['rate']}\n"
         )
 
@@ -2030,7 +2336,7 @@ async def send_follow_notifications(data):
 
 
 # ============================================================
-# YENİ OLAY BİLDİRİMİ
+# OLAY BİLDİRİMİ
 # ============================================================
 
 async def notify_event(data):
@@ -2063,11 +2369,15 @@ async def notify_event(data):
 
         last_event_notification[room] = now
 
-    await send_telegram_message(data)
+    await send_telegram_message(
+        data
+    )
 
     try:
 
-        personal_users = get_personal_alarm_users()
+        personal_users = (
+            get_personal_alarm_users()
+        )
 
         for (
             user_id,
@@ -2108,7 +2418,9 @@ async def notify_event(data):
 
     try:
 
-        await send_follow_notifications(data)
+        await send_follow_notifications(
+            data
+        )
 
     except Exception as e:
 
@@ -2132,7 +2444,9 @@ async def telegram_sender():
 
         try:
 
-            await notify_event(data)
+            await notify_event(
+                data
+            )
 
         except Exception as e:
 
@@ -2173,11 +2487,7 @@ async def send_admin(text):
 
 
 # ============================================================
-# ADMIN YETKİ RAPORU
-#
-# BURASI ÖNEMLİ:
-# VIP'in yetkileri değil ADMIN'in yetkileri gösterilir.
-# Mini App linki burada YOK.
+# ADMIN VIP YETKİ RAPORU
 # ============================================================
 
 def build_vip_admin_report(
@@ -2194,10 +2504,15 @@ def build_vip_admin_report(
         "━━━━━━━━━━━━━━━━━━\n\n"
 
         "👤 VIP ÜYE BİLGİLERİ\n"
-        f"• Ad: {vip.get('first_name') or '-'}\n"
+        f"• Ad: "
+        f"{vip.get('first_name') or '-'}\n"
+
         f"• Kullanıcı adı: "
         f"@{vip.get('username') or 'yok'}\n"
-        f"• Telegram ID: {vip.get('user_id')}\n"
+
+        f"• Telegram ID: "
+        f"{vip.get('user_id')}\n"
+
         f"• Kalan VIP: "
         f"{format_remaining(vip['expires_at'])}\n\n"
 
@@ -2205,17 +2520,17 @@ def build_vip_admin_report(
         "━━━━━━━━━━━━━━━━━━\n"
 
         "👑 VIP YÖNETİMİ\n"
-        "• /davet — VIP davet linki oluşturma\n"
-        "• /uyeler — Aktif VIP üyeleri görüntüleme\n"
-        "• /vipbilgi ID — VIP bilgilerini görüntüleme\n"
-        "• /uzatvip ID gün — VIP süresini uzatma\n"
-        "• /silvip ID — VIP erişimini kaldırma\n\n"
+        "• /davet — VIP davet oluşturma\n"
+        "• /uyeler — VIP üyeleri görüntüleme\n"
+        "• /vipbilgi ID — VIP bilgisi\n"
+        "• /uzatvip ID gün — VIP uzatma\n"
+        "• /silvip ID — VIP silme\n\n"
 
         "🌐 RADAR YÖNETİMİ\n"
         "• 🟪 Goody Bag radarını yönetme\n"
         "• 🟨 Hazine Sandığı radarını yönetme\n"
         "• 🔎 Radar verilerini görüntüleme\n"
-        "• 🎛 Radar arama ve filtrelerini kullanma\n\n"
+        "• 🎛 Arama ve filtreler\n\n"
 
         "👥 VIP SİSTEMİ\n"
         "• VIP üyeleri yönetme\n"
@@ -2227,7 +2542,7 @@ def build_vip_admin_report(
         "• VIP aktivasyon bildirimleri\n"
         "• VIP süre uzatma bildirimleri\n"
         "• VIP silme bildirimleri\n"
-        "• Admin VIP durum raporları\n\n"
+        "• Günlük VIP raporları\n\n"
 
         "🔐 ADMIN KOMUTLARI\n"
         "• /davet\n"
@@ -2257,41 +2572,152 @@ async def notify_admin_vip(
     if not report:
         return False
 
-    return await send_admin(report)
-
-
-# ============================================================
-# VIP SİLİNDİ
-# ============================================================
-
-async def notify_vip_removed(user_id):
-
-    ok, _ = await telegram_api(
-        "sendMessage",
-        {
-            "chat_id":
-                user_id,
-
-            "text":
-                (
-                    "🔒 VIP erişimin sonlandırıldı.\n\n"
-                    "Ödül Avcısı VIP radarına "
-                    "erişimin kapatıldı."
-                ),
-
-            "disable_web_page_preview":
-                True
-        }
+    return await send_admin(
+        report
     )
 
-    return ok
+
+# ============================================================
+# GÜNLÜK VIP RAPORU
+#
+# SADECE KALAN GÜN GÖSTERİLİR.
+# Alarm / takip / sessiz ayarları YOK.
+# ============================================================
+
+def build_daily_vip_report():
+
+    rows = list_vips()
+
+    if not rows:
+
+        return (
+            "👑 GÜNLÜK VIP RAPORU\n"
+            "━━━━━━━━━━━━━━━━━━\n\n"
+            "📭 Aktif VIP üye yok."
+        )
+
+    lines = [
+        "👑 GÜNLÜK VIP RAPORU",
+        "━━━━━━━━━━━━━━━━━━",
+        ""
+    ]
+
+    for row in rows:
+
+        user_id = row[0]
+        username = row[1]
+        first_name = row[2]
+        expires_at = row[3]
+
+        name = (
+            first_name
+            or username
+            or "Bilinmiyor"
+        )
+
+        # Günlük raporda SADECE gün bilgisi
+        remaining = format_remaining_days(
+            expires_at
+        )
+
+        lines.extend([
+            f"👤 {name}",
+            f"📱 @{username or 'yok'}",
+            f"🆔 {user_id}",
+            f"⏳ Kalan: {remaining}",
+            ""
+        ])
+
+    return "\n".join(lines)
+
+
+async def send_daily_vip_report():
+
+    try:
+
+        # Önce süresi bitenleri temizle
+        await cleanup_expired_vips()
+
+        report = build_daily_vip_report()
+
+        await send_admin(
+            report
+        )
+
+        print(
+            "[VIP RAPOR] Günlük VIP raporu gönderildi."
+        )
+
+    except Exception as e:
+
+        print(
+            "[GÜNLÜK VIP RAPOR HATASI]",
+            repr(e)
+        )
+
+
+async def daily_vip_report_loop():
+
+    while True:
+
+        try:
+
+            now = datetime.now(
+                TURKEY_TZ
+            )
+
+            target = now.replace(
+                hour=VIP_REPORT_HOUR,
+                minute=VIP_REPORT_MINUTE,
+                second=0,
+                microsecond=0
+            )
+
+            if target <= now:
+
+                target += timedelta(
+                    days=1
+                )
+
+            wait_seconds = (
+                target - now
+            ).total_seconds()
+
+            print(
+                "[VIP RAPOR]",
+                f"Sonraki rapor: {target.isoformat()}",
+                f"| {int(wait_seconds)} saniye"
+            )
+
+            await asyncio.sleep(
+                max(
+                    1,
+                    wait_seconds
+                )
+            )
+
+            await send_daily_vip_report()
+
+        except Exception as e:
+
+            print(
+                "[GÜNLÜK RAPOR LOOP HATASI]",
+                repr(e)
+            )
+
+            # Hata olursa loop tamamen ölmesin
+            await asyncio.sleep(
+                60
+            )
 
 
 # ============================================================
 # MINI APP AUTH
 # ============================================================
 
-def validate_telegram_init_data(init_data):
+def validate_telegram_init_data(
+    init_data
+):
 
     if not init_data:
         return None
@@ -2352,12 +2778,16 @@ def validate_telegram_init_data(init_data):
         ):
             return None
 
-        user_json = data.get("user")
+        user_json = data.get(
+            "user"
+        )
 
         if not user_json:
             return None
 
-        user = json.loads(user_json)
+        user = json.loads(
+            user_json
+        )
 
         return user
 
@@ -2367,12 +2797,11 @@ def validate_telegram_init_data(init_data):
 
 
 # ============================================================
-# MINI APP HTML
+# MINI APP
 # ============================================================
 
 MINI_APP_HTML = r"""
 <!DOCTYPE html>
-
 <html lang="tr">
 
 <head>
@@ -2488,8 +2917,7 @@ body{
 }
 
 .latest-card.alarm{
- box-shadow:
- 0 0 15px rgba(255,70,70,.35);
+ box-shadow:0 0 15px rgba(255,70,70,.35);
  border-color:#ff4545;
 }
 
@@ -3021,8 +3449,6 @@ const seenChest = new Set();
 const newGoody = new Set();
 const newChest = new Set();
 
-let latestKey = null;
-
 
 function escapeHtml(value){
 
@@ -3110,7 +3536,7 @@ function isAlarm(item){
 
 /* =========================================================
    KULLANICI ADI KOPYALAMA
-   @username olarak kopyalar
+   @username kopyalar
    ========================================================= */
 
 async function copyUsername(username, el){
@@ -3277,7 +3703,8 @@ function detectNewItems(
 
  items.forEach(item=>{
 
-  const key = itemKey(item);
+  const key =
+   itemKey(item);
 
   if(!key)
    return;
@@ -3304,7 +3731,9 @@ function detectNewItems(
 function renderLatest(){
 
  const container =
-  document.getElementById("latest");
+  document.getElementById(
+   "latest"
+  );
 
  const all = [
 
@@ -3332,20 +3761,21 @@ function renderLatest(){
 
  }
 
- const item = all[0];
-
- const key = itemKey(item);
-
- latestKey = key;
+ const item =
+  all[0];
 
  const isGoody =
   item._type === "GOODY";
 
  const icon =
-  isGoody ? "🟪" : "🟨";
+  isGoody
+  ? "🟪"
+  : "🟨";
 
  const cls =
-  isGoody ? "goody" : "chest";
+  isGoody
+  ? "goody"
+  : "chest";
 
  const alarm =
   isAlarm(item);
@@ -3434,10 +3864,14 @@ function renderItems(
 ){
 
  const container =
-  document.getElementById(elementId);
+  document.getElementById(
+   elementId
+  );
 
  const counter =
-  document.getElementById(counterId);
+  document.getElementById(
+   counterId
+  );
 
  const items =
   filterItems(
@@ -3695,7 +4129,9 @@ async function loadRadar(){
 
   if(!response.ok){
 
-   if(response.status === 401){
+   if(
+    response.status === 401
+   ){
 
     throw new Error(
      "VIP erişimi gerekli"
@@ -3727,7 +4163,9 @@ async function loadRadar(){
   };
 
   const status =
-   document.getElementById("status");
+   document.getElementById(
+    "status"
+   );
 
   status.className =
    "status";
@@ -3748,7 +4186,9 @@ async function loadRadar(){
   );
 
   const status =
-   document.getElementById("status");
+   document.getElementById(
+    "status"
+   );
 
   status.className =
    "status error";
@@ -3789,10 +4229,14 @@ document
     document
      .querySelectorAll(".filter")
      .forEach(x=>
-      x.classList.remove("active")
+      x.classList.remove(
+       "active"
+      )
      );
 
-    this.classList.add("active");
+    this.classList.add(
+     "active"
+    );
 
     activeFilter =
      this.dataset.filter;
@@ -3815,7 +4259,6 @@ loadRadar();
 </script>
 
 </body>
-
 </html>
 """
 
@@ -3868,7 +4311,9 @@ async def cors_middleware(
             }
         )
 
-    response = await handler(request)
+    response = await handler(
+        request
+    )
 
     response.headers[
         "Access-Control-Allow-Origin"
@@ -3979,7 +4424,9 @@ async def api_miniapp_data(request):
         user.get("id")
     )
 
-    vip = get_vip(user_id)
+    vip = get_vip(
+        user_id
+    )
 
     if not vip:
 
@@ -4083,7 +4530,9 @@ async def start_http_server():
         api_miniapp_data
     )
 
-    runner = web.AppRunner(app)
+    runner = web.AppRunner(
+        app
+    )
 
     await runner.setup()
 
@@ -4125,9 +4574,6 @@ def vip_keyboard():
 
 # ============================================================
 # VIP YETKİLERİ
-#
-# BU BÖLÜM VIP KULLANICIYA GİDEN /start MESAJI İÇİNDİR.
-# Admin raporuyla karıştırılmaz.
 # ============================================================
 
 def vip_permissions_text(vip):
@@ -4147,19 +4593,24 @@ def vip_permissions_text(vip):
     if settings["alarm_coins"] > 0:
 
         alarm_text = (
-            f"🟢 {settings['alarm_coins']}+ coin / "
-            f"{settings['alarm_people']} veya daha az kişi"
+            f"🟢 "
+            f"{settings['alarm_coins']}+ coin / "
+            f"{settings['alarm_people']} "
+            f"veya daha az kişi"
         )
 
     else:
 
-        alarm_text = "🔴 Kişisel alarm kapalı"
+        alarm_text = (
+            "🔴 Kişisel alarm kapalı"
+        )
 
     return (
 
         "👑 VIP ERİŞİMİN AKTİF\n\n"
 
-        f"⏳ Kalan süre: {remaining}\n\n"
+        f"⏳ Kalan süre: "
+        f"{remaining}\n\n"
 
         "🌐 VIP RADAR\n"
         "• Canlı Goody Bag radarı\n"
@@ -4170,7 +4621,8 @@ def vip_permissions_text(vip):
         f"• {alarm_text}\n\n"
 
         "👤 YAYINCI TAKİP\n"
-        f"• Takip edilen: {len(follows)} yayıncı\n"
+        f"• Takip edilen: "
+        f"{len(follows)} yayıncı\n"
         "• Takip ettiğin yayıncı yakalanınca "
         "özel mesaj alırsın.\n\n"
 
@@ -4203,16 +4655,16 @@ async def start_cmd(
     if not user:
         return
 
-    vip = get_vip(user.id)
+    # Önce mevcut VIP kontrolü
+    vip = get_vip(
+        user.id
+    )
 
     if vip:
 
         await update.message.reply_text(
-
             vip_permissions_text(vip),
-
             reply_markup=vip_keyboard()
-
         )
 
         return
@@ -4229,7 +4681,9 @@ async def start_cmd(
 
         value = args[0]
 
-        if value.startswith("invite_"):
+        if value.startswith(
+            "invite_"
+        ):
 
             invite_token = value[
                 len("invite_"):
@@ -4237,37 +4691,42 @@ async def start_cmd(
 
     if invite_token:
 
-        success = use_invite(
+        result = use_invite(
             invite_token,
             user
         )
 
-        if success:
+        if result:
 
-            vip = get_vip(user.id)
+            _, duration_days = result
+
+            vip = get_vip(
+                user.id
+            )
 
             await update.message.reply_text(
 
                 "🎉 HOŞ GELDİN!\n\n"
 
-                "✅ VIP erişimin açıldı.\n\n"
+                f"✅ VIP erişimin açıldı.\n"
+                f"⏳ VIP süresi: "
+                f"{duration_days} gün\n\n"
 
                 +
-                vip_permissions_text(vip),
+                vip_permissions_text(
+                    vip
+                ),
 
                 reply_markup=vip_keyboard()
 
             )
 
-            # =================================================
-            # ADMİNE OTOMATİK VIP YETKİ RAPORU
-            # =================================================
-
             try:
 
                 await notify_admin_vip(
                     vip,
-                    "🎟 YENİ VIP ÜYE"
+                    f"🎟 YENİ VIP ÜYE "
+                    f"({duration_days} GÜN)"
                 )
 
             except Exception as e:
@@ -4294,6 +4753,10 @@ async def start_cmd(
 
 # ============================================================
 # DAVET
+#
+# /davet
+# /davet 7
+# /davet 20 gün
 # ============================================================
 
 async def davet_cmd(
@@ -4314,7 +4777,44 @@ async def davet_cmd(
 
         return
 
-    token = create_invite()
+    days = VIP_DAYS
+
+    if context.args:
+
+        # İlk sayı gün olarak alınır.
+        # /davet 20 gün -> 20
+        # /davet 7 -> 7
+        match = re.search(
+            r"\d+",
+            context.args[0]
+        )
+
+        if not match:
+
+            await update.message.reply_text(
+                "❌ Geçersiz gün.\n\n"
+                "Örnek:\n"
+                "/davet 7\n"
+                "/davet 20 gün"
+            )
+
+            return
+
+        days = safe_int(
+            match.group(0)
+        )
+
+        if days <= 0:
+
+            await update.message.reply_text(
+                "❌ Gün sayısı 0'dan büyük olmalı."
+            )
+
+            return
+
+    token, days = create_invite(
+        days
+    )
 
     link = (
         f"https://t.me/"
@@ -4326,12 +4826,14 @@ async def davet_cmd(
 
         "🎟 VIP DAVET LİNKİ\n\n"
 
-        f"⏳ Süre: {VIP_DAYS} gün\n"
+        f"⏳ VIP erişim süresi: "
+        f"{days} gün\n"
 
         "🔐 Kullanım: Tek kişi\n"
 
         "⏰ Link geçerliliği: 24 saat\n\n"
 
+        "🔗 DAVET LİNKİ:\n"
         f"{link}"
 
     )
@@ -4340,6 +4842,18 @@ async def davet_cmd(
 # ============================================================
 # ÜYELER
 # ============================================================
+
+def vip_delete_keyboard(user_id):
+
+    return InlineKeyboardMarkup(
+        [[
+            InlineKeyboardButton(
+                "🔒 VIP SİL",
+                callback_data=f"silvip:{user_id}"
+            )
+        ]]
+    )
+
 
 async def uyeler_cmd(
     update: Update,
@@ -4359,6 +4873,9 @@ async def uyeler_cmd(
 
         return
 
+    # Önce süresi bitenleri temizle
+    await cleanup_expired_vips()
+
     rows = list_vips()
 
     if not rows:
@@ -4369,10 +4886,10 @@ async def uyeler_cmd(
 
         return
 
-    lines = [
-        "👑 AKTİF VIP ÜYELER",
-        ""
-    ]
+    await update.message.reply_text(
+        "👑 AKTİF VIP ÜYELER\n"
+        "━━━━━━━━━━━━━━━━━━"
+    )
 
     for row in rows:
 
@@ -4381,7 +4898,9 @@ async def uyeler_cmd(
         first_name = row[2]
         expires = row[3]
 
-        remaining = format_remaining(expires)
+        remaining = format_remaining(
+            expires
+        )
 
         name = (
             first_name
@@ -4389,22 +4908,178 @@ async def uyeler_cmd(
             or "Bilinmiyor"
         )
 
-        lines.append(
+        text = (
 
             f"👤 {name}\n"
-            f"🆔 {user_id}\n"
+
             f"📱 @{username or 'yok'}\n"
-            f"⏳ {remaining}\n"
+
+            f"🆔 {user_id}\n"
+
+            f"⏳ Kalan: {remaining}"
 
         )
 
-    await update.message.reply_text(
-        "\n".join(lines)
+        await update.message.reply_text(
+            text,
+            reply_markup=vip_delete_keyboard(
+                user_id
+            )
+        )
+
+
+# ============================================================
+# VIP CALLBACK
+#
+# /uyeler ekranındaki SİL butonu
+# ============================================================
+
+async def vip_callback(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE
+):
+
+    query = update.callback_query
+
+    if not query:
+        return
+
+    await query.answer()
+
+    user = query.from_user
+
+    if not user:
+        return
+
+    if user.id != ADMIN_USER_ID:
+
+        await query.answer(
+            "❌ Yetkin yok.",
+            show_alert=True
+        )
+
+        return
+
+    data = query.data or ""
+
+    if not data.startswith(
+        "silvip:"
+    ):
+        return
+
+    user_id = safe_int(
+        data.split(
+            ":",
+            1
+        )[1]
+    )
+
+    if not user_id:
+
+        await query.answer(
+            "❌ Geçersiz kullanıcı.",
+            show_alert=True
+        )
+
+        return
+
+    old_vip = get_vip(
+        user_id
+    )
+
+    if not old_vip:
+
+        await query.edit_message_text(
+            "ℹ️ Bu VIP üyelik zaten aktif değil."
+        )
+
+        return
+
+    removed = remove_vip(
+        user_id
+    )
+
+    if not removed:
+
+        await query.edit_message_text(
+            "❌ VIP silinemedi."
+        )
+
+        return
+
+    notified = False
+
+    try:
+
+        notified = await notify_vip_removed(
+            user_id
+        )
+
+    except Exception as e:
+
+        print(
+            "[VIP SIL BİLDİRİM HATASI]",
+            repr(e)
+        )
+
+    try:
+
+        await send_admin(
+
+            "🔒 VIP ÜYE SİLİNDİ\n"
+            "━━━━━━━━━━━━━━━━━━\n\n"
+
+            f"👤 "
+            f"{old_vip.get('first_name') or '-'}\n"
+
+            f"📱 @"
+            f"{old_vip.get('username') or 'yok'}\n"
+
+            f"🆔 "
+            f"{old_vip.get('user_id')}\n\n"
+
+            "❌ VIP erişimi kapatıldı."
+
+        )
+
+    except Exception as e:
+
+        print(
+            "[ADMIN VIP SILME HATASI]",
+            repr(e)
+        )
+
+    await query.edit_message_text(
+
+        "🔒 VIP ÜYE SİLİNDİ\n"
+        "━━━━━━━━━━━━━━━━━━\n\n"
+
+        f"👤 "
+        f"{old_vip.get('first_name') or '-'}\n"
+
+        f"📱 @"
+        f"{old_vip.get('username') or 'yok'}\n"
+
+        f"🆔 "
+        f"{old_vip.get('user_id')}\n\n"
+
+        "❌ VIP erişimi kapatıldı.\n"
+
+        +
+        (
+            "📩 Kullanıcıya bildirim gönderildi."
+            if notified
+            else
+            "⚠️ Kullanıcıya bildirim gönderilemedi."
+        )
+
     )
 
 
 # ============================================================
 # SIL VIP
+#
+# Eski /silvip ID komutu da çalışır.
 # ============================================================
 
 async def silvip_cmd(
@@ -4429,7 +5104,10 @@ async def silvip_cmd(
 
         await update.message.reply_text(
             "Kullanım:\n"
-            "/silvip 123456789"
+            "/silvip 123456789\n\n"
+            "Alternatif:\n"
+            "/uyeler komutundaki "
+            "🔒 VIP SİL butonunu kullanabilirsin."
         )
 
         return
@@ -4446,85 +5124,88 @@ async def silvip_cmd(
 
         return
 
-    old_vip = get_vip(user_id)
+    old_vip = get_vip(
+        user_id
+    )
 
-    removed = remove_vip(user_id)
+    removed = remove_vip(
+        user_id
+    )
 
-    if removed:
+    if not removed:
+
+        await update.message.reply_text(
+            "❌ Bu kullanıcı VIP değil."
+        )
+
+        return
+
+    notified = False
+
+    try:
 
         notified = await notify_vip_removed(
             user_id
         )
 
-        try:
+    except Exception as e:
 
-            if old_vip:
+        print(
+            "[VIP SIL BİLDİRİM HATASI]",
+            repr(e)
+        )
 
-                await send_admin(
+    try:
 
-                    "🔒 VIP ÜYE SİLİNDİ\n"
-                    "━━━━━━━━━━━━━━━━━━\n\n"
+        if old_vip:
 
-                    f"👤 "
-                    f"{old_vip.get('first_name') or '-'}\n"
+            await send_admin(
 
-                    f"📱 @"
-                    f"{old_vip.get('username') or 'yok'}\n"
+                "🔒 VIP ÜYE SİLİNDİ\n"
+                "━━━━━━━━━━━━━━━━━━\n\n"
 
-                    f"🆔 "
-                    f"{old_vip.get('user_id')}\n\n"
+                f"👤 "
+                f"{old_vip.get('first_name') or '-'}\n"
 
-                    "❌ VIP erişimi kapatıldı.\n\n"
+                f"📱 @"
+                f"{old_vip.get('username') or 'yok'}\n"
 
-                    "👑 ADMIN YETKİLERİ\n"
-                    "• /davet\n"
-                    "• /uyeler\n"
-                    "• /vipbilgi\n"
-                    "• /uzatvip\n"
-                    "• /silvip"
+                f"🆔 "
+                f"{old_vip.get('user_id')}\n\n"
 
-                )
+                "❌ VIP erişimi kapatıldı."
 
-            else:
-
-                await send_admin(
-
-                    "🔒 VIP ÜYE SİLİNDİ\n\n"
-
-                    f"🆔 {user_id}\n\n"
-
-                    "❌ VIP erişimi kapatıldı."
-
-                )
-
-        except Exception as e:
-
-            print(
-                "[ADMIN VIP SILME HATASI]",
-                repr(e)
-            )
-
-        if notified:
-
-            await update.message.reply_text(
-                "✅ VIP erişim silindi.\n"
-                "📩 Kullanıcıya bildirim gönderildi.\n"
-                "👑 Admin kaydı oluşturuldu."
             )
 
         else:
 
-            await update.message.reply_text(
-                "✅ VIP erişim silindi.\n"
-                "⚠️ Kullanıcıya bildirim gönderilemedi.\n"
-                "👑 Admin kaydı oluşturuldu."
+            await send_admin(
+
+                "🔒 VIP ÜYE SİLİNDİ\n\n"
+                f"🆔 {user_id}\n\n"
+                "❌ VIP erişimi kapatıldı."
+
             )
 
-    else:
+    except Exception as e:
 
-        await update.message.reply_text(
-            "❌ Bu kullanıcı VIP değil."
+        print(
+            "[ADMIN VIP SILME HATASI]",
+            repr(e)
         )
+
+    await update.message.reply_text(
+
+        "✅ VIP erişim silindi.\n"
+        +
+        (
+            "📩 Kullanıcıya bildirim gönderildi."
+            if notified
+            else
+            "⚠️ Kullanıcıya bildirim gönderilemedi."
+        )
+
+    )
 
 
 # ============================================================
@@ -4566,7 +5247,11 @@ async def uzatvip_cmd(
         context.args[1]
     )
 
-    if not user_id or days <= 0:
+    if (
+        not user_id
+        or
+        days <= 0
+    ):
 
         await update.message.reply_text(
             "❌ Geçersiz ID veya gün."
@@ -4624,13 +5309,16 @@ async def uzatvip_cmd(
 
     try:
 
-        updated_vip = get_vip(user_id)
+        updated_vip = get_vip(
+            user_id
+        )
 
         if updated_vip:
 
             await notify_admin_vip(
                 updated_vip,
-                f"➕ VIP SÜRESİ UZATILDI (+{days} GÜN)"
+                f"➕ VIP SÜRESİ UZATILDI "
+                f"(+{days} GÜN)"
             )
 
     except Exception as e:
@@ -4676,7 +5364,9 @@ async def vipbilgi_cmd(
         context.args[0]
     )
 
-    vip = get_vip(user_id)
+    vip = get_vip(
+        user_id
+    )
 
     if not vip:
 
@@ -4690,8 +5380,13 @@ async def vipbilgi_cmd(
         vip["expires_at"]
     )
 
-    settings = get_user_settings(user_id)
-    follows = get_follows(user_id)
+    settings = get_user_settings(
+        user_id
+    )
+
+    follows = get_follows(
+        user_id
+    )
 
     await update.message.reply_text(
 
@@ -4709,7 +5404,8 @@ async def vipbilgi_cmd(
 
         f"🪙 {settings['alarm_coins']}+\n"
 
-        f"👥 {settings['alarm_people']} veya daha az\n\n"
+        f"👥 {settings['alarm_people']} "
+        f"veya daha az\n\n"
 
         f"👤 Takip edilen yayıncı: "
         f"{len(follows)}"
@@ -4763,7 +5459,9 @@ async def alarm_cmd(
 
     if len(context.args) < 2:
 
-        settings = get_user_settings(user.id)
+        settings = get_user_settings(
+            user.id
+        )
 
         if settings["alarm_coins"]:
 
@@ -4825,7 +5523,11 @@ async def alarm_cmd(
         context.args[1]
     )
 
-    if coins <= 0 or people <= 0:
+    if (
+        coins <= 0
+        or
+        people <= 0
+    ):
 
         await update.message.reply_text(
             "❌ Örnek:\n/alarm 200 5"
@@ -4877,7 +5579,9 @@ async def takip_cmd(
 
     if not context.args:
 
-        follows = get_follows(user.id)
+        follows = get_follows(
+            user.id
+        )
 
         if not follows:
 
@@ -4942,7 +5646,9 @@ async def takipler_cmd(
 
         return
 
-    follows = get_follows(user.id)
+    follows = get_follows(
+        user.id
+    )
 
     if not follows:
 
@@ -5044,7 +5750,9 @@ async def sessiz_cmd(
 
     if not context.args:
 
-        settings = get_user_settings(user.id)
+        settings = get_user_settings(
+            user.id
+        )
 
         await update.message.reply_text(
 
@@ -5149,21 +5857,35 @@ async def yardim_cmd(
         "/start"
     )
 
-    if user and user.id == ADMIN_USER_ID:
+    if (
+        user
+        and
+        user.id == ADMIN_USER_ID
+    ):
 
         text += (
 
-            "\n\n👑 ADMİN\n"
+            "\n\n👑 ADMİN\n\n"
 
+            "🎟 VIP DAVET\n"
             "/davet\n"
+            "/davet 7\n"
+            "/davet 20 gün\n\n"
+
+            "👥 VIP YÖNETİMİ\n"
             "/uyeler\n"
             "/vipbilgi ID\n"
             "/uzatvip ID gün\n"
-            "/silvip ID"
+            "/silvip ID\n\n"
+
+            "ℹ️ /uyeler içinde "
+            "🔒 VIP SİL butonu da var."
 
         )
 
-    await update.message.reply_text(text)
+    await update.message.reply_text(
+        text
+    )
 
 
 # ============================================================
@@ -5184,12 +5906,19 @@ async def message_listener(event):
         if key in processed_messages:
             return
 
-        processed_messages.add(key)
+        processed_messages.add(
+            key
+        )
 
-        if len(processed_messages) > 50000:
+        if len(
+            processed_messages
+        ) > 50000:
+
             processed_messages.clear()
 
-        data = parse_source_message(event)
+        data = parse_source_message(
+            event
+        )
 
         if not data:
             return
@@ -5251,7 +5980,9 @@ async def main():
 
     init_db()
 
-    http_session = aiohttp.ClientSession()
+    http_session = (
+        aiohttp.ClientSession()
+    )
 
     await start_http_server()
 
@@ -5356,11 +6087,20 @@ async def main():
         )
     )
 
+    # /uyeler içindeki 🔒 VIP SİL
+    application.add_handler(
+        CallbackQueryHandler(
+            vip_callback,
+            pattern=r"^silvip:"
+        )
+    )
+
     await application.initialize()
 
     await application.start()
 
     if application.updater:
+
         await application.updater.start_polling()
 
     print(
@@ -5400,6 +6140,22 @@ async def main():
         telegram_sender()
     )
 
+    # ========================================================
+    # VIP SÜRE KONTROLÜ
+    # ========================================================
+
+    asyncio.create_task(
+        vip_expiry_loop()
+    )
+
+    # ========================================================
+    # GÜNLÜK VIP RAPORU
+    # ========================================================
+
+    asyncio.create_task(
+        daily_vip_report_loop()
+    )
+
     print(
         "[HAZIR] Goody Bag aktif."
     )
@@ -5429,11 +6185,19 @@ async def main():
     )
 
     print(
-        "[HAZIR] VIP otomatik yetki mesajı aktif."
+        "[HAZIR] Özel süreli davet sistemi aktif."
     )
 
     print(
-        "[HAZIR] Admin VIP yetki raporu aktif."
+        "[HAZIR] VIP otomatik süre sonlandırma aktif."
+    )
+
+    print(
+        "[HAZIR] Günlük 09:00 VIP raporu aktif."
+    )
+
+    print(
+        "[HAZIR] /uyeler VIP silme butonu aktif."
     )
 
     print(
@@ -5442,10 +6206,6 @@ async def main():
 
     print(
         "[HAZIR] Kullanıcı adı kopyalama aktif."
-    )
-
-    print(
-        "[HAZIR] Büyük yazı modu aktif."
     )
 
     print(
@@ -5464,6 +6224,7 @@ async def main():
                 await application.updater.stop()
 
             await application.stop()
+
             await application.shutdown()
 
         except Exception:
@@ -5475,6 +6236,7 @@ async def main():
             pass
 
         if http_session:
+
             await http_session.close()
 
         print(
