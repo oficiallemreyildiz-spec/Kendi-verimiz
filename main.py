@@ -1603,24 +1603,50 @@ def calculate_target_time(
 # Böylece Telegram ve Mini App aynı doğru linki kullanır.
 # ============================================================
 
+def canonical_tiktok_username(username):
+    """
+    Sadece gerçek TikTok kullanıcı adını normalize eder.
+    @ işareti, boşluk ve yanlışlıkla gelen TikTok URL parçaları temizlenir.
+    """
+    username = str(
+        username or ""
+    ).strip()
+
+    if not username:
+        return ""
+
+    # Eğer yanlışlıkla URL geldiyse kullanıcı adını URL'den çıkar.
+    m = re.search(
+        r'(?:tiktok\.com/)?@?([A-Za-z0-9._]+)',
+        username,
+        re.I
+    )
+
+    if m:
+        username = m.group(1)
+
+    username = username.strip().lstrip("@").strip()
+
+    return username
+
+
 def get_live_link(
     username,
     room=None,
     token_data=None
 ):
 
-    username = str(
-        username or ""
-    ).strip()
-
-    while username.startswith("@"):
-        username = username[1:]
-
-    username = username.strip()
+    username = canonical_tiktok_username(
+        username
+    )
 
     if not username:
         return ""
 
+    # TEK ve KESİN canlı link formatı:
+    # https://www.tiktok.com/@KULLANICI/live
+    #
+    # room/token/openitok/live_url/url kullanılmaz.
     return (
         "https://www.tiktok.com/"
         f"@{username}/live"
@@ -1654,9 +1680,14 @@ def parse_source_message(event):
     if is_goody is None:
         return None
 
-    username = None
+    # Kaynak mesaj başlığındaki yayıncı adı asıl kaynaktır.
+    # Token içindeki username eski/yanlış yayına ait olabileceği için
+    # sadece kaynak mesajdan username bulunamazsa yedek olarak kullanılır.
+    username = extract_username_from_text(
+        text
+    )
 
-    if token_data:
+    if not username and token_data:
 
         for key in [
             "username",
@@ -1669,15 +1700,12 @@ def parse_source_message(event):
 
                 username = str(
                     token_data[key]
-                )
+                ).strip().lstrip("@").strip()
 
                 break
 
     username = (
         username
-        or extract_username_from_text(
-            text
-        )
         or "bilinmiyor"
     )
 
@@ -4342,10 +4370,37 @@ async def cors_middleware(
 # API
 # ============================================================
 
+def normalize_radar_item_links(items):
+    """
+    Radar verisindeki live alanını her cevapta username'den yeniden üretir.
+    Böylece eski/stale token linki RAM'e veya geçmiş veriye sızsa bile
+    Mini App'e yanlış link gönderilmez.
+    """
+    result = []
+
+    for item in items:
+        data = dict(item)
+
+        username = data.get(
+            "username",
+            ""
+        )
+
+        data["live"] = get_live_link(
+            username,
+            data.get("room"),
+            None
+        )
+
+        result.append(data)
+
+    return result
+
+
 async def api_boxes(request):
 
     return web.json_response(
-        list(
+        normalize_radar_item_links(
             LIVE_CHESTS.values()
         )
     )
@@ -4354,7 +4409,7 @@ async def api_boxes(request):
 async def api_goody_bags(request):
 
     return web.json_response(
-        list(
+        normalize_radar_item_links(
             LIVE_GOODY_BAGS.values()
         )
     )
@@ -4390,12 +4445,12 @@ async def api_all(request):
             int(time.time()),
 
         "chests":
-            list(
+            normalize_radar_item_links(
                 LIVE_CHESTS.values()
             ),
 
         "goody_bags":
-            list(
+            normalize_radar_item_links(
                 LIVE_GOODY_BAGS.values()
             ),
 
@@ -4471,12 +4526,12 @@ async def api_miniapp_data(request):
             vip["expires_at"],
 
         "chests":
-            list(
+            normalize_radar_item_links(
                 LIVE_CHESTS.values()
             ),
 
         "goody_bags":
-            list(
+            normalize_radar_item_links(
                 LIVE_GOODY_BAGS.values()
             ),
 
