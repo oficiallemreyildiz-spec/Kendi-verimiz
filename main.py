@@ -41,6 +41,8 @@ import sqlite3
 import secrets
 import hashlib
 import hmac
+import urllib.request
+import urllib.error
 
 from datetime import datetime, timedelta
 from urllib.parse import unquote, parse_qsl
@@ -166,7 +168,15 @@ http_session = None
 # DATABASE
 # ============================================================
 
-DB_FILE = "radar.db"
+DB_FILE = os.environ.get("DB_FILE", "radar.db")
+
+# VIP KALICI DEPOLAMA
+# Render yerel diskinde SQLite tek başına kalıcı değildir.
+# Upstash REST bilgileri verilirse VIP kayıtları uzakta da saklanır
+# ve her restart/deploy sonrasında otomatik geri yüklenir.
+UPSTASH_REDIS_REST_URL = os.environ.get("UPSTASH_REDIS_REST_URL", "").rstrip("/")
+UPSTASH_REDIS_REST_TOKEN = os.environ.get("UPSTASH_REDIS_REST_TOKEN", "")
+VIP_REMOTE_KEY = os.environ.get("VIP_REMOTE_KEY", "odul_avcisi:vip_users:v1")
 
 
 def db():
@@ -175,6 +185,134 @@ def db():
         timeout=30,
         check_same_thread=False
     )
+
+
+def _upstash_enabled():
+    return bool(UPSTASH_REDIS_REST_URL and UPSTASH_REDIS_REST_TOKEN)
+
+
+def _upstash_command(command):
+    if not _upstash_enabled():
+        return None
+
+    try:
+        body = json.dumps(command).encode("utf-8")
+        request = urllib.request.Request(
+            UPSTASH_REDIS_REST_URL,
+            data=body,
+            method="POST",
+            headers={
+                "Authorization": f"Bearer {UPSTASH_REDIS_REST_TOKEN}",
+                "Content-Type": "application/json",
+            },
+        )
+        with urllib.request.urlopen(request, timeout=10) as response:
+            raw = response.read().decode("utf-8", "ignore")
+        data = json.loads(raw)
+        return data.get("result")
+    except Exception as e:
+        print("[VIP REMOTE HATA]", repr(e))
+        return None
+
+
+def _load_remote_vips():
+    if not _upstash_enabled():
+        return None
+
+    result = _upstash_command(["GET", VIP_REMOTE_KEY])
+    if result in (None, ""):
+        return None
+
+    try:
+        data = json.loads(result)
+        if not isinstance(data, dict):
+            return None
+        return data
+    except Exception as e:
+        print("[VIP REMOTE OKUMA HATASI]", repr(e))
+        return None
+
+
+def _save_remote_vips(vips):
+    if not _upstash_enabled():
+        return False
+
+    try:
+        payload = json.dumps(vips, ensure_ascii=False, separators=(",", ":"))
+        result = _upstash_command(["SET", VIP_REMOTE_KEY, payload])
+        return result == "OK"
+    except Exception as e:
+        print("[VIP REMOTE KAYIT HATASI]", repr(e))
+        return False
+
+
+def _local_vips_as_dict():
+    conn = db()
+    cur = conn.cursor()
+    cur.execute("SELECT user_id, username, first_name, expires_at, created_at FROM vip_users")
+    rows = cur.fetchall()
+    conn.close()
+
+    return {
+        str(row[0]): {
+            "user_id": int(row[0]),
+            "username": row[1] or "",
+            "first_name": row[2] or "",
+            "expires_at": int(row[3]),
+            "created_at": int(row[4]),
+        }
+        for row in rows
+    }
+
+
+def _restore_vips_from_remote():
+    if not _upstash_enabled():
+        return
+
+    remote = _load_remote_vips()
+    if remote is None:
+        local = _local_vips_as_dict()
+        if local:
+            _save_remote_vips(local)
+            print("[VIP KALICI DEPOLAMA] Yerel VIP kayıtları remote yedeğe aktarıldı.")
+        return
+
+    conn = db()
+    cur = conn.cursor()
+    cur.execute("DELETE FROM vip_users")
+
+    for value in remote.values():
+        try:
+            user_id = safe_int(value.get("user_id"))
+            expires_at = safe_int(value.get("expires_at"))
+            created_at = safe_int(value.get("created_at"), int(time.time()))
+            if not user_id or not expires_at:
+                continue
+            cur.execute("""
+                INSERT OR REPLACE INTO vip_users
+                (user_id, username, first_name, expires_at, created_at)
+                VALUES (?, ?, ?, ?, ?)
+            """, (
+                user_id,
+                str(value.get("username") or ""),
+                str(value.get("first_name") or ""),
+                expires_at,
+                created_at,
+            ))
+        except Exception as e:
+            print("[VIP RESTORE KAYIT HATASI]", repr(e))
+
+    conn.commit()
+    conn.close()
+    print(f"[VIP KALICI DEPOLAMA] {len(remote)} VIP kayıt geri yüklendi.")
+
+
+def _sync_vips_to_remote():
+    if not _upstash_enabled():
+        return
+    vips = _local_vips_as_dict()
+    if _save_remote_vips(vips):
+        print(f"[VIP KALICI DEPOLAMA] {len(vips)} VIP kayıt remote'a kaydedildi.")
 
 
 def init_db():
@@ -261,6 +399,9 @@ def init_db():
 
     conn.commit()
     conn.close()
+
+    # Render restart/deploy sonrası VIP kayıtlarını kalıcı depodan geri getir.
+    _restore_vips_from_remote()
 
 
 # ============================================================
@@ -354,6 +495,8 @@ def add_vip(
     conn.commit()
     conn.close()
 
+    _sync_vips_to_remote()
+
     return expires
 
 
@@ -404,6 +547,9 @@ def remove_vip(user_id):
 
     conn.commit()
     conn.close()
+
+    if removed:
+        _sync_vips_to_remote()
 
     return removed
 
@@ -456,6 +602,8 @@ def extend_vip(user_id, days):
 
     conn.commit()
     conn.close()
+
+    _sync_vips_to_remote()
 
     return new_expire
 
@@ -805,6 +953,8 @@ def use_invite(token, user):
 
     conn.commit()
     conn.close()
+
+    _sync_vips_to_remote()
 
     return True, duration_days
 
@@ -6235,6 +6385,11 @@ async def main():
     print("=" * 70)
 
     init_db()
+
+    if _upstash_enabled():
+        print("[VIP KALICI DEPOLAMA] Upstash aktif.")
+    else:
+        print("[VIP KALICI DEPOLAMA] Upstash ayarlı değil; SQLite yerel depolama kullanılıyor.")
 
     http_session = (
         aiohttp.ClientSession()
