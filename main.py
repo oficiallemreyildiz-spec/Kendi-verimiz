@@ -2257,7 +2257,7 @@ async def telegram_api(
 
             wait_until = max(
                 telegram_retry_until,
-                last_telegram_send + 1.25
+                last_telegram_send + 1.10
             )
 
             if wait_until > now:
@@ -2665,9 +2665,21 @@ async def notify_event(data):
         if len(last_event_notification) > 50000:
             last_event_notification.clear()
 
+    # ANA RADAR BİLDİRİMİ ÖNCE GÖNDERİLİR.
+    # Kişisel alarm ve takip bildirimleri ana kuyruğu bloklamaz.
     await send_telegram_message(
         data
     )
+
+    # Bu iki işlem eski kodda burada await edildiği için, çok sayıda VIP
+    # veya takipçi olduğunda sonraki radar olayları Telegram kuyruğunda
+    # bekliyordu. Arka planda çalıştırıyoruz.
+    asyncio.create_task(
+        send_secondary_notifications(data)
+    )
+
+
+async def send_secondary_notifications(data):
 
     try:
 
